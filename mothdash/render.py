@@ -80,6 +80,19 @@ def _sort_button(label: str, sort_type: str = "text", default: str = "") -> str:
     )
 
 
+def _station_short_label(station: Station) -> str:
+    labels = {
+        "kingfisher": "KH",
+        "bosque-neimi": "Bosque",
+        "dombroskie-homestead": "Dombroskie",
+        "zeledonia-monkey-run": "Monkey Run",
+        "iandavies-dove-dr": "Dove Dr",
+        "durfee-hill": "Durfee",
+        "tompkins-map-area": "Map Area",
+    }
+    return labels.get(station.id, station.name.split()[0])
+
+
 def _metric(label: str, value: Any, compact: bool = False) -> str:
     class_name = "hero-metric hero-metric-compact" if compact else "hero-metric"
     return f"""
@@ -454,7 +467,7 @@ def _calendar_table(rows: list[dict[str, Any]], stations: list[Station], mode: s
     )
     headers = "".join(
         f'<th scope="col" class="station-head" style="--station-color: {h(colors[station.id])}">'
-        f'{_sort_button(station.name, "number")}</th>'
+        f'{_sort_button(_station_short_label(station), "number")}</th>'
         for station in enabled
     )
     label = "Date" if mode == "year" else "Month day"
@@ -484,12 +497,12 @@ def _calendar_table(rows: list[dict[str, Any]], stations: list[Station], mode: s
             """
         )
     return f"""
-    <table class="sortable-table calendar-table">
+    <table class="sortable-table calendar-table" aria-label="{h(label)} species counts by station">
       <thead>
         <tr>
           <th scope="col">{_sort_button(label, "text")}</th>
           <th scope="col">{_sort_button("Active stations", "number", "desc")}</th>
-          <th scope="col">{_sort_button("Species total", "number")}</th>
+          <th scope="col">{_sort_button("Unique spp.", "number")}</th>
           {headers}
         </tr>
       </thead>
@@ -1485,20 +1498,50 @@ a:hover { color: #f2d78e; }
 .view-panel[hidden] {
   display: none;
 }
-.calendar-table td,
-.calendar-table th {
+.calendar-table {
+  table-layout: fixed;
+  min-width: 920px;
+}
+.calendar-table th,
+.calendar-table td {
   text-align: center;
+  padding: 8px;
 }
 .calendar-table td:first-child,
 .calendar-table th:first-child {
+  width: 96px;
   text-align: left;
 }
+.calendar-table th:nth-child(2),
+.calendar-table td:nth-child(2) {
+  width: 92px;
+}
+.calendar-table th:nth-child(3),
+.calendar-table td:nth-child(3) {
+  width: 88px;
+}
+.calendar-table th.station-head {
+  width: 82px;
+}
+.calendar-table th.station-head::before {
+  display: block;
+  margin: 0 auto 4px;
+}
+.calendar-table .sort-button {
+  width: 100%;
+  justify-content: center;
+  white-space: normal;
+  line-height: 1.1;
+}
+.calendar-table th:first-child .sort-button {
+  justify-content: flex-start;
+}
 .calendar-cell {
-  min-width: 92px;
-  padding: 7px;
+  width: 82px;
 }
 .calendar-cell span {
-  min-height: 34px;
+  width: 100%;
+  min-height: 38px;
   display: grid;
   place-items: center;
   border: 1px solid var(--station-color);
@@ -1669,7 +1712,7 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
     <section id="calendar">
       <div class="section-head">
         <h2>Daily species calendar</h2>
-        <p>Counts are unique moth taxa per station per night. The all-years view compresses the record into month-day rows, which helps common seasonal signals stand out.</p>
+        <p>Station cells show unique moth taxa per station per night. The total column is the unique species union across stations, not a sum of site counts.</p>
       </div>
       {_view_toggle("Calendar view", "calendar-year", f"{year} dates" if year else "Current dates", "calendar-all-years", "All years")}
       <div class="view-panel" id="calendar-year"><div class="table-wrap">{_calendar_table(year_calendar, stations, "year")}</div></div>

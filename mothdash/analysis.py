@@ -360,10 +360,13 @@ def daily_species_counts(settings: Settings, year: int | None = None) -> list[di
                 "key": day_key,
                 "label": label,
                 "sort_key": sort_key,
+                "taxa": set(),
                 "stations": defaultdict(set),
             },
         )
-        day["stations"][row["station_id"]].add(int(taxon_id))
+        taxon_id = int(taxon_id)
+        day["taxa"].add(taxon_id)
+        day["stations"][row["station_id"]].add(taxon_id)
 
     results = []
     for day in days.values():
@@ -371,7 +374,7 @@ def daily_species_counts(settings: Settings, year: int | None = None) -> list[di
             station_id: len(taxa)
             for station_id, taxa in day["stations"].items()
         }
-        total = sum(stations.values())
+        total = len(day["taxa"])
         active_stations = sum(1 for count in stations.values() if count)
         results.append(
             {
