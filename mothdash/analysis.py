@@ -654,7 +654,7 @@ def station_profile(settings: Settings, station_id: str) -> dict[str, Any]:
         if len(seen) != before:
             accumulation.append({"date": sd, "species": len(seen)})
     if len(accumulation) > 40:
-        step = max(1, len(accumulation) // 40)
+        step = max(1, (len(accumulation) + 39) // 40)
         accumulation = accumulation[::step]
         if accumulation[-1]["species"] != len(seen):
             accumulation.append({"date": max(dates), "species": len(seen)})
@@ -734,6 +734,156 @@ def station_profile(settings: Settings, station_id: str) -> dict[str, Any]:
         "unique_species": station_uniques,
         "recent": recent,
         "narrative": " ".join(narrative_bits) if narrative_bits else "This station is configured and waiting for synced moth observations.",
+    }
+
+
+def trend_summary(settings: Settings) -> dict[str, Any]:
+    rows = load_rows(settings)
+    taxa = station_taxa(settings)
+    if not rows:
+        return {
+            "phenology": [],
+            "network_accumulation": [],
+            "rank_abundance": [],
+            "station_similarity": [],
+        }
+
+    by_taxon: dict[int, dict[str, Any]] = {}
+    for row in rows:
+        taxon_id = row.get("taxon_id")
+        sd = row.get("session_date")
+        if not taxon_id or not sd:
+            continue
+        taxon_id = int(taxon_id)
+        item = by_taxon.setdefault(
+            taxon_id,
+            {
+                "taxon_id": taxon_id,
+                "label": row["label"],
+                "count": 0,
+                "stations": set(),
+                "dates": [],
+                "months": defaultdict(int),
+            },
+        )
+        item["count"] += 1
+        item["stations"].add(row["station_id"])
+        item["dates"].append(sd)
+        item["months"][sd.month] += 1
+
+    phenology = []
+    for item in sorted(
+        by_taxon.values(),
+        key=lambda value: (-len(value["stations"]), -value["count"], value["label"]),
+    )[:16]:
+        dates = item["dates"]
+        days = [seen_date.timetuple().tm_yday for seen_date in dates]
+        first_day = min(days)
+        latest_day = max(days)
+        first_label = date(2000, 1, 1) + timedelta(days=first_day - 1)
+        latest_label = date(2000, 1, 1) + timedelta(days=latest_day - 1)
+        peak_month = max(item["months"], key=item["months"].get)
+        phenology.append(
+            {
+                "taxon_id": item["taxon_id"],
+                "label": item["label"],
+                "count": item["count"],
+                "station_count": len(item["stations"]),
+                "first_day": first_day,
+                "latest_day": latest_day,
+                "first_label": first_label.strftime("%b ") + str(first_label.day),
+                "latest_label": latest_label.strftime("%b ") + str(latest_label.day),
+                "peak_month": date(2000, peak_month, 1).strftime("%b"),
+            }
+        )
+
+    taxa_by_date: dict[date, set[int]] = defaultdict(set)
+    for row in rows:
+        taxon_id = row.get("taxon_id")
+        sd = row.get("session_date")
+        if taxon_id and sd:
+            taxa_by_date[sd].add(int(taxon_id))
+    seen = set()
+    network_accumulation = []
+    for sd in sorted(taxa_by_date):
+        before = len(seen)
+        seen.update(taxa_by_date[sd])
+        if len(seen) != before:
+            network_accumulation.append(
+                {
+                    "date": sd.isoformat(),
+                    "species": len(seen),
+                    "new_species": len(seen) - before,
+                }
+            )
+    if len(network_accumulation) > 44:
+        step = max(1, (len(network_accumulation) + 43) // 44)
+        network_accumulation = network_accumulation[::step]
+        if network_accumulation[-1]["species"] != len(seen):
+            latest_date = max(taxa_by_date)
+            network_accumulation.append(
+                {
+                    "date": latest_date.isoformat(),
+                    "species": len(seen),
+                    "new_species": 0,
+                }
+            )
+
+    rank_abundance = [
+        {
+            "rank": rank,
+            "taxon_id": taxon["taxon_id"],
+            "label": taxon["label"],
+            "count": taxon["total_count"],
+            "station_count": taxon["station_count"],
+        }
+        for rank, taxon in enumerate(
+            sorted(taxa, key=lambda item: (-item["total_count"], item["label"]))[:24],
+            start=1,
+        )
+    ]
+
+    station_taxa_sets: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        taxon_id = row.get("taxon_id")
+        if not taxon_id:
+            continue
+        item = station_taxa_sets.setdefault(
+            row["station_id"],
+            {"station_id": row["station_id"], "station_name": row["station_name"], "taxa": set()},
+        )
+        item["taxa"].add(int(taxon_id))
+
+    station_similarity = []
+    stations = sorted(station_taxa_sets.values(), key=lambda item: item["station_name"])
+    for left in stations:
+        matrix_row = []
+        for right in stations:
+            shared = len(left["taxa"] & right["taxa"])
+            union = len(left["taxa"] | right["taxa"])
+            similarity = shared / union if union else 0
+            matrix_row.append(
+                {
+                    "station_id": right["station_id"],
+                    "station_name": right["station_name"],
+                    "shared": shared,
+                    "union": union,
+                    "similarity": similarity,
+                }
+            )
+        station_similarity.append(
+            {
+                "station_id": left["station_id"],
+                "station_name": left["station_name"],
+                "cells": matrix_row,
+            }
+        )
+
+    return {
+        "phenology": phenology,
+        "network_accumulation": network_accumulation,
+        "rank_abundance": rank_abundance,
+        "station_similarity": station_similarity,
     }
 
 

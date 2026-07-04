@@ -20,6 +20,7 @@ from .analysis import (
     station_profile,
     station_summaries,
     station_taxa,
+    trend_summary,
     unique_station_taxa,
 )
 from .config import Settings, Station
@@ -654,6 +655,143 @@ def _profile_recent(rows: list[dict[str, Any]]) -> str:
             """
         )
     return "".join(cards)
+
+
+def _phenology_ribbons(rows: list[dict[str, Any]]) -> str:
+    if not rows:
+        return '<p class="empty">Phenology ribbons will appear after synced observations.</p>'
+    items = []
+    for row in rows:
+        start = max(0, min(100, (row["first_day"] - 1) / 365 * 100))
+        end = max(start + 1, min(100, row["latest_day"] / 365 * 100))
+        width = end - start
+        items.append(
+            f"""
+            <div class="phenology-row">
+              <div>
+                <strong>{h(row["label"])}</strong>
+                <span>{h(row["station_count"])} stations · {h(row["count"])} obs · peak {h(row["peak_month"])}</span>
+              </div>
+              <div class="phenology-track" aria-label="{h(row["label"])} observed from {h(row["first_label"])} to {h(row["latest_label"])}">
+                <i style="left: {start:.2f}%; width: {width:.2f}%"></i>
+              </div>
+              <small>{h(row["first_label"])} to {h(row["latest_label"])}</small>
+            </div>
+            """
+        )
+    return "".join(items)
+
+
+def _network_accumulation(rows: list[dict[str, Any]]) -> str:
+    if not rows:
+        return '<p class="empty">Network accumulation will appear after synced observations.</p>'
+    max_species = max(row["species"] for row in rows)
+    items = []
+    for row in rows[-32:]:
+        width = 100 * row["species"] / max_species if max_species else 0
+        items.append(
+            f"""
+            <div class="trend-bar-row">
+              <span>{h(row["date"])}</span>
+              <div><i style="width: {width:.1f}%"></i></div>
+              <strong>{h(row["species"])}</strong>
+            </div>
+            """
+        )
+    return "".join(items)
+
+
+def _rank_abundance(rows: list[dict[str, Any]]) -> str:
+    if not rows:
+        return '<p class="empty">Rank abundance will appear after synced observations.</p>'
+    max_count = max(row["count"] for row in rows)
+    items = []
+    for row in rows:
+        width = 100 * row["count"] / max_count if max_count else 0
+        items.append(
+            f"""
+            <div class="rank-row">
+              <span>{h(row["rank"])}</span>
+              <div>
+                <strong>{h(row["label"])}</strong>
+                <small>{h(row["station_count"])} stations · {h(row["count"])} obs</small>
+                <i style="width: {width:.1f}%"></i>
+              </div>
+            </div>
+            """
+        )
+    return "".join(items)
+
+
+def _station_similarity_matrix(rows: list[dict[str, Any]], stations: list[Station]) -> str:
+    if not rows:
+        return '<p class="empty">Station similarity will appear after synced observations.</p>'
+    by_station = {station.id: station for station in stations}
+    colors = _station_color_map(stations)
+    def row_label(station_id: str, station_name: str) -> str:
+        station = by_station.get(station_id)
+        return _station_short_label(station) if station else station_name
+
+    headers = "".join(
+        f'<th scope="col">{h(row_label(row["station_id"], row["station_name"]))}</th>'
+        for row in rows
+    )
+    body = []
+    for row in rows:
+        label = row_label(row["station_id"], row["station_name"])
+        cells = []
+        for cell in row["cells"]:
+            alpha = 0.08 + (0.78 * cell["similarity"])
+            color = _hex_to_rgba(colors.get(cell["station_id"], FALLBACK_COLORS[0]), alpha)
+            cells.append(
+                f"""
+                <td style="--cell-bg: {h(color)}" data-sort-value="{cell["similarity"]:.3f}">
+                  <span>{cell["similarity"]:.0%}</span>
+                  <small>{h(cell["shared"])} shared</small>
+                </td>
+                """
+            )
+        body.append(
+            f"""
+            <tr>
+              <th scope="row">{h(label)}</th>
+              {''.join(cells)}
+            </tr>
+            """
+        )
+    return f"""
+    <table class="similarity-table">
+      <thead><tr><th scope="col">Station</th>{headers}</tr></thead>
+      <tbody>{''.join(body)}</tbody>
+    </table>
+    """
+
+
+def _trend_section(trends: dict[str, Any], stations: list[Station]) -> str:
+    return f"""
+    <div class="trend-grid">
+      <article class="trend-panel trend-panel-wide">
+        <h3>Phenology ribbons</h3>
+        <p>Common network species, shown by observed flight span across all synced years.</p>
+        {_phenology_ribbons(trends["phenology"])}
+      </article>
+      <article class="trend-panel">
+        <h3>Network accumulation</h3>
+        <p>Running species list across all tracked stations.</p>
+        {_network_accumulation(trends["network_accumulation"])}
+      </article>
+      <article class="trend-panel">
+        <h3>Rank abundance</h3>
+        <p>Most frequently observed moth taxa in the current network cache.</p>
+        {_rank_abundance(trends["rank_abundance"])}
+      </article>
+      <article class="trend-panel trend-panel-wide">
+        <h3>Station similarity</h3>
+        <p>Jaccard similarity based on shared moth taxa. Darker cells mean more overlap.</p>
+        <div class="similarity-wrap">{_station_similarity_matrix(trends["station_similarity"], stations)}</div>
+      </article>
+    </div>
+    """
 
 
 def _snapshot_payload(settings: Settings, stations: list[Station], taxa: list[dict[str, Any]]) -> dict[str, Any]:
@@ -1568,6 +1706,150 @@ h2 {
   color: var(--muted);
   font-size: 0.78rem;
 }
+.trend-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.trend-panel {
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+}
+.trend-panel-wide {
+  grid-column: 1 / -1;
+}
+.trend-panel h3 {
+  margin: 0 0 6px;
+  font-size: 1.15rem;
+}
+.trend-panel p {
+  margin: 0 0 14px;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+.phenology-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.8fr) minmax(260px, 1fr) 132px;
+  gap: 12px;
+  align-items: center;
+  padding: 9px 0;
+  border-top: 1px solid var(--line);
+}
+.phenology-row strong,
+.rank-row strong {
+  display: block;
+  color: var(--ink);
+  line-height: 1.15;
+}
+.phenology-row span,
+.phenology-row small,
+.rank-row small {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+.phenology-track {
+  position: relative;
+  height: 14px;
+  background: #191a12;
+  border: 1px solid var(--line);
+}
+.phenology-track::before,
+.phenology-track::after {
+  position: absolute;
+  top: 18px;
+  color: var(--faint);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.68rem;
+}
+.phenology-track::before {
+  content: "Jan";
+  left: 0;
+}
+.phenology-track::after {
+  content: "Dec";
+  right: 0;
+}
+.phenology-track i {
+  position: absolute;
+  top: -1px;
+  bottom: -1px;
+  display: block;
+  background: var(--amber);
+}
+.trend-bar-row {
+  display: grid;
+  grid-template-columns: 104px minmax(0, 1fr) 56px;
+  gap: 10px;
+  align-items: center;
+  min-height: 27px;
+}
+.trend-bar-row span,
+.trend-bar-row strong,
+.rank-row span {
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.78rem;
+  font-weight: 500;
+}
+.trend-bar-row div {
+  height: 12px;
+  border: 1px solid var(--line);
+  background: #191a12;
+}
+.trend-bar-row i {
+  display: block;
+  height: 100%;
+  background: var(--leaf);
+}
+.rank-row {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 9px;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+}
+.rank-row div {
+  position: relative;
+  min-height: 42px;
+}
+.rank-row i {
+  display: block;
+  height: 4px;
+  margin-top: 7px;
+  background: var(--amber);
+}
+.similarity-wrap {
+  overflow-x: auto;
+}
+.similarity-table {
+  min-width: 760px;
+  table-layout: fixed;
+}
+.similarity-table th,
+.similarity-table td {
+  text-align: center;
+  padding: 8px;
+}
+.similarity-table th:first-child {
+  text-align: left;
+  width: 118px;
+}
+.similarity-table td {
+  background: var(--cell-bg);
+}
+.similarity-table td span,
+.similarity-table td small {
+  display: block;
+  color: var(--ink);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.similarity-table td small {
+  color: var(--muted);
+  font-size: 0.68rem;
+}
 .insight-grid {
   display: grid;
   grid-template-columns: repeat(12, 1fr);
@@ -1989,6 +2271,15 @@ footer div {
   .profile-context {
     grid-template-columns: 1fr;
   }
+  .trend-grid {
+    grid-template-columns: 1fr;
+  }
+  .phenology-row {
+    grid-template-columns: 1fr;
+  }
+  .phenology-track {
+    margin-bottom: 20px;
+  }
   .section-head {
     display: block;
   }
@@ -2054,6 +2345,7 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
     records = record_highlights(settings)
     uniques = unique_station_taxa(settings)
     insights = dashboard_insights(settings)
+    trends = trend_summary(settings)
 
     html = f"""<!doctype html>
 <html lang="en">
@@ -2078,6 +2370,7 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
         <a href="#records">Records</a>
         <a href="#unique">Unique</a>
         <a href="#calendar">Calendar</a>
+        <a href="#trends">Trends</a>
         <a href="#species">Species</a>
         <a href="live.html">Live</a>
       </nav>
@@ -2156,6 +2449,14 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
       <div class="view-panel" id="calendar-all-years" hidden><div class="table-wrap">{_calendar_table(all_time_calendar, stations, "all")}</div></div>
     </section>
 
+    <section id="trends">
+      <div class="section-head">
+        <h2>Trend views</h2>
+        <p>Build-time visual summaries for flight timing, network growth, abundance structure, and shared fauna.</p>
+      </div>
+      {_trend_section(trends, stations)}
+    </section>
+
     <section id="species">
       <div class="section-head">
         <h2>Station species comparison</h2>
@@ -2174,6 +2475,10 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
     output.write_text(html, encoding="utf-8")
     (settings.public_dir / "insights.json").write_text(
         json.dumps(insights, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    (settings.public_dir / "trends.json").write_text(
+        json.dumps(trends, indent=2, sort_keys=True),
         encoding="utf-8",
     )
     snapshot = _snapshot_payload(settings, stations, taxa)

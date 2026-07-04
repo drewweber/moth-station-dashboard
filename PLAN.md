@@ -94,6 +94,9 @@ with automatically generated insight cards and a Naturalist Feed.
    - Phenology ribbons, season progression, accumulation curves, multi-year
      overlays, relative abundance curves, flight distributions, rank abundance,
      station similarity, cluster analysis, and shared-fauna networks.
+   - First phase: generate static trend views for phenology ribbons, network
+     species accumulation, rank abundance, and station similarity, plus a
+     reusable `trends.json` data product.
 8. Automatic story generation
    - Each build should identify ecological stories without manual curation.
    - Stories become homepage cards and feed items.

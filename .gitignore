@@ -8,5 +8,6 @@ public/index.html
 public/live.html
 public/live-snapshot.json
 public/insights.json
+public/trends.json
 public/stations/
 logs/
