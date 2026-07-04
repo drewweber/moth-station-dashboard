@@ -8,6 +8,7 @@ default_taxon_id = 47157
 default_without_taxon_id = 47224
 user_agent = "moth-station-dashboard/0.1"
 custom_domain = "moth-stations.kingfisher-hollow.com"
+stats_refresh_limit = 80
 
 [[stations]]
 id = "kingfisher"
@@ -46,7 +47,7 @@ notes = "iNaturalist project station."
 
 [[stations]]
 id = "zeledonia-monkey-run"
-name = "Zeledonia - Monkey Run"
+name = "Monkey Run"
 enabled = true
 user_login = "zeledonia"
 place_id = 114200
@@ -59,7 +60,7 @@ notes = "Moth observations by zeledonia at Monkey Run."
 
 [[stations]]
 id = "iandavies-dove-dr"
-name = "Ian Davies - Dove Dr"
+name = "Dove Dr"
 enabled = true
 user_login = "iandavies"
 lat = 42.4263383333
