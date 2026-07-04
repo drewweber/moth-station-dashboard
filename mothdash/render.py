@@ -12,6 +12,7 @@ from .analysis import (
     active_year,
     first_of_season,
     generated_at,
+    hero_photos,
     record_highlights,
     recent_observations,
     station_summaries,
@@ -34,9 +35,10 @@ def _summary_map(summaries: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     return {item["station_id"]: item for item in summaries}
 
 
-def _metric(label: str, value: Any) -> str:
+def _metric(label: str, value: Any, compact: bool = False) -> str:
+    class_name = "hero-metric hero-metric-compact" if compact else "hero-metric"
     return f"""
-    <div class="hero-metric">
+    <div class="{class_name}">
       <strong>{h(value)}</strong>
       <span>{h(label)}</span>
     </div>
@@ -63,7 +65,7 @@ def _hero_metrics(
             _metric("moth observations", f"{total_observations:,}"),
             _metric("unique taxa", f"{len(taxa):,}"),
             _metric("iNat firsts", f"{notable:,}"),
-            _metric("latest session", latest),
+            _metric("latest session", latest, compact=True),
         ]
     )
 
@@ -916,6 +918,9 @@ h1, h2 {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
+.hero-metric-compact strong {
+  font-size: clamp(0.95rem, 1.45vw, 1.18rem);
+}
 .hero-metric span {
   color: var(--muted);
   font-size: 0.82rem;
@@ -1272,6 +1277,7 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
 
     summaries = station_summaries(settings)
     recent = recent_observations(settings)
+    hero_photo_rows = hero_photos(settings)
     year = active_year(settings)
     pulses = first_of_season(settings, year)
     taxa = station_taxa(settings)
@@ -1309,7 +1315,7 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
         <h1>Night flights, compared.</h1>
         <p class="subhead">A working dashboard for seeing which moth stations are active, what just arrived, and whether first-of-season records are breaking across the region on the same nights.</p>
       </div>
-      <div class="photo-rail" aria-label="Recent moth photos">{_photo_strip(recent)}</div>
+      <div class="photo-rail" aria-label="Recent moth photos">{_photo_strip(hero_photo_rows)}</div>
       <div class="hero-metrics">{_hero_metrics(summaries, taxa, pulses, stations, records)}</div>
     </div>
   </header>

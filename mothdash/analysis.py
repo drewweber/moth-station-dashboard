@@ -117,6 +117,70 @@ def recent_observations(settings: Settings) -> list[dict[str, Any]]:
     return out
 
 
+def hero_photos(settings: Settings, limit: int = 8) -> list[dict[str, Any]]:
+    """Recent photo observations balanced across stations for the hero rail."""
+    with connect(settings.database) as conn:
+        rows = conn.execute(
+            """
+            SELECT o.*, s.name AS station_name
+            FROM observations o
+            JOIN stations s ON s.id = o.station_id
+            WHERE s.enabled = 1
+              AND o.photo_url IS NOT NULL
+            ORDER BY COALESCE(o.created_at, o.observed_on) DESC, o.inat_obs_id DESC
+            LIMIT 600
+            """
+        ).fetchall()
+    candidates = [dict(row) for row in rows]
+    for row in candidates:
+        row["session_date"] = session_date(
+            row.get("observed_on"),
+            row.get("observed_at"),
+            settings.session_cutoff_hour,
+        )
+        row["label"] = _label(row)
+
+    selected = []
+    seen_photos = set()
+    seen_stations = set()
+
+    for row in candidates:
+        if row["station_id"] in seen_stations:
+            continue
+        if row["photo_url"] in seen_photos:
+            continue
+        selected.append(row)
+        seen_stations.add(row["station_id"])
+        seen_photos.add(row["photo_url"])
+        if len(selected) >= limit:
+            return selected
+
+    per_station_counts = defaultdict(int)
+    for row in selected:
+        per_station_counts[row["station_id"]] += 1
+
+    for row in candidates:
+        if row["photo_url"] in seen_photos:
+            continue
+        if per_station_counts[row["station_id"]] >= 2:
+            continue
+        selected.append(row)
+        per_station_counts[row["station_id"]] += 1
+        seen_photos.add(row["photo_url"])
+        if len(selected) >= limit:
+            break
+
+    for row in candidates:
+        if len(selected) >= limit:
+            break
+        if row["photo_url"] in seen_photos:
+            continue
+        selected.append(row)
+        seen_photos.add(row["photo_url"])
+
+    return selected
+
+
 def active_year(settings: Settings) -> int | None:
     with connect(settings.database) as conn:
         row = conn.execute(
