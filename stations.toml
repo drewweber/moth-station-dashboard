@@ -103,6 +103,5 @@ county_place_id = 1082
 state_place_id = 48
 color = "#d88b61"
 timezone = "America/New_York"
-public_location = "Map area near 42.3916, -76.4120, Tompkins County, NY"
-website = "https://www.inaturalist.org/observations?nelat=42.39261448208384&nelng=-76.41085160470544&subview=map&swlat=42.39049089489255&swlng=-76.41319585538446"
+public_location = "Small Tompkins County map area"
 notes = "Moth observations from the supplied iNaturalist map bounding box."
