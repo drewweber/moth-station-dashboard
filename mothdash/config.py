@@ -35,6 +35,7 @@ class Settings:
     default_taxon_id: int = 47157
     default_without_taxon_id: int = 47224
     user_agent: str = "moth-station-dashboard/0.1"
+    custom_domain: str = ""
 
 
 @dataclass(frozen=True)
@@ -78,6 +79,7 @@ def load_config(path: str | Path = "stations.toml") -> tuple[Settings, list[Stat
         default_taxon_id=int(raw_settings.get("default_taxon_id", 47157)),
         default_without_taxon_id=int(raw_settings.get("default_without_taxon_id", 47224)),
         user_agent=str(raw_settings.get("user_agent", "moth-station-dashboard/0.1")),
+        custom_domain=str(raw_settings.get("custom_domain", "")),
     )
 
     stations = []
@@ -111,4 +113,3 @@ def load_config(path: str | Path = "stations.toml") -> tuple[Settings, list[Stat
         )
 
     return settings, stations
-

@@ -30,6 +30,21 @@ python3 -m mothdash build      # sync, then render
 python3 -m mothdash sync --full # clear and resync station observations
 ```
 
+## Hosting
+
+The dashboard is configured for GitHub Pages at:
+
+`https://moth-stations.kingfisher-hollow.com`
+
+`stations.toml` sets `custom_domain`, and the renderer writes `public/CNAME`
+for every build. After pushing this repo to GitHub:
+
+1. Enable GitHub Pages with "GitHub Actions" as the source.
+2. Add a DNS `CNAME` record for `moth-stations.kingfisher-hollow.com` pointing
+   to the repository owner's GitHub Pages host, usually
+   `<github-username>.github.io`.
+3. Run the `Build Dashboard` workflow once from the Actions tab.
+
 ## Configure Stations
 
 Edit `stations.toml`. A station is any iNaturalist query representing one moth
@@ -65,4 +80,3 @@ This is an intentionally small first pass:
   after major station-query changes
 - first-of-season timing is based on observed date, with records before noon
   assigned to the previous evening's moth session
-

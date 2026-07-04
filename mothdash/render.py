@@ -356,4 +356,9 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
 </html>
 """
     output.write_text(html, encoding="utf-8")
+    if settings.custom_domain:
+        (settings.public_dir / "CNAME").write_text(
+            f"{settings.custom_domain.strip()}\n",
+            encoding="utf-8",
+        )
     return output
