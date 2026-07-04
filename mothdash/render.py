@@ -17,6 +17,7 @@ from .analysis import (
     hero_photos,
     record_highlights,
     recent_observations,
+    station_profile,
     station_summaries,
     station_taxa,
     unique_station_taxa,
@@ -92,6 +93,10 @@ def _station_short_label(station: Station) -> str:
         "tompkins-map-area": "Map Area",
     }
     return labels.get(station.id, station.name.split()[0])
+
+
+def _station_page_path(station: Station) -> str:
+    return f"stations/{station.id}.html"
 
 
 def _metric(label: str, value: Any, compact: bool = False) -> str:
@@ -172,7 +177,7 @@ def _station_cards(summaries: list[dict[str, Any]], stations: list[Station]) -> 
             <article class="station-card" style="--station-color: {_station_color(station, index)}">
               <div>
                 <p class="station-status">{h(status)}</p>
-                <h3>{h(station.name)}</h3>
+                <h3><a href="{h(_station_page_path(station))}">{h(station.name)}</a></h3>
                 <p>{h(location)}</p>
               </div>
               <div class="station-numbers">
@@ -540,6 +545,117 @@ def _view_toggle(name: str, first_id: str, first_label: str, second_id: str, sec
     """
 
 
+def _profile_metric(label: str, value: Any) -> str:
+    return f'<div class="profile-metric"><strong>{h(value)}</strong><span>{h(label)}</span></div>'
+
+
+def _profile_context(station: Station) -> str:
+    items = [
+        ("Habitat", station.habitat),
+        ("Light setup", station.light_setup),
+        ("Station history", station.station_history),
+    ]
+    rows = []
+    for label, value in items:
+        rows.append(
+            f"""
+            <article class="profile-context-item">
+              <p>{h(label)}</p>
+              <span>{h(value) if value else "Not documented yet."}</span>
+            </article>
+            """
+        )
+    return "".join(rows)
+
+
+def _seasonal_bars(profile: dict[str, Any]) -> str:
+    rows = profile["seasonal_richness"]
+    max_species = max([row["species"] for row in rows] + [1])
+    bars = []
+    for row in rows:
+        width = 100 * row["species"] / max_species if max_species else 0
+        bars.append(
+            f"""
+            <div class="month-bar">
+              <span>{h(row["label"])}</span>
+              <div><i style="width: {width:.1f}%"></i></div>
+              <strong>{h(row["species"])}</strong>
+            </div>
+            """
+        )
+    return "".join(bars)
+
+
+def _accumulation_bars(profile: dict[str, Any]) -> str:
+    rows = profile["accumulation"]
+    if not rows:
+        return '<p class="empty">Species accumulation will appear after synced observations.</p>'
+    max_species = max(row["species"] for row in rows)
+    bars = []
+    for row in rows[-28:]:
+        width = 100 * row["species"] / max_species if max_species else 0
+        bars.append(
+            f"""
+            <div class="accumulation-row">
+              <span>{h(row["date"])}</span>
+              <div><i style="width: {width:.1f}%"></i></div>
+              <strong>{h(row["species"])}</strong>
+            </div>
+            """
+        )
+    return "".join(bars)
+
+
+def _profile_species_list(rows: list[dict[str, Any]], empty: str) -> str:
+    if not rows:
+        return f'<p class="empty">{h(empty)}</p>'
+    items = []
+    for row in rows:
+        detail = []
+        if "count" in row:
+            detail.append(f"{row['count']} obs")
+        if "share" in row:
+            detail.append(f"{row['share']:.0%} of network records")
+        elif row.get("latest"):
+            detail.append(f"latest {row['latest']}")
+        items.append(
+            f"""
+            <li>
+              <span>{h(row["label"])}</span>
+              <small>{h(" · ".join(detail))}</small>
+            </li>
+            """
+        )
+    return f'<ul class="profile-species-list">{"".join(items)}</ul>'
+
+
+def _profile_recent(rows: list[dict[str, Any]]) -> str:
+    if not rows:
+        return '<p class="empty">Recent observations will appear after the next sync.</p>'
+    cards = []
+    for row in rows:
+        label = h(row["label"])
+        image = ""
+        if row.get("photo_url"):
+            image = f'<img src="{h(row["photo_url"])}" alt="{label}" loading="lazy">'
+        else:
+            image = '<div class="sighting-placeholder" aria-hidden="true">light sheet</div>'
+        title = f'<a href="{h(row["url"])}">{label}</a>' if row.get("url") else label
+        cards.append(
+            f"""
+            <article class="sighting-card">
+              <div class="sighting-image">{image}</div>
+              <div class="sighting-copy">
+                <p>{h(row.get("session_date"))}</p>
+                <h3>{title}</h3>
+                <span>{h(row.get("observer_login"))}</span>
+              </div>
+            </article>
+            """
+        )
+    return "".join(cards)
+
+
 def _snapshot_payload(settings: Settings, stations: list[Station], taxa: list[dict[str, Any]]) -> dict[str, Any]:
     known_taxa: dict[str, list[int]] = {}
     for taxon in taxa:
@@ -569,6 +685,107 @@ def _snapshot_payload(settings: Settings, stations: list[Station], taxa: list[di
         "poll_seconds": 60,
         "stations": enabled,
     }
+
+
+def _station_profile_page(station: Station, profile: dict[str, Any], color: str) -> str:
+    location = station.public_location or "Configured station"
+    website = (
+        f'<a href="{h(station.website)}">iNaturalist source</a>'
+        if station.website else ""
+    )
+    metrics = "".join(
+        [
+            _profile_metric("moth taxa", f"{profile['species']:,}"),
+            _profile_metric("observations", f"{profile['observations']:,}"),
+            _profile_metric("moth sessions", f"{profile['active_sessions']:,}"),
+            _profile_metric("unique here", f"{profile['unique_count']:,}"),
+            _profile_metric("latest session", profile["latest_session"] or "waiting"),
+        ]
+    )
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{h(station.name)} · Moth Station Dashboard</title>
+  <meta name="description" content="Station profile for {h(station.name)} in the moth stations dashboard.">
+  <meta name="theme-color" content="#151611">
+  <style>{CSS}</style>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to station profile</a>
+  <header>
+    <div class="topbar">
+      <a class="brand" href="../index.html"><span class="brand-mark" aria-hidden="true"></span><span>Moth stations</span></a>
+      <nav aria-label="Station navigation">
+        <a href="../index.html#feed">Feed</a>
+        <a href="../index.html#stations">Stations</a>
+        <a href="../index.html#calendar">Calendar</a>
+        <a href="../live.html">Live</a>
+      </nav>
+    </div>
+    <div class="profile-hero" style="--station-color: {h(color)}">
+      <p class="eyebrow">station profile</p>
+      <h1>{h(station.name)}</h1>
+      <p class="subhead">{h(location)}</p>
+      <div class="profile-links">{website}</div>
+      <div class="profile-metrics">{metrics}</div>
+    </div>
+  </header>
+  <main id="main" class="site-shell">
+    <section>
+      <div class="section-head">
+        <h2>Station story</h2>
+        <p>{h(profile["narrative"])}</p>
+      </div>
+      <div class="profile-context">{_profile_context(station)}</div>
+    </section>
+
+    <section>
+      <div class="section-head">
+        <h2>Seasonal richness</h2>
+        <p>Unique moth taxa by month, using all synced observations for this station.</p>
+      </div>
+      <div class="profile-chart">{_seasonal_bars(profile)}</div>
+    </section>
+
+    <section>
+      <div class="section-head">
+        <h2>Species accumulation</h2>
+        <p>Recent milestones in the running species list for this station.</p>
+      </div>
+      <div class="profile-chart">{_accumulation_bars(profile)}</div>
+    </section>
+
+    <section>
+      <div class="section-head">
+        <h2>Signature species</h2>
+        <p>Species most associated with this station based on its share of current network observations.</p>
+      </div>
+      {_profile_species_list(profile["signature_species"], "Signature species will appear after synced observations.")}
+    </section>
+
+    <section>
+      <div class="section-head">
+        <h2>Frequently unique here</h2>
+        <p>Species currently recorded at this station and no other tracked station.</p>
+      </div>
+      {_profile_species_list(profile["unique_species"], "No station-unique species are available yet.")}
+    </section>
+
+    <section>
+      <div class="section-head">
+        <h2>Recent observations</h2>
+        <p>Latest synced observations from this station.</p>
+      </div>
+      <div class="sighting-grid">{_profile_recent(profile["recent"])}</div>
+    </section>
+  </main>
+  <footer><div>Generated {h(generated_at())}. Station profiles are generated from the synced iNaturalist observation cache.</div></footer>
+  <script>{DASHBOARD_JS}</script>
+</body>
+</html>
+"""
 
 
 DASHBOARD_JS = r"""
@@ -1093,6 +1310,42 @@ nav a {
   gap: clamp(24px, 5vw, 72px);
   align-items: start;
 }
+.profile-hero {
+  width: min(var(--max), calc(100% - 32px));
+  margin: 0 auto;
+  padding: 54px 0 38px;
+  border-top: 6px solid var(--station-color);
+}
+.profile-hero h1 {
+  max-width: 980px;
+}
+.profile-links {
+  margin-top: 14px;
+}
+.profile-metrics {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 1px;
+  margin-top: 30px;
+  border: 1px solid var(--line);
+  background: var(--line);
+}
+.profile-metric {
+  min-height: 92px;
+  padding: 12px;
+  background: var(--panel);
+}
+.profile-metric strong {
+  display: block;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: clamp(1.02rem, 1.8vw, 1.5rem);
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.profile-metric span {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
 .hero-copy {
   grid-column: 1;
 }
@@ -1229,6 +1482,91 @@ h2 {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: 10px;
+}
+.profile-context {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.profile-context-item {
+  min-height: 150px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+}
+.profile-context-item p {
+  margin: 0 0 12px;
+  color: var(--amber);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.78rem;
+}
+.profile-context-item span {
+  color: var(--muted);
+}
+.profile-chart {
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+}
+.month-bar,
+.accumulation-row {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr) 56px;
+  gap: 10px;
+  align-items: center;
+  min-height: 28px;
+}
+.accumulation-row {
+  grid-template-columns: 104px minmax(0, 1fr) 56px;
+}
+.month-bar span,
+.accumulation-row span,
+.month-bar strong,
+.accumulation-row strong {
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+.month-bar div,
+.accumulation-row div {
+  height: 12px;
+  background: #191a12;
+  border: 1px solid var(--line);
+}
+.month-bar i,
+.accumulation-row i {
+  display: block;
+  height: 100%;
+  background: var(--amber);
+}
+.profile-species-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 10px;
+}
+.profile-species-list li {
+  min-height: 82px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 13px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+}
+.profile-species-list span {
+  color: var(--ink);
+  line-height: 1.2;
+}
+.profile-species-list small {
+  color: var(--muted);
+  font-size: 0.78rem;
 }
 .insight-grid {
   display: grid;
@@ -1647,6 +1985,10 @@ footer div {
   .hero-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+  .profile-metrics,
+  .profile-context {
+    grid-template-columns: 1fr;
+  }
   .section-head {
     display: block;
   }
@@ -1843,6 +2185,21 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
         _live_page(),
         encoding="utf-8",
     )
+    stations_dir = settings.public_dir / "stations"
+    stations_dir.mkdir(parents=True, exist_ok=True)
+    station_colors = _station_color_map(stations)
+    for station in stations:
+        if not station.enabled:
+            continue
+        profile = station_profile(settings, station.id)
+        (stations_dir / f"{station.id}.html").write_text(
+            _station_profile_page(
+                station,
+                profile,
+                station_colors.get(station.id, station.color or FALLBACK_COLORS[0]),
+            ),
+            encoding="utf-8",
+        )
     if settings.custom_domain:
         (settings.public_dir / "CNAME").write_text(
             f"{settings.custom_domain.strip()}\n",

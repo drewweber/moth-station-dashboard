@@ -75,6 +75,10 @@ with automatically generated insight cards and a Naturalist Feed.
    - Habitat, light setup, station history, accumulation curve, seasonal
      richness, phenology calendar, signature species, frequently unique species,
      and station-associated species.
+   - First phase: generate one static page per station with optional owner
+     context fields, data-derived narrative, seasonal richness, accumulation
+     milestones, signature species, station-unique species, and recent
+     observations.
 4. Community achievements
    - Reward discoveries, coverage milestones, family/taxon specialties,
      seasonal coverage, consistent uploads, strong IDs, and excellent photos.

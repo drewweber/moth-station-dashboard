@@ -612,6 +612,131 @@ def dashboard_insights(settings: Settings, limit: int = 16) -> list[dict[str, An
     return deduped
 
 
+def station_profile(settings: Settings, station_id: str) -> dict[str, Any]:
+    rows = [
+        row for row in load_rows(settings)
+        if row["station_id"] == station_id
+    ]
+    taxa = station_taxa(settings)
+    unique_taxa = unique_station_taxa(settings)
+
+    taxa_seen = {int(row["taxon_id"]) for row in rows if row.get("taxon_id")}
+    dates = [row["session_date"] for row in rows if row.get("session_date")]
+    latest = max(dates) if dates else None
+    first = min(dates) if dates else None
+
+    by_month: dict[int, set[int]] = defaultdict(set)
+    for row in rows:
+        taxon_id = row.get("taxon_id")
+        sd = row.get("session_date")
+        if taxon_id and sd:
+            by_month[sd.month].add(int(taxon_id))
+    seasonal_richness = [
+        {
+            "month": month,
+            "label": date(2000, month, 1).strftime("%b"),
+            "species": len(by_month.get(month, set())),
+        }
+        for month in range(1, 13)
+    ]
+
+    taxa_by_date: dict[date, set[int]] = defaultdict(set)
+    for row in rows:
+        taxon_id = row.get("taxon_id")
+        sd = row.get("session_date")
+        if taxon_id and sd:
+            taxa_by_date[sd].add(int(taxon_id))
+    seen = set()
+    accumulation = []
+    for sd in sorted(taxa_by_date):
+        before = len(seen)
+        seen.update(taxa_by_date[sd])
+        if len(seen) != before:
+            accumulation.append({"date": sd, "species": len(seen)})
+    if len(accumulation) > 40:
+        step = max(1, len(accumulation) // 40)
+        accumulation = accumulation[::step]
+        if accumulation[-1]["species"] != len(seen):
+            accumulation.append({"date": max(dates), "species": len(seen)})
+
+    signature = []
+    for taxon in taxa:
+        entry = taxon["stations"].get(station_id)
+        if not entry:
+            continue
+        total = max(1, taxon["total_count"])
+        share = entry["count"] / total
+        signature.append(
+            {
+                "label": taxon["label"],
+                "count": entry["count"],
+                "network_count": total,
+                "station_count": taxon["station_count"],
+                "share": share,
+            }
+        )
+    signature = sorted(
+        signature,
+        key=lambda item: (-item["share"], -item["count"], item["label"]),
+    )[:12]
+
+    station_uniques = [
+        item for item in unique_taxa
+        if item["station_id"] == station_id
+    ]
+    station_uniques = sorted(
+        station_uniques,
+        key=lambda item: (-item["count"], item["label"]),
+    )[:12]
+
+    recent = sorted(
+        rows,
+        key=lambda row: (
+            row.get("created_at") or row.get("observed_on") or "",
+            row.get("inat_obs_id") or 0,
+        ),
+        reverse=True,
+    )[:12]
+
+    active_sessions = len({row["session_date"] for row in rows if row.get("session_date")})
+    observations = len(rows)
+    species = len(taxa_seen)
+    unique_count = len([item for item in unique_taxa if item["station_id"] == station_id])
+    narrative_bits = []
+    if species:
+        narrative_bits.append(
+            f"This station has documented {species} moth taxa from {observations} observations."
+        )
+    if active_sessions:
+        narrative_bits.append(
+            f"The dataset spans {active_sessions} moth sessions from {first} through {latest}."
+        )
+    if unique_count:
+        narrative_bits.append(
+            f"{unique_count} taxa are currently unique to this station within the tracked network."
+        )
+    if signature:
+        narrative_bits.append(
+            f"{signature[0]['label']} is the strongest station-associated species by current share of network observations."
+        )
+
+    return {
+        "station_id": station_id,
+        "observations": observations,
+        "species": species,
+        "active_sessions": active_sessions,
+        "first_session": first,
+        "latest_session": latest,
+        "unique_count": unique_count,
+        "seasonal_richness": seasonal_richness,
+        "accumulation": accumulation,
+        "signature_species": signature,
+        "unique_species": station_uniques,
+        "recent": recent,
+        "narrative": " ".join(narrative_bits) if narrative_bits else "This station is configured and waiting for synced moth observations.",
+    }
+
+
 def record_highlights(settings: Settings) -> list[dict[str, Any]]:
     highlights = []
     for taxon in station_taxa(settings):
