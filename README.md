@@ -32,18 +32,25 @@ python3 -m mothdash sync --full # clear and resync station observations
 
 ## Hosting
 
-The dashboard is configured for GitHub Pages at:
+The dashboard is configured for Cloudflare Pages at:
 
 `https://moth-stations.kingfisher-hollow.com`
 
-`stations.toml` sets `custom_domain`, and the renderer writes `public/CNAME`
-for every build. After pushing this repo to GitHub:
+The GitHub Actions workflow builds the dashboard and deploys `public/` to the
+Cloudflare Pages project named `moth-stations`.
 
-1. Enable GitHub Pages with "GitHub Actions" as the source.
-2. Add a DNS `CNAME` record for `moth-stations.kingfisher-hollow.com` pointing
-   to the repository owner's GitHub Pages host, usually
-   `<github-username>.github.io`.
-3. Run the `Build Dashboard` workflow once from the Actions tab.
+After pushing this repo to GitHub:
+
+1. Create a Cloudflare Pages project named `moth-stations`.
+2. Add `moth-stations.kingfisher-hollow.com` as a custom domain on that Pages
+   project.
+3. Add these GitHub Actions repo secrets:
+   - `CLOUDFLARE_API_TOKEN`
+   - `CLOUDFLARE_ACCOUNT_ID`
+4. Run the `Build and deploy dashboard` workflow once from the Actions tab.
+
+If the Cloudflare Pages project uses a different name, update
+`.github/workflows/build.yml`.
 
 ## Configure Stations
 

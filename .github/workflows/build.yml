@@ -1,40 +1,48 @@
-name: Build Dashboard
+name: Build and deploy dashboard
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: {}
   schedule:
+    # 10:15 UTC = 6:15 AM Eastern during daylight time.
     - cron: "15 10 * * *"
+  push:
+    branches: [main]
+    paths:
+      - "mothdash/**"
+      - "stations.toml"
+      - ".github/workflows/build.yml"
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
-  group: pages
+  group: moth-station-dashboard
   cancel-in-progress: false
 
 jobs:
-  build:
+  build-and-deploy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
+      - name: Restore database cache
+        uses: actions/cache@v4
+        with:
+          path: data/mothdash.db
+          key: mothdash-db-${{ github.run_id }}
+          restore-keys: |
+            mothdash-db-
+
       - name: Build dashboard
         run: python -m mothdash build
-      - uses: actions/upload-pages-artifact@v3
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
         with:
-          path: public
-
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
-    needs: build
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v4
-
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy public --project-name=moth-stations --commit-dirty=true
