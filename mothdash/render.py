@@ -592,19 +592,55 @@ def _accumulation_bars(profile: dict[str, Any]) -> str:
     if not rows:
         return '<p class="empty">Species accumulation will appear after synced observations.</p>'
     max_species = max(row["species"] for row in rows)
-    bars = []
-    for row in rows[-28:]:
-        width = 100 * row["species"] / max_species if max_species else 0
-        bars.append(
+    width = 720
+    height = 260
+    left = 52
+    right = 24
+    top = 22
+    bottom = 42
+    plot_width = width - left - right
+    plot_height = height - top - bottom
+    dates = [row["date"] for row in rows]
+    min_date = min(dates)
+    max_date = max(dates)
+    date_span = max(1, max_date.toordinal() - min_date.toordinal())
+
+    points = []
+    for row in rows:
+        x = left + ((row["date"].toordinal() - min_date.toordinal()) / date_span * plot_width)
+        y = top + plot_height - ((row["species"] / max_species) * plot_height if max_species else 0)
+        points.append((x, y, row))
+    point_attr = " ".join(f"{x:.1f},{y:.1f}" for x, y, _ in points)
+    area_attr = f"{left},{top + plot_height:.1f} {point_attr} {left + plot_width:.1f},{top + plot_height:.1f}"
+    markers = []
+    for x, y, row in points:
+        markers.append(
             f"""
-            <div class="accumulation-row">
-              <span>{h(row["date"])}</span>
-              <div><i style="width: {width:.1f}%"></i></div>
-              <strong>{h(row["species"])}</strong>
-            </div>
+            <circle cx="{x:.1f}" cy="{y:.1f}" r="3.2">
+              <title>{h(row["date"])} · {h(row["species"])} species</title>
+            </circle>
             """
         )
-    return "".join(bars)
+    latest = rows[-1]
+    return f"""
+    <figure class="accumulation-line-chart">
+      <svg viewBox="0 0 {width} {height}" role="img" aria-labelledby="accumulation-title accumulation-desc" preserveAspectRatio="none">
+        <title id="accumulation-title">Station species accumulation curve</title>
+        <desc id="accumulation-desc">Running moth species count from {h(min_date)} to {h(max_date)}, ending at {h(latest["species"])} species.</desc>
+        <line class="chart-axis" x1="{left}" y1="{top + plot_height}" x2="{left + plot_width}" y2="{top + plot_height}"></line>
+        <line class="chart-axis" x1="{left}" y1="{top}" x2="{left}" y2="{top + plot_height}"></line>
+        <line class="chart-grid" x1="{left}" y1="{top}" x2="{left + plot_width}" y2="{top}"></line>
+        <text class="chart-label" x="{left - 8}" y="{top + 4}" text-anchor="end">{h(max_species)}</text>
+        <text class="chart-label" x="{left - 8}" y="{top + plot_height + 4}" text-anchor="end">0</text>
+        <text class="chart-label" x="{left}" y="{height - 12}" text-anchor="start">{h(min_date)}</text>
+        <text class="chart-label" x="{left + plot_width}" y="{height - 12}" text-anchor="end">{h(max_date)}</text>
+        <polygon class="accumulation-area" points="{area_attr}"></polygon>
+        <polyline class="accumulation-line" points="{point_attr}"></polyline>
+        {''.join(markers)}
+        <text class="chart-callout" x="{points[-1][0] - 8:.1f}" y="{points[-1][1] - 10:.1f}" text-anchor="end">{h(latest["species"])} species</text>
+      </svg>
+    </figure>
+    """
 
 
 def _profile_species_list(rows: list[dict[str, Any]], empty: str) -> str:
@@ -1648,37 +1684,73 @@ h2 {
   border-radius: 6px;
   background: var(--panel);
 }
-.month-bar,
-.accumulation-row {
+.month-bar {
   display: grid;
   grid-template-columns: 58px minmax(0, 1fr) 56px;
   gap: 10px;
   align-items: center;
   min-height: 28px;
 }
-.accumulation-row {
-  grid-template-columns: 104px minmax(0, 1fr) 56px;
-}
 .month-bar span,
-.accumulation-row span,
-.month-bar strong,
-.accumulation-row strong {
+.month-bar strong {
   color: var(--muted);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.8rem;
   font-weight: 500;
 }
-.month-bar div,
-.accumulation-row div {
+.month-bar div {
   height: 12px;
   background: #191a12;
   border: 1px solid var(--line);
 }
-.month-bar i,
-.accumulation-row i {
+.month-bar i {
   display: block;
   height: 100%;
   background: var(--amber);
+}
+.accumulation-line-chart {
+  margin: 0;
+}
+.accumulation-line-chart svg {
+  width: 100%;
+  height: clamp(230px, 32vw, 340px);
+  display: block;
+}
+.chart-axis,
+.chart-grid {
+  vector-effect: non-scaling-stroke;
+  stroke: var(--line);
+  stroke-width: 1;
+}
+.chart-grid {
+  stroke-dasharray: 4 6;
+}
+.accumulation-area {
+  fill: rgba(215, 181, 109, 0.12);
+}
+.accumulation-line {
+  fill: none;
+  stroke: var(--amber);
+  stroke-width: 4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+.accumulation-line-chart circle {
+  fill: var(--panel);
+  stroke: var(--amber);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+.chart-label,
+.chart-callout {
+  fill: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.78rem;
+}
+.chart-callout {
+  fill: var(--ink);
+  font-weight: 650;
 }
 .profile-species-list {
   list-style: none;
