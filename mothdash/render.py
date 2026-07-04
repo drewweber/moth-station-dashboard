@@ -10,6 +10,7 @@ from typing import Any
 
 from .analysis import (
     active_year,
+    daily_species_counts,
     first_of_season,
     generated_at,
     hero_photos,
@@ -23,6 +24,18 @@ from .config import Settings, Station
 from .db import init_db
 
 
+FALLBACK_COLORS = [
+    "#d7b56d",
+    "#6eb7a8",
+    "#cf7d92",
+    "#9b8ed4",
+    "#7fb3d5",
+    "#90b66f",
+    "#d88b61",
+    "#c8a7d8",
+]
+
+
 def h(value: Any) -> str:
     if value is None:
         return ""
@@ -33,6 +46,38 @@ def h(value: Any) -> str:
 
 def _summary_map(summaries: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     return {item["station_id"]: item for item in summaries}
+
+
+def _station_color(station: Station, index: int) -> str:
+    return station.color or FALLBACK_COLORS[index % len(FALLBACK_COLORS)]
+
+
+def _station_color_map(stations: list[Station]) -> dict[str, str]:
+    return {
+        station.id: _station_color(station, index)
+        for index, station in enumerate([station for station in stations if station.enabled])
+    }
+
+
+def _hex_to_rgba(hex_color: str, alpha: float) -> str:
+    value = hex_color.strip().lstrip("#")
+    if len(value) != 6:
+        return f"rgba(215, 181, 109, {alpha:.3f})"
+    try:
+        red = int(value[0:2], 16)
+        green = int(value[2:4], 16)
+        blue = int(value[4:6], 16)
+    except ValueError:
+        return f"rgba(215, 181, 109, {alpha:.3f})"
+    return f"rgba({red}, {green}, {blue}, {alpha:.3f})"
+
+
+def _sort_button(label: str, sort_type: str = "text", default: str = "") -> str:
+    default_attr = f' data-sort-default="{h(default)}"' if default else ""
+    return (
+        f'<button class="sort-button" type="button" data-sort-type="{h(sort_type)}"'
+        f'{default_attr}>{h(label)}<span aria-hidden="true"></span></button>'
+    )
 
 
 def _metric(label: str, value: Any, compact: bool = False) -> str:
@@ -101,7 +146,7 @@ def _station_cards(summaries: list[dict[str, Any]], stations: list[Station]) -> 
         return '<p class="empty">No stations are enabled. Add one in stations.toml and run a sync.</p>'
     by_station = _summary_map(summaries)
     cards = []
-    for station in enabled:
+    for index, station in enumerate(enabled):
         item = by_station.get(station.id)
         species = item["species"] if item else 0
         observations = item["observations"] if item else 0
@@ -110,7 +155,7 @@ def _station_cards(summaries: list[dict[str, Any]], stations: list[Station]) -> 
         status = "active" if item else "queued"
         cards.append(
             f"""
-            <article class="station-card">
+            <article class="station-card" style="--station-color: {_station_color(station, index)}">
               <div>
                 <p class="station-status">{h(status)}</p>
                 <h3>{h(station.name)}</h3>
@@ -147,14 +192,14 @@ def _recent_table(rows: list[dict[str, Any]]) -> str:
             """
         )
     return f"""
-    <table>
+    <table class="sortable-table">
       <thead>
         <tr>
-          <th scope="col">Uploaded</th>
-          <th scope="col">Session</th>
-          <th scope="col">Station</th>
-          <th scope="col">Taxon</th>
-          <th scope="col">Observer</th>
+          <th scope="col">{_sort_button("Uploaded", "date")}</th>
+          <th scope="col">{_sort_button("Session", "date")}</th>
+          <th scope="col">{_sort_button("Station")}</th>
+          <th scope="col">{_sort_button("Taxon")}</th>
+          <th scope="col">{_sort_button("Observer")}</th>
         </tr>
       </thead>
       <tbody>{''.join(body)}</tbody>
@@ -249,13 +294,13 @@ def _record_table(rows: list[dict[str, Any]]) -> str:
             """
         )
     return f"""
-    <table>
+    <table class="sortable-table">
       <thead>
         <tr>
-          <th scope="col">Species</th>
-          <th scope="col">Station</th>
-          <th scope="col">Station first</th>
-          <th scope="col">Flags</th>
+          <th scope="col">{_sort_button("Species")}</th>
+          <th scope="col">{_sort_button("Station")}</th>
+          <th scope="col">{_sort_button("Station first", "date")}</th>
+          <th scope="col">{_sort_button("Flags")}</th>
         </tr>
       </thead>
       <tbody>{''.join(body)}</tbody>
@@ -280,14 +325,14 @@ def _unique_station_table(rows: list[dict[str, Any]]) -> str:
             """
         )
     return f"""
-    <table>
+    <table class="sortable-table">
       <thead>
         <tr>
-          <th scope="col">Species</th>
-          <th scope="col">Only station</th>
-          <th scope="col">Obs</th>
-          <th scope="col">First</th>
-          <th scope="col">Latest</th>
+          <th scope="col">{_sort_button("Species")}</th>
+          <th scope="col">{_sort_button("Only station")}</th>
+          <th scope="col">{_sort_button("Obs", "number")}</th>
+          <th scope="col">{_sort_button("First", "date")}</th>
+          <th scope="col">{_sort_button("Latest", "date")}</th>
         </tr>
       </thead>
       <tbody>{''.join(body)}</tbody>
@@ -299,7 +344,12 @@ def _pulse_table(rows: list[dict[str, Any]], stations: list[Station]) -> str:
     if not rows:
         return '<p class="empty">No multi-station first-of-season records yet. Add another station and sync observations to compare seasonal timing.</p>'
     enabled = [station for station in stations if station.enabled]
-    headers = "".join(f'<th scope="col">{h(station.name)}</th>' for station in enabled)
+    colors = _station_color_map(stations)
+    headers = "".join(
+        f'<th scope="col" class="station-head" style="--station-color: {h(colors[station.id])}">'
+        f'{_sort_button(station.name, "date")}</th>'
+        for station in enabled
+    )
     body = []
     for row in rows[:80]:
         station_cells = []
@@ -307,30 +357,32 @@ def _pulse_table(rows: list[dict[str, Any]], stations: list[Station]) -> str:
             entry = row["stations"].get(station.id)
             if entry:
                 value = h(entry["date"])
+                sort_value = h(entry["date"])
                 if entry.get("url"):
                     value = f'<a href="{h(entry["url"])}">{value}</a>'
             else:
                 value = ""
-            station_cells.append(f"<td>{value}</td>")
+                sort_value = ""
+            station_cells.append(f'<td data-sort-value="{sort_value}">{value}</td>')
         body.append(
             f"""
             <tr>
               <td>{h(row["label"])}</td>
-              <td>{h(row["station_count"])}</td>
-              <td>{h(row["spread_days"])}</td>
+              <td data-sort-value="{h(row["station_count"])}">{h(row["station_count"])}</td>
+              <td data-sort-value="{h(row["spread_days"])}">{h(row["spread_days"])}</td>
               <td><span class="tag">{h(row["pulse"])}</span></td>
               {''.join(station_cells)}
             </tr>
             """
         )
     return f"""
-    <table>
+    <table class="sortable-table">
       <thead>
         <tr>
-          <th scope="col">Species</th>
-          <th scope="col">Stations</th>
-          <th scope="col">Spread</th>
-          <th scope="col">Pulse</th>
+          <th scope="col">{_sort_button("Species")}</th>
+          <th scope="col">{_sort_button("Stations", "number", "desc")}</th>
+          <th scope="col">{_sort_button("Spread", "number")}</th>
+          <th scope="col">{_sort_button("Pulse")}</th>
           {headers}
         </tr>
       </thead>
@@ -343,7 +395,12 @@ def _comparison_table(rows: list[dict[str, Any]], stations: list[Station]) -> st
     if not rows:
         return '<p class="empty">No station species have been synced yet. Run a sync to populate this dashboard.</p>'
     enabled = [station for station in stations if station.enabled]
-    headers = "".join(f'<th scope="col">{h(station.name)}</th>' for station in enabled)
+    colors = _station_color_map(stations)
+    headers = "".join(
+        f'<th scope="col" class="station-head" style="--station-color: {h(colors[station.id])}">'
+        f'{_sort_button(station.name, "number")}</th>'
+        for station in enabled
+    )
     body = []
     for row in rows[:250]:
         cells = []
@@ -359,31 +416,94 @@ def _comparison_table(rows: list[dict[str, Any]], stations: list[Station]) -> st
                     flags.append("tracked")
                 flag_html = _flag_list(flags)
                 cells.append(
-                    f"<td><strong>{h(entry['count'])}</strong><br>"
+                    f"<td data-sort-value=\"{h(entry['count'])}\"><strong>{h(entry['count'])}</strong><br>"
                     f"<span>{h(entry['first'])}</span>{flag_html}</td>"
                 )
             else:
-                cells.append("<td></td>")
+                cells.append('<td data-sort-value="0"></td>')
         body.append(
             f"""
             <tr>
               <td>{h(row["label"])}</td>
-              <td>{h(row["station_count"])}</td>
+              <td data-sort-value="{h(row["station_count"])}">{h(row["station_count"])}</td>
               {''.join(cells)}
             </tr>
             """
         )
     return f"""
-    <table>
+    <table class="sortable-table">
       <thead>
         <tr>
-          <th scope="col">Species</th>
-          <th scope="col">Stations</th>
+          <th scope="col">{_sort_button("Species")}</th>
+          <th scope="col">{_sort_button("Stations", "number", "desc")}</th>
           {headers}
         </tr>
       </thead>
       <tbody>{''.join(body)}</tbody>
     </table>
+    """
+
+
+def _calendar_table(rows: list[dict[str, Any]], stations: list[Station], mode: str) -> str:
+    if not rows:
+        return '<p class="empty">No calendar counts are available yet.</p>'
+    enabled = [station for station in stations if station.enabled]
+    colors = _station_color_map(stations)
+    max_count = max(
+        [count for row in rows for count in row["stations"].values()] + [1]
+    )
+    headers = "".join(
+        f'<th scope="col" class="station-head" style="--station-color: {h(colors[station.id])}">'
+        f'{_sort_button(station.name, "number")}</th>'
+        for station in enabled
+    )
+    label = "Date" if mode == "year" else "Month day"
+    body = []
+    for row in rows:
+        cells = []
+        for station in enabled:
+            count = row["stations"].get(station.id, 0)
+            intensity = 0 if count == 0 else 0.16 + (0.74 * count / max_count)
+            color = colors[station.id]
+            background = _hex_to_rgba(color, intensity)
+            cells.append(
+                f"""
+                <td class="calendar-cell" data-sort-value="{h(count)}">
+                  <span style="--station-color: {h(color)}; --cell-bg: {h(background)}">{h(count) if count else ""}</span>
+                </td>
+                """
+            )
+        body.append(
+            f"""
+            <tr>
+              <td data-sort-value="{h(row["sort_key"])}">{h(row["label"])}</td>
+              <td data-sort-value="{h(row["active_stations"])}">{h(row["active_stations"])}</td>
+              <td data-sort-value="{h(row["total"])}">{h(row["total"])}</td>
+              {''.join(cells)}
+            </tr>
+            """
+        )
+    return f"""
+    <table class="sortable-table calendar-table">
+      <thead>
+        <tr>
+          <th scope="col">{_sort_button(label, "text")}</th>
+          <th scope="col">{_sort_button("Active stations", "number", "desc")}</th>
+          <th scope="col">{_sort_button("Species total", "number")}</th>
+          {headers}
+        </tr>
+      </thead>
+      <tbody>{''.join(body)}</tbody>
+    </table>
+    """
+
+
+def _view_toggle(name: str, first_id: str, first_label: str, second_id: str, second_label: str) -> str:
+    return f"""
+    <div class="view-toggle" role="group" aria-label="{h(name)}">
+      <button type="button" class="view-toggle-button is-active" data-view-target="{h(first_id)}">{h(first_label)}</button>
+      <button type="button" class="view-toggle-button" data-view-target="{h(second_id)}">{h(second_label)}</button>
+    </div>
     """
 
 
@@ -416,6 +536,77 @@ def _snapshot_payload(settings: Settings, stations: list[Station], taxa: list[di
         "poll_seconds": 60,
         "stations": enabled,
     }
+
+
+DASHBOARD_JS = r"""
+function cellValue(row, index, type) {
+  const cell = row.children[index];
+  const raw = (cell?.dataset.sortValue || cell?.textContent || "").trim();
+  if (type === "number") return raw === "" ? -Infinity : Number(raw.replace(/,/g, ""));
+  if (type === "date") return raw || "9999-99-99";
+  return raw.toLocaleLowerCase();
+}
+
+function compareValues(a, b, type) {
+  if (type === "number") return a - b;
+  return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: "base" });
+}
+
+function sortTable(table, columnIndex, direction, type) {
+  const tbody = table.tBodies[0];
+  if (!tbody) return;
+  const rows = Array.from(tbody.rows);
+  rows.sort((a, b) => {
+    const result = compareValues(cellValue(a, columnIndex, type), cellValue(b, columnIndex, type), type);
+    return direction === "asc" ? result : -result;
+  });
+  rows.forEach((row) => tbody.appendChild(row));
+  table.querySelectorAll(".sort-button").forEach((button) => {
+    button.dataset.direction = "";
+    button.closest("th")?.removeAttribute("aria-sort");
+  });
+  const button = table.tHead?.rows[0]?.cells[columnIndex]?.querySelector(".sort-button");
+  if (button) {
+    button.dataset.direction = direction;
+    button.closest("th")?.setAttribute("aria-sort", direction === "asc" ? "ascending" : "descending");
+  }
+}
+
+function initSortableTables() {
+  document.querySelectorAll(".sortable-table").forEach((table) => {
+    table.querySelectorAll("thead .sort-button").forEach((button, index) => {
+      const type = button.dataset.sortType || "text";
+      button.addEventListener("click", () => {
+        const next = button.dataset.direction === "asc" ? "desc" : "asc";
+        sortTable(table, index, next, type);
+      });
+      if (button.dataset.sortDefault) {
+        sortTable(table, index, button.dataset.sortDefault, type);
+      }
+    });
+  });
+}
+
+function initViewToggles() {
+  document.querySelectorAll(".view-toggle").forEach((group) => {
+    group.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-view-target]");
+      if (!button) return;
+      const targetId = button.dataset.viewTarget;
+      const section = group.closest("section");
+      section.querySelectorAll(".view-panel").forEach((panel) => {
+        panel.hidden = panel.id !== targetId;
+      });
+      group.querySelectorAll(".view-toggle-button").forEach((item) => {
+        item.classList.toggle("is-active", item === button);
+      });
+    });
+  });
+}
+
+initSortableTables();
+initViewToggles();
+"""
 
 
 LIVE_JS = r"""
@@ -1011,10 +1202,19 @@ h2 {
   display: flex;
   flex-direction: column;
   justify-content: space-between;
+  position: relative;
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 6px;
   padding: 16px;
+}
+.station-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 5px;
+  background: var(--station-color, var(--amber));
+  border-radius: 6px 0 0 6px;
 }
 .station-card h3 {
   margin: 8px 0 8px;
@@ -1158,7 +1358,8 @@ h2 {
   white-space: nowrap;
 }
 .table-wrap {
-  overflow-x: auto;
+  max-height: min(72vh, 760px);
+  overflow: auto;
   border: 1px solid var(--line);
   border-radius: 6px;
   background: var(--panel);
@@ -1177,10 +1378,56 @@ th, td {
   vertical-align: top;
 }
 th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
   background: #1c1d15;
   color: var(--amber);
   font-weight: 650;
   white-space: nowrap;
+}
+th.station-head {
+  color: var(--station-color);
+}
+th.station-head::before {
+  content: "";
+  display: inline-block;
+  width: 0.7rem;
+  height: 0.7rem;
+  margin-right: 0.45rem;
+  background: var(--station-color);
+  vertical-align: -0.05rem;
+}
+.sort-button {
+  appearance: none;
+  border: 0;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+.sort-button span::after {
+  content: "↕";
+  color: var(--faint);
+  font-size: 0.78rem;
+}
+.sort-button[data-direction="asc"] span::after {
+  content: "↑";
+  color: var(--ink);
+}
+.sort-button[data-direction="desc"] span::after {
+  content: "↓";
+  color: var(--ink);
+}
+.sort-button:focus-visible,
+.view-toggle-button:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 3px;
 }
 td span {
   color: var(--muted);
@@ -1210,6 +1457,55 @@ a:hover { color: #f2d78e; }
   padding: 18px;
   border: 1px dashed var(--line);
   border-radius: 6px;
+}
+.view-toggle {
+  display: inline-flex;
+  gap: 1px;
+  padding: 3px;
+  margin: 0 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #181910;
+}
+.view-toggle-button {
+  appearance: none;
+  border: 0;
+  border-radius: 4px;
+  padding: 7px 10px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.86rem;
+  cursor: pointer;
+}
+.view-toggle-button.is-active {
+  background: var(--amber);
+  color: #1b170f;
+}
+.view-panel[hidden] {
+  display: none;
+}
+.calendar-table td,
+.calendar-table th {
+  text-align: center;
+}
+.calendar-table td:first-child,
+.calendar-table th:first-child {
+  text-align: left;
+}
+.calendar-cell {
+  min-width: 92px;
+  padding: 7px;
+}
+.calendar-cell span {
+  min-height: 34px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--station-color);
+  background: var(--cell-bg);
+  color: var(--ink);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.86rem;
 }
 footer {
   color: var(--muted);
@@ -1280,7 +1576,11 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
     hero_photo_rows = hero_photos(settings)
     year = active_year(settings)
     pulses = first_of_season(settings, year)
+    all_time_pulses = first_of_season(settings, all_time=True)
     taxa = station_taxa(settings)
+    year_taxa = station_taxa(settings, year) if year else []
+    year_calendar = daily_species_counts(settings, year) if year else []
+    all_time_calendar = daily_species_counts(settings)
     records = record_highlights(settings)
     uniques = unique_station_taxa(settings)
 
@@ -1305,6 +1605,7 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
         <a href="#pulses">Firsts</a>
         <a href="#records">Records</a>
         <a href="#unique">Unique</a>
+        <a href="#calendar">Calendar</a>
         <a href="#species">Species</a>
         <a href="live.html">Live</a>
       </nav>
@@ -1340,10 +1641,12 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
     <section id="pulses">
       <div class="section-head">
         <h2>{h(year) if year else "Current"} first-of-season pulses</h2>
-        <p>Species appearing at two or more stations are grouped by how tightly their first session dates line up.</p>
+        <p>Species appearing at two or more stations are grouped by how tightly their first session dates line up. Switch to all-time to compare first arrivals across the full station history.</p>
       </div>
       <div class="pulse-grid">{_pulse_cards(pulses)}</div>
-      <div class="table-wrap">{_pulse_table(pulses, stations)}</div>
+      {_view_toggle("First arrival view", "pulse-year", f"{year} season" if year else "Current season", "pulse-all-time", "All time")}
+      <div class="view-panel" id="pulse-year"><div class="table-wrap">{_pulse_table(pulses, stations)}</div></div>
+      <div class="view-panel" id="pulse-all-time" hidden><div class="table-wrap">{_pulse_table(all_time_pulses, stations)}</div></div>
     </section>
 
     <section id="records">
@@ -1363,15 +1666,28 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
       <div class="table-wrap">{_unique_station_table(uniques)}</div>
     </section>
 
+    <section id="calendar">
+      <div class="section-head">
+        <h2>Daily species calendar</h2>
+        <p>Counts are unique moth taxa per station per night. The all-years view compresses the record into month-day rows, which helps common seasonal signals stand out.</p>
+      </div>
+      {_view_toggle("Calendar view", "calendar-year", f"{year} dates" if year else "Current dates", "calendar-all-years", "All years")}
+      <div class="view-panel" id="calendar-year"><div class="table-wrap">{_calendar_table(year_calendar, stations, "year")}</div></div>
+      <div class="view-panel" id="calendar-all-years" hidden><div class="table-wrap">{_calendar_table(all_time_calendar, stations, "all")}</div></div>
+    </section>
+
     <section id="species">
       <div class="section-head">
-        <h2>All-time station comparison</h2>
-        <p>Each cell shows the observation count, first session date, and any county, state, or tracked-station first flags.</p>
+        <h2>Station species comparison</h2>
+        <p>Each cell shows the observation count, first session date, and any county, state, or tracked-station first flags. Default sort favors species found across the most stations.</p>
       </div>
-      <div class="table-wrap">{_comparison_table(taxa, stations)}</div>
+      {_view_toggle("Species comparison view", "species-all-time", "All time", "species-year", f"{year} only" if year else "Current year")}
+      <div class="view-panel" id="species-all-time"><div class="table-wrap">{_comparison_table(taxa, stations)}</div></div>
+      <div class="view-panel" id="species-year" hidden><div class="table-wrap">{_comparison_table(year_taxa, stations)}</div></div>
     </section>
   </main>
   <footer><div>Generated {h(generated_at())}. First-of-season dates use moth session dates, with records before noon assigned to the previous evening.</div></footer>
+  <script>{DASHBOARD_JS}</script>
 </body>
 </html>
 """

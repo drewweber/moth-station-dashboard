@@ -19,6 +19,7 @@ STATION_META_KEYS = {
     "public_location",
     "notes",
     "website",
+    "color",
 }
 
 ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
@@ -51,6 +52,7 @@ class Station:
     public_location: str = ""
     notes: str = ""
     website: str = ""
+    color: str = ""
 
     def api_params(self, settings: Settings) -> dict[str, Any]:
         params = dict(self.query)
@@ -111,6 +113,7 @@ def load_config(path: str | Path = "stations.toml") -> tuple[Settings, list[Stat
                 public_location=str(raw_station.get("public_location", "")),
                 notes=str(raw_station.get("notes", "")),
                 website=str(raw_station.get("website", "")),
+                color=str(raw_station.get("color", "")),
             )
         )
 

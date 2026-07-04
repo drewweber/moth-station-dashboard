@@ -189,11 +189,15 @@ def active_year(settings: Settings) -> int | None:
     return int(row["year"]) if row and row["year"] else None
 
 
-def first_of_season(settings: Settings, year: int | None = None) -> list[dict[str, Any]]:
+def first_of_season(
+    settings: Settings,
+    year: int | None = None,
+    all_time: bool = False,
+) -> list[dict[str, Any]]:
     rows = load_rows(settings)
-    if year is None:
+    if year is None and not all_time:
         year = active_year(settings)
-    if year is None:
+    if year is None and not all_time:
         return []
 
     firsts: dict[tuple[int, str], dict[str, Any]] = {}
@@ -203,7 +207,9 @@ def first_of_season(settings: Settings, year: int | None = None) -> list[dict[st
     for row in rows:
         taxon_id = row.get("taxon_id")
         sd = row.get("session_date")
-        if not taxon_id or sd is None or sd.year != year:
+        if not taxon_id or sd is None:
+            continue
+        if not all_time and sd.year != year:
             continue
         station_id = row["station_id"]
         key = (int(taxon_id), station_id)
@@ -244,6 +250,7 @@ def first_of_season(settings: Settings, year: int | None = None) -> list[dict[st
         item.update(
             {
                 "year": year,
+                "all_time": all_time,
                 "station_count": len(station_dates),
                 "earliest": earliest,
                 "latest": latest,
@@ -259,7 +266,7 @@ def first_of_season(settings: Settings, year: int | None = None) -> list[dict[st
     )
 
 
-def station_taxa(settings: Settings) -> list[dict[str, Any]]:
+def station_taxa(settings: Settings, year: int | None = None) -> list[dict[str, Any]]:
     rows = load_rows(settings)
     with connect(settings.database) as conn:
         stats_rows = conn.execute("SELECT * FROM station_taxon_stats").fetchall()
@@ -271,6 +278,9 @@ def station_taxa(settings: Settings) -> list[dict[str, Any]]:
     for row in rows:
         taxon_id = row.get("taxon_id")
         if not taxon_id:
+            continue
+        sd = row.get("session_date")
+        if year is not None and (sd is None or sd.year != year):
             continue
         key = (int(taxon_id), row["station_id"])
         item = grouped.setdefault(
@@ -286,7 +296,6 @@ def station_taxa(settings: Settings) -> list[dict[str, Any]]:
             },
         )
         item["count"] += 1
-        sd = row.get("session_date")
         if sd:
             if item["first"] is None or sd < item["first"]:
                 item["first"] = sd
@@ -325,6 +334,56 @@ def station_taxa(settings: Settings) -> list[dict[str, Any]]:
         item["first_among_tracked_stations"] = first_station_names
         results.append(dict(item))
     return sorted(results, key=lambda item: (-item["station_count"], item["label"]))
+
+
+def daily_species_counts(settings: Settings, year: int | None = None) -> list[dict[str, Any]]:
+    rows = load_rows(settings)
+    days: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        taxon_id = row.get("taxon_id")
+        sd = row.get("session_date")
+        if not taxon_id or sd is None:
+            continue
+        if year is not None:
+            if sd.year != year:
+                continue
+            day_key = sd.isoformat()
+            label = f"{sd:%b} {sd.day}"
+            sort_key = sd.isoformat()
+        else:
+            day_key = sd.strftime("%m-%d")
+            label = f"{sd:%b} {sd.day}"
+            sort_key = day_key
+        day = days.setdefault(
+            day_key,
+            {
+                "key": day_key,
+                "label": label,
+                "sort_key": sort_key,
+                "stations": defaultdict(set),
+            },
+        )
+        day["stations"][row["station_id"]].add(int(taxon_id))
+
+    results = []
+    for day in days.values():
+        stations = {
+            station_id: len(taxa)
+            for station_id, taxa in day["stations"].items()
+        }
+        total = sum(stations.values())
+        active_stations = sum(1 for count in stations.values() if count)
+        results.append(
+            {
+                "key": day["key"],
+                "label": day["label"],
+                "sort_key": day["sort_key"],
+                "stations": stations,
+                "total": total,
+                "active_stations": active_stations,
+            }
+        )
+    return sorted(results, key=lambda item: item["sort_key"])
 
 
 def record_highlights(settings: Settings) -> list[dict[str, Any]]:
