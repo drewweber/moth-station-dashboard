@@ -626,11 +626,17 @@ def station_profile(settings: Settings, station_id: str) -> dict[str, Any]:
     first = min(dates) if dates else None
 
     by_month: dict[int, set[int]] = defaultdict(set)
+    by_week: dict[int, dict[str, Any]] = defaultdict(
+        lambda: {"taxa": set(), "observations": 0}
+    )
     for row in rows:
         taxon_id = row.get("taxon_id")
         sd = row.get("session_date")
         if taxon_id and sd:
             by_month[sd.month].add(int(taxon_id))
+            week = min(52, max(1, ((sd.timetuple().tm_yday - 1) // 7) + 1))
+            by_week[week]["taxa"].add(int(taxon_id))
+            by_week[week]["observations"] += 1
     seasonal_richness = [
         {
             "month": month,
@@ -639,6 +645,17 @@ def station_profile(settings: Settings, station_id: str) -> dict[str, Any]:
         }
         for month in range(1, 13)
     ]
+    phenology_weeks = []
+    for week in range(1, 53):
+        start = date(2000, 1, 1) + timedelta(days=(week - 1) * 7)
+        phenology_weeks.append(
+            {
+                "week": week,
+                "label": f"{start:%b} {start.day}",
+                "species": len(by_week[week]["taxa"]),
+                "observations": by_week[week]["observations"],
+            }
+        )
 
     taxa_by_date: dict[date, set[int]] = defaultdict(set)
     for row in rows:
@@ -698,6 +715,55 @@ def station_profile(settings: Settings, station_id: str) -> dict[str, Any]:
         reverse=True,
     )[:12]
 
+    expected_next = []
+    if latest:
+        latest_year_taxa = {
+            int(row["taxon_id"]) for row in rows
+            if row.get("taxon_id")
+            and row.get("session_date")
+            and row["session_date"].year == latest.year
+        }
+        start_day = latest.timetuple().tm_yday
+        next_window: dict[int, dict[str, Any]] = {}
+        for row in rows:
+            taxon_id = row.get("taxon_id")
+            sd = row.get("session_date")
+            if not taxon_id or not sd:
+                continue
+            day = sd.timetuple().tm_yday
+            delta = (day - start_day) % 366
+            if delta == 0 or delta > 30:
+                continue
+            taxon_id = int(taxon_id)
+            item = next_window.setdefault(
+                taxon_id,
+                {
+                    "taxon_id": taxon_id,
+                    "label": row["label"],
+                    "records": 0,
+                    "days": [],
+                    "seen_this_year": taxon_id in latest_year_taxa,
+                },
+            )
+            item["records"] += 1
+            item["days"].append(day)
+        for item in next_window.values():
+            first_day = min(item["days"])
+            last_day = max(item["days"])
+            first_label = date(2000, 1, 1) + timedelta(days=first_day - 1)
+            last_label = date(2000, 1, 1) + timedelta(days=last_day - 1)
+            item["window"] = (
+                f"{first_label:%b} {first_label.day}"
+                if first_day == last_day
+                else f"{first_label:%b} {first_label.day} to {last_label:%b} {last_label.day}"
+            )
+            del item["days"]
+            expected_next.append(item)
+        expected_next = sorted(
+            expected_next,
+            key=lambda item: (item["seen_this_year"], -item["records"], item["label"]),
+        )[:12]
+
     active_sessions = len({row["session_date"] for row in rows if row.get("session_date")})
     observations = len(rows)
     species = len(taxa_seen)
@@ -729,9 +795,11 @@ def station_profile(settings: Settings, station_id: str) -> dict[str, Any]:
         "latest_session": latest,
         "unique_count": unique_count,
         "seasonal_richness": seasonal_richness,
+        "phenology_weeks": phenology_weeks,
         "accumulation": accumulation,
         "signature_species": signature,
         "unique_species": station_uniques,
+        "expected_next": expected_next,
         "recent": recent,
         "narrative": " ".join(narrative_bits) if narrative_bits else "This station is configured and waiting for synced moth observations.",
     }

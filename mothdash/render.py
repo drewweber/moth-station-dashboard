@@ -643,6 +643,43 @@ def _accumulation_bars(profile: dict[str, Any]) -> str:
     """
 
 
+def _profile_phenology_calendar(profile: dict[str, Any]) -> str:
+    rows = profile["phenology_weeks"]
+    if not rows:
+        return '<p class="empty">Phenology calendar will appear after synced observations.</p>'
+    max_species = max([row["species"] for row in rows] + [1])
+    cells = []
+    for row in rows:
+        intensity = 0 if row["species"] == 0 else 0.14 + (0.72 * row["species"] / max_species)
+        cells.append(
+            f"""
+            <div class="profile-week" style="--cell-bg: {_hex_to_rgba("#d7b56d", intensity)}">
+              <strong>{h(row["species"]) if row["species"] else ""}</strong>
+              <span>{h(row["label"])}</span>
+              <small>{h(row["observations"])} obs</small>
+            </div>
+            """
+        )
+    return f'<div class="profile-week-grid">{"".join(cells)}</div>'
+
+
+def _expected_next_list(rows: list[dict[str, Any]]) -> str:
+    if not rows:
+        return '<p class="empty">No next-flight suggestions are available from the current station history.</p>'
+    items = []
+    for row in rows:
+        status = "already seen this year" if row["seen_this_year"] else "not yet seen this year"
+        items.append(
+            f"""
+            <li>
+              <span>{h(row["label"])}</span>
+              <small>{h(row["window"])} · {h(row["records"])} historical record{'s' if row["records"] != 1 else ''} · {h(status)}</small>
+            </li>
+            """
+        )
+    return f'<ul class="profile-species-list profile-watch-list">{"".join(items)}</ul>'
+
+
 def _profile_species_list(rows: list[dict[str, Any]], empty: str) -> str:
     if not rows:
         return f'<p class="empty">{h(empty)}</p>'
@@ -1035,10 +1072,26 @@ def _station_profile_page(station: Station, profile: dict[str, Any], color: str)
 
     <section>
       <div class="section-head">
+        <h2>Phenology calendar</h2>
+        <p>Weekly unique moth taxa for this station across all synced years. Darker weeks have richer station activity.</p>
+      </div>
+      <div class="profile-chart">{_profile_phenology_calendar(profile)}</div>
+    </section>
+
+    <section>
+      <div class="section-head">
         <h2>Species accumulation</h2>
         <p>Recent milestones in the running species list for this station.</p>
       </div>
       <div class="profile-chart">{_accumulation_bars(profile)}</div>
+    </section>
+
+    <section>
+      <div class="section-head">
+        <h2>Watch next</h2>
+        <p>Species historically recorded at this station in the 30 calendar days after the latest synced session.</p>
+      </div>
+      {_expected_next_list(profile["expected_next"])}
     </section>
 
     <section>
@@ -1793,6 +1846,33 @@ h2 {
   border: 1px solid var(--line);
   border-radius: 6px;
   background: var(--panel);
+  overflow-x: auto;
+}
+.profile-week-grid {
+  min-width: 760px;
+  display: grid;
+  grid-template-columns: repeat(13, minmax(54px, 1fr));
+  gap: 6px;
+}
+.profile-week {
+  min-height: 54px;
+  display: grid;
+  align-content: space-between;
+  padding: 6px;
+  border: 1px solid var(--line);
+  background: var(--cell-bg);
+}
+.profile-week strong {
+  color: var(--ink);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.95rem;
+}
+.profile-week span,
+.profile-week small {
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.66rem;
+  line-height: 1.05;
 }
 .month-bar {
   display: grid;
@@ -1887,6 +1967,9 @@ h2 {
 .profile-species-list small {
   color: var(--muted);
   font-size: 0.78rem;
+}
+.profile-watch-list li {
+  min-height: 92px;
 }
 .trend-grid {
   display: grid;

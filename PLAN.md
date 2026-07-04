@@ -79,6 +79,9 @@ with automatically generated insight cards and a Naturalist Feed.
      context fields, data-derived narrative, seasonal richness, accumulation
      milestones, signature species, station-unique species, and recent
      observations.
+   - Second phase: add weekly station phenology calendars and a "watch next"
+     list based on the station's historical records in the next 30 calendar
+     days.
 4. Community achievements
    - Reward discoveries, coverage milestones, family/taxon specialties,
      seasonal coverage, consistent uploads, strong IDs, and excellent photos.
