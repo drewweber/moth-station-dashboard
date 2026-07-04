@@ -744,6 +744,7 @@ def trend_summary(settings: Settings) -> dict[str, Any]:
         return {
             "phenology": [],
             "network_accumulation": [],
+            "monthly_overlays": [],
             "rank_abundance": [],
             "station_similarity": [],
         }
@@ -829,6 +830,30 @@ def trend_summary(settings: Settings) -> dict[str, Any]:
                 }
             )
 
+    by_year_month: dict[int, dict[int, set[int]]] = defaultdict(lambda: defaultdict(set))
+    for row in rows:
+        taxon_id = row.get("taxon_id")
+        sd = row.get("session_date")
+        if taxon_id and sd:
+            by_year_month[sd.year][sd.month].add(int(taxon_id))
+    monthly_overlays = []
+    for year, months in sorted(by_year_month.items()):
+        values = [
+            {
+                "month": month,
+                "label": date(2000, month, 1).strftime("%b"),
+                "species": len(months.get(month, set())),
+            }
+            for month in range(1, 13)
+        ]
+        monthly_overlays.append(
+            {
+                "year": year,
+                "total_species": len(set().union(*months.values())) if months else 0,
+                "months": values,
+            }
+        )
+
     rank_abundance = [
         {
             "rank": rank,
@@ -882,6 +907,7 @@ def trend_summary(settings: Settings) -> dict[str, Any]:
     return {
         "phenology": phenology,
         "network_accumulation": network_accumulation,
+        "monthly_overlays": monthly_overlays,
         "rank_abundance": rank_abundance,
         "station_similarity": station_similarity,
     }

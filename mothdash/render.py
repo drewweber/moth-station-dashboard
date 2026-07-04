@@ -773,6 +773,75 @@ def _network_accumulation(rows: list[dict[str, Any]]) -> str:
     """
 
 
+def _monthly_overlays(rows: list[dict[str, Any]]) -> str:
+    if not rows:
+        return '<p class="empty">Monthly overlays will appear after synced observations.</p>'
+    width = 720
+    height = 260
+    left = 46
+    right = 64
+    top = 20
+    bottom = 42
+    plot_width = width - left - right
+    plot_height = height - top - bottom
+    max_species = max(
+        [month["species"] for row in rows for month in row["months"]] + [1]
+    )
+    colors = ["#d7b56d", "#8aa77a", "#7fb3d5", "#cf7d92", "#9b8ed4"]
+    polylines = []
+    markers = []
+    labels = []
+    for index, row in enumerate(rows[-5:]):
+        color = colors[index % len(colors)]
+        points = []
+        for month in row["months"]:
+            x = left + ((month["month"] - 1) / 11 * plot_width)
+            y = top + plot_height - ((month["species"] / max_species) * plot_height if max_species else 0)
+            points.append((x, y, month))
+        point_attr = " ".join(f"{x:.1f},{y:.1f}" for x, y, _ in points)
+        polylines.append(
+            f'<polyline class="monthly-line" style="--series-color: {h(color)}" points="{point_attr}"></polyline>'
+        )
+        for x, y, month in points:
+            if month["species"] == 0:
+                continue
+            markers.append(
+                f"""
+                <circle class="monthly-point" style="--series-color: {h(color)}" cx="{x:.1f}" cy="{y:.1f}" r="3">
+                  <title>{h(row["year"])} {h(month["label"])} · {h(month["species"])} species</title>
+                </circle>
+                """
+            )
+        last_x, last_y, _ = points[-1]
+        labels.append(
+            f'<text class="monthly-label" style="--series-color: {h(color)}" x="{last_x + 8:.1f}" y="{last_y + 4:.1f}">{h(row["year"])}</text>'
+        )
+    month_labels = []
+    for month in [1, 4, 7, 10, 12]:
+        x = left + ((month - 1) / 11 * plot_width)
+        label = date(2000, month, 1).strftime("%b")
+        month_labels.append(
+            f'<text class="chart-label" x="{x:.1f}" y="{height - 12}" text-anchor="middle">{h(label)}</text>'
+        )
+    return f"""
+    <figure class="monthly-overlay-chart">
+      <svg viewBox="0 0 {width} {height}" role="img" aria-labelledby="monthly-overlay-title monthly-overlay-desc" preserveAspectRatio="none">
+        <title id="monthly-overlay-title">Monthly species richness by year</title>
+        <desc id="monthly-overlay-desc">One line per year showing unique moth taxa by month across the station network.</desc>
+        <line class="chart-axis" x1="{left}" y1="{top + plot_height}" x2="{left + plot_width}" y2="{top + plot_height}"></line>
+        <line class="chart-axis" x1="{left}" y1="{top}" x2="{left}" y2="{top + plot_height}"></line>
+        <line class="chart-grid" x1="{left}" y1="{top}" x2="{left + plot_width}" y2="{top}"></line>
+        <text class="chart-label" x="{left - 8}" y="{top + 4}" text-anchor="end">{h(max_species)}</text>
+        <text class="chart-label" x="{left - 8}" y="{top + plot_height + 4}" text-anchor="end">0</text>
+        {''.join(month_labels)}
+        {''.join(polylines)}
+        {''.join(markers)}
+        {''.join(labels)}
+      </svg>
+    </figure>
+    """
+
+
 def _rank_abundance(rows: list[dict[str, Any]]) -> str:
     if not rows:
         return '<p class="empty">Rank abundance will appear after synced observations.</p>'
@@ -851,6 +920,11 @@ def _trend_section(trends: dict[str, Any], stations: list[Station]) -> str:
         <h3>Network accumulation</h3>
         <p>Running species list across all tracked stations.</p>
         {_network_accumulation(trends["network_accumulation"])}
+      </article>
+      <article class="trend-panel">
+        <h3>Monthly overlays</h3>
+        <p>Unique moth taxa by month, with one line per synced year.</p>
+        {_monthly_overlays(trends["monthly_overlays"])}
       </article>
       <article class="trend-panel">
         <h3>Rank abundance</h3>
@@ -1901,6 +1975,34 @@ h2 {
 }
 .network-line-chart circle {
   stroke: var(--leaf);
+}
+.monthly-overlay-chart {
+  margin: 0;
+}
+.monthly-overlay-chart svg {
+  width: 100%;
+  height: clamp(230px, 32vw, 340px);
+  display: block;
+}
+.monthly-line {
+  fill: none;
+  stroke: var(--series-color);
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+.monthly-point {
+  fill: var(--panel);
+  stroke: var(--series-color);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+.monthly-label {
+  fill: var(--series-color);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.78rem;
+  font-weight: 650;
 }
 .rank-row {
   display: grid;
