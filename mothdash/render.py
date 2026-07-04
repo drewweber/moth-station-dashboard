@@ -722,19 +722,55 @@ def _network_accumulation(rows: list[dict[str, Any]]) -> str:
     if not rows:
         return '<p class="empty">Network accumulation will appear after synced observations.</p>'
     max_species = max(row["species"] for row in rows)
-    items = []
-    for row in rows[-32:]:
-        width = 100 * row["species"] / max_species if max_species else 0
-        items.append(
+    width = 720
+    height = 260
+    left = 52
+    right = 24
+    top = 22
+    bottom = 42
+    plot_width = width - left - right
+    plot_height = height - top - bottom
+    dates = [date.fromisoformat(row["date"]) for row in rows]
+    min_date = min(dates)
+    max_date = max(dates)
+    date_span = max(1, max_date.toordinal() - min_date.toordinal())
+
+    points = []
+    for row, row_date in zip(rows, dates):
+        x = left + ((row_date.toordinal() - min_date.toordinal()) / date_span * plot_width)
+        y = top + plot_height - ((row["species"] / max_species) * plot_height if max_species else 0)
+        points.append((x, y, row, row_date))
+    point_attr = " ".join(f"{x:.1f},{y:.1f}" for x, y, _, _ in points)
+    area_attr = f"{left},{top + plot_height:.1f} {point_attr} {left + plot_width:.1f},{top + plot_height:.1f}"
+    markers = []
+    for x, y, row, row_date in points:
+        markers.append(
             f"""
-            <div class="trend-bar-row">
-              <span>{h(row["date"])}</span>
-              <div><i style="width: {width:.1f}%"></i></div>
-              <strong>{h(row["species"])}</strong>
-            </div>
+            <circle cx="{x:.1f}" cy="{y:.1f}" r="3.1">
+              <title>{h(row_date)} · {h(row["species"])} species · +{h(row["new_species"])} new</title>
+            </circle>
             """
         )
-    return "".join(items)
+    latest = rows[-1]
+    return f"""
+    <figure class="accumulation-line-chart network-line-chart">
+      <svg viewBox="0 0 {width} {height}" role="img" aria-labelledby="network-accumulation-title network-accumulation-desc" preserveAspectRatio="none">
+        <title id="network-accumulation-title">Network species accumulation curve</title>
+        <desc id="network-accumulation-desc">Running network moth species count from {h(min_date)} to {h(max_date)}, ending at {h(latest["species"])} species.</desc>
+        <line class="chart-axis" x1="{left}" y1="{top + plot_height}" x2="{left + plot_width}" y2="{top + plot_height}"></line>
+        <line class="chart-axis" x1="{left}" y1="{top}" x2="{left}" y2="{top + plot_height}"></line>
+        <line class="chart-grid" x1="{left}" y1="{top}" x2="{left + plot_width}" y2="{top}"></line>
+        <text class="chart-label" x="{left - 8}" y="{top + 4}" text-anchor="end">{h(max_species)}</text>
+        <text class="chart-label" x="{left - 8}" y="{top + plot_height + 4}" text-anchor="end">0</text>
+        <text class="chart-label" x="{left}" y="{height - 12}" text-anchor="start">{h(min_date)}</text>
+        <text class="chart-label" x="{left + plot_width}" y="{height - 12}" text-anchor="end">{h(max_date)}</text>
+        <polygon class="accumulation-area" points="{area_attr}"></polygon>
+        <polyline class="accumulation-line" points="{point_attr}"></polyline>
+        {''.join(markers)}
+        <text class="chart-callout" x="{points[-1][0] - 8:.1f}" y="{points[-1][1] - 10:.1f}" text-anchor="end">{h(latest["species"])} species</text>
+      </svg>
+    </figure>
+    """
 
 
 def _rank_abundance(rows: list[dict[str, Any]]) -> str:
@@ -1851,30 +1887,20 @@ h2 {
   display: block;
   background: var(--amber);
 }
-.trend-bar-row {
-  display: grid;
-  grid-template-columns: 104px minmax(0, 1fr) 56px;
-  gap: 10px;
-  align-items: center;
-  min-height: 27px;
-}
-.trend-bar-row span,
-.trend-bar-row strong,
 .rank-row span {
   color: var(--muted);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.78rem;
   font-weight: 500;
 }
-.trend-bar-row div {
-  height: 12px;
-  border: 1px solid var(--line);
-  background: #191a12;
+.network-line-chart .accumulation-area {
+  fill: rgba(138, 167, 122, 0.14);
 }
-.trend-bar-row i {
-  display: block;
-  height: 100%;
-  background: var(--leaf);
+.network-line-chart .accumulation-line {
+  stroke: var(--leaf);
+}
+.network-line-chart circle {
+  stroke: var(--leaf);
 }
 .rank-row {
   display: grid;
