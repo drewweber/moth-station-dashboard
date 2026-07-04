@@ -977,6 +977,24 @@ def _trend_section(trends: dict[str, Any], stations: list[Station]) -> str:
     """
 
 
+SENSITIVE_LIVE_QUERY_KEYS = {
+    "lat",
+    "lng",
+    "radius",
+    "nelat",
+    "nelng",
+    "swlat",
+    "swlng",
+}
+
+
+def _public_live_query(settings: Settings, station: Station) -> tuple[dict[str, Any], bool]:
+    query = station.api_params(settings)
+    if any(key in query for key in SENSITIVE_LIVE_QUERY_KEYS):
+        return {}, False
+    return query, True
+
+
 def _snapshot_payload(settings: Settings, stations: list[Station], taxa: list[dict[str, Any]]) -> dict[str, Any]:
     known_taxa: dict[str, list[int]] = {}
     for taxon in taxa:
@@ -990,11 +1008,14 @@ def _snapshot_payload(settings: Settings, stations: list[Station], taxa: list[di
     for station in stations:
         if not station.enabled:
             continue
+        query, live_supported = _public_live_query(settings, station)
         enabled.append({
             "id": station.id,
             "name": station.name,
             "public_location": station.public_location,
-            "query": station.api_params(settings),
+            "query": query,
+            "live_supported": live_supported,
+            "live_note": "" if live_supported else "Live polling disabled for precise-location queries.",
             "known_taxa": sorted(known_taxa.get(station.id, [])),
         })
 
@@ -1300,6 +1321,7 @@ async function runCheck() {
   setStatus(`Checking iNaturalist at ${now.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`);
   let found = 0;
   for (const station of state.snapshot.stations) {
+    if (!station.live_supported) continue;
     const known = stationKnownSet(station);
     const data = await fetchStation(station, createdAfter);
     for (const obs of data.results || []) {
@@ -1359,7 +1381,7 @@ async function loadSnapshot() {
   if (!response.ok) throw new Error("Could not load live snapshot.");
   state.snapshot = await response.json();
   els.snapshotTime.textContent = state.snapshot.generated_at;
-  els.stationCount.textContent = state.snapshot.stations.length;
+  els.stationCount.textContent = state.snapshot.stations.filter((station) => station.live_supported).length;
 }
 
 async function init() {
