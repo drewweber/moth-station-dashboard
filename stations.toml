@@ -72,3 +72,15 @@ timezone = "America/New_York"
 public_location = "Dove Dr area, Tompkins County, NY"
 website = "https://www.inaturalist.org/people/iandavies"
 notes = "Moth observations by iandavies within 100 m of Dove Dr."
+
+[[stations]]
+id = "durfee-hill"
+name = "Durfee Hill"
+enabled = true
+place_id = 120907
+county_place_id = 1082
+state_place_id = 48
+timezone = "America/New_York"
+public_location = "Durfee Hill, Tompkins County, NY"
+website = "https://www.inaturalist.org/places/durfee-hill"
+notes = "Moth observations from the iNaturalist Durfee Hill place."
