@@ -1,0 +1,85 @@
+"""SQLite schema and helpers."""
+
+from __future__ import annotations
+
+from contextlib import contextmanager
+from pathlib import Path
+import sqlite3
+
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS stations (
+    id              TEXT PRIMARY KEY,
+    name            TEXT NOT NULL,
+    enabled         INTEGER NOT NULL,
+    timezone        TEXT,
+    county_place_id INTEGER,
+    state_place_id  INTEGER,
+    public_location TEXT,
+    notes           TEXT,
+    website         TEXT,
+    updated_at      TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS observations (
+    station_id    TEXT NOT NULL,
+    inat_obs_id   INTEGER NOT NULL,
+    uuid          TEXT,
+    observed_on   TEXT,
+    observed_at   TEXT,
+    created_at    TEXT,
+    updated_at    TEXT,
+    taxon_id      INTEGER,
+    taxon_name    TEXT,
+    common_name   TEXT,
+    rank          TEXT,
+    quality_grade TEXT,
+    observer_login TEXT,
+    observer_name TEXT,
+    latitude      REAL,
+    longitude     REAL,
+    url           TEXT,
+    photo_url     TEXT,
+    photo_attribution TEXT,
+    photo_license TEXT,
+    captive       INTEGER,
+    PRIMARY KEY (station_id, inat_obs_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_obs_station_taxon
+    ON observations(station_id, taxon_id);
+CREATE INDEX IF NOT EXISTS idx_obs_observed
+    ON observations(observed_on);
+CREATE INDEX IF NOT EXISTS idx_obs_created
+    ON observations(created_at);
+
+CREATE TABLE IF NOT EXISTS sync_log (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    station_id     TEXT NOT NULL,
+    synced_at      TEXT DEFAULT CURRENT_TIMESTAMP,
+    full_sync      INTEGER NOT NULL,
+    observations_added INTEGER NOT NULL,
+    observations_seen  INTEGER NOT NULL,
+    max_inat_obs_id INTEGER
+);
+"""
+
+
+@contextmanager
+def connect(path: Path):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(path, timeout=30)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=30000")
+    try:
+        yield conn
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def init_db(path: Path) -> None:
+    with connect(path) as conn:
+        conn.executescript(SCHEMA)
+

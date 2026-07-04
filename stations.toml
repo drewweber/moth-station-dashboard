@@ -1,0 +1,21 @@
+[settings]
+data_dir = "data"
+public_dir = "public"
+database = "data/mothdash.db"
+session_cutoff_hour = 12
+recent_limit = 50
+default_taxon_id = 47157
+default_without_taxon_id = 47224
+user_agent = "moth-station-dashboard/0.1"
+
+[[stations]]
+id = "kingfisher"
+name = "Kingfisher Hollow"
+enabled = true
+project_id = 249580
+county_place_id = 653
+state_place_id = 48
+timezone = "America/New_York"
+public_location = "Tioga County, NY"
+notes = "Seed station from the Kingfisher Hollow Biodiversity Survey."
+
