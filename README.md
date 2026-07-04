@@ -10,6 +10,8 @@ The MVP builds a static dashboard from configured station queries:
 - same-season spread, so synchronized flight pulses surface quickly
 - county/state iNaturalist first flags, first-among-tracked flags, and moths
   currently unique to one station
+- a `live.html` page where visitors can turn on a 10-minute iNaturalist check
+  for species new since the last build
 
 ## Setup
 
@@ -91,3 +93,5 @@ This is an intentionally small first pass:
   assigned to the previous evening's moth session
 - county/state first-record context is cached and refreshed gradually so
   scheduled builds do not make thousands of iNaturalist API calls at once
+- the live page runs in the visitor's browser, keeps live mode on locally for
+  two hours, and checks recent iNaturalist uploads for ten minutes after toggle

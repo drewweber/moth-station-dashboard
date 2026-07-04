@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import date
 from html import escape
 from pathlib import Path
@@ -382,6 +383,399 @@ def _comparison_table(rows: list[dict[str, Any]], stations: list[Station]) -> st
       <tbody>{''.join(body)}</tbody>
     </table>
     """
+
+
+def _snapshot_payload(settings: Settings, stations: list[Station], taxa: list[dict[str, Any]]) -> dict[str, Any]:
+    known_taxa: dict[str, list[int]] = {}
+    for taxon in taxa:
+        taxon_id = taxon.get("taxon_id")
+        if not taxon_id:
+            continue
+        for station_id in taxon["stations"]:
+            known_taxa.setdefault(station_id, []).append(int(taxon_id))
+
+    enabled = []
+    for station in stations:
+        if not station.enabled:
+            continue
+        enabled.append({
+            "id": station.id,
+            "name": station.name,
+            "public_location": station.public_location,
+            "query": station.api_params(settings),
+            "known_taxa": sorted(known_taxa.get(station.id, [])),
+        })
+
+    return {
+        "generated_at": generated_at(),
+        "api_base": "https://api.inaturalist.org/v1",
+        "live_mode_hours": 2,
+        "scan_minutes": 10,
+        "poll_seconds": 60,
+        "stations": enabled,
+    }
+
+
+LIVE_JS = r"""
+const state = {
+  snapshot: null,
+  timer: null,
+  stopAt: 0,
+  known: new Map(),
+  seenThisSession: new Set(),
+};
+
+const LIVE_KEY = "mothdash-live-until";
+const els = {};
+
+function fmtTime(ms) {
+  if (ms <= 0) return "off";
+  const total = Math.ceil(ms / 1000);
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
+}
+
+function setStatus(message) {
+  els.status.textContent = message;
+}
+
+function liveUntil() {
+  return Number(localStorage.getItem(LIVE_KEY) || 0);
+}
+
+function liveIsOn() {
+  return liveUntil() > Date.now();
+}
+
+function updateToggleState() {
+  const remaining = liveUntil() - Date.now();
+  els.toggle.checked = remaining > 0;
+  els.remaining.textContent = remaining > 0 ? fmtTime(remaining) : "off";
+}
+
+function stationKnownSet(station) {
+  if (!state.known.has(station.id)) {
+    state.known.set(station.id, new Set(station.known_taxa || []));
+  }
+  return state.known.get(station.id);
+}
+
+function observationLabel(obs) {
+  const taxon = obs.taxon || {};
+  const common = taxon.preferred_common_name;
+  const scientific = taxon.name;
+  if (common && scientific) return `${common} (${scientific})`;
+  return common || scientific || "Unknown taxon";
+}
+
+function obsPhoto(obs) {
+  const photo = (obs.photos || [])[0];
+  if (!photo || !photo.url) return "";
+  return photo.url.replace("square", "medium");
+}
+
+function addLogItem(item) {
+  const empty = els.log.querySelector(".empty");
+  if (empty) empty.remove();
+  const article = document.createElement("article");
+  article.className = "live-item";
+  const image = item.photo
+    ? `<img src="${item.photo}" alt="${item.label}" loading="lazy">`
+    : `<div class="live-placeholder" aria-hidden="true">sheet</div>`;
+  article.innerHTML = `
+    <div class="live-image">${image}</div>
+    <div>
+      <p>${item.stationName} · ${item.observedOn || "undated"}</p>
+      <h2><a href="${item.url}">${item.label}</a></h2>
+      <span>New to this station since the last dashboard build</span>
+    </div>
+  `;
+  els.log.prepend(article);
+}
+
+async function fetchStation(station, createdAfter) {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(station.query || {})) {
+    if (value === null || value === undefined || value === "") continue;
+    params.set(key, String(value));
+  }
+  params.set("created_d1", createdAfter);
+  params.set("order_by", "created_at");
+  params.set("order", "desc");
+  params.set("per_page", "50");
+  const url = `${state.snapshot.api_base}/observations?${params.toString()}`;
+  const response = await fetch(url, { headers: { accept: "application/json" } });
+  if (!response.ok) throw new Error(`${station.name}: iNaturalist returned ${response.status}`);
+  return response.json();
+}
+
+async function runCheck() {
+  if (!liveIsOn()) {
+    stopScan("Live mode expired.");
+    return;
+  }
+  const now = new Date();
+  const createdAfter = new Date(Date.now() - state.snapshot.live_mode_hours * 60 * 60 * 1000).toISOString();
+  setStatus(`Checking iNaturalist at ${now.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`);
+  let found = 0;
+  for (const station of state.snapshot.stations) {
+    const known = stationKnownSet(station);
+    const data = await fetchStation(station, createdAfter);
+    for (const obs of data.results || []) {
+      const taxon = obs.taxon || {};
+      const taxonId = taxon.id;
+      if (!taxonId || known.has(taxonId)) continue;
+      const key = `${station.id}:${taxonId}`;
+      if (state.seenThisSession.has(key)) continue;
+      state.seenThisSession.add(key);
+      known.add(taxonId);
+      found += 1;
+      addLogItem({
+        stationName: station.name,
+        label: observationLabel(obs),
+        observedOn: obs.observed_on,
+        url: obs.uri || `https://www.inaturalist.org/observations/${obs.id}`,
+        photo: obsPhoto(obs),
+      });
+    }
+  }
+  els.lastCheck.textContent = now.toLocaleString();
+  setStatus(found ? `Found ${found} new station species.` : "No new station species found in this check.");
+}
+
+function stopScan(message) {
+  if (state.timer) window.clearInterval(state.timer);
+  state.timer = null;
+  state.stopAt = 0;
+  if (message) setStatus(message);
+}
+
+async function startScan() {
+  if (!state.snapshot) return;
+  stopScan();
+  state.stopAt = Date.now() + state.snapshot.scan_minutes * 60 * 1000;
+  setStatus("Live scan started.");
+  try {
+    await runCheck();
+  } catch (error) {
+    setStatus(error.message || "Live check failed.");
+  }
+  state.timer = window.setInterval(async () => {
+    if (Date.now() >= state.stopAt) {
+      stopScan("10-minute scan complete. Toggle live mode again to start another scan.");
+      return;
+    }
+    try {
+      await runCheck();
+    } catch (error) {
+      setStatus(error.message || "Live check failed.");
+    }
+  }, state.snapshot.poll_seconds * 1000);
+}
+
+async function loadSnapshot() {
+  const response = await fetch("live-snapshot.json", { cache: "no-store" });
+  if (!response.ok) throw new Error("Could not load live snapshot.");
+  state.snapshot = await response.json();
+  els.snapshotTime.textContent = state.snapshot.generated_at;
+  els.stationCount.textContent = state.snapshot.stations.length;
+}
+
+async function init() {
+  els.toggle = document.querySelector("#live-toggle");
+  els.status = document.querySelector("#live-status");
+  els.remaining = document.querySelector("#live-remaining");
+  els.lastCheck = document.querySelector("#last-check");
+  els.snapshotTime = document.querySelector("#snapshot-time");
+  els.stationCount = document.querySelector("#station-count");
+  els.log = document.querySelector("#live-log");
+
+  await loadSnapshot();
+  updateToggleState();
+  window.setInterval(updateToggleState, 30000);
+
+  els.toggle.addEventListener("change", async () => {
+    if (els.toggle.checked) {
+      const until = Date.now() + state.snapshot.live_mode_hours * 60 * 60 * 1000;
+      localStorage.setItem(LIVE_KEY, String(until));
+      updateToggleState();
+      await startScan();
+    } else {
+      localStorage.removeItem(LIVE_KEY);
+      updateToggleState();
+      stopScan("Live mode off.");
+    }
+  });
+
+  if (liveIsOn()) {
+    await startScan();
+  } else {
+    setStatus("Live mode is off.");
+  }
+}
+
+init().catch((error) => {
+  setStatus(error.message || "Live page could not start.");
+});
+"""
+
+
+def _live_page() -> str:
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Live species log · Moth Station Dashboard</title>
+  <meta name="description" content="Run a short live check for moth species newly appearing at tracked iNaturalist stations.">
+  <meta name="theme-color" content="#151611">
+  <style>{CSS}
+  .live-shell {{
+    width: min(980px, calc(100% - 32px));
+    margin: 0 auto;
+    padding: 42px 0 60px;
+  }}
+  .live-panel {{
+    margin-top: 26px;
+    padding: 18px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+  }}
+  .toggle-row {{
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    flex-wrap: wrap;
+  }}
+  .switch {{
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+  }}
+  .switch input {{
+    width: 48px;
+    height: 28px;
+    accent-color: var(--amber);
+  }}
+  .live-meta {{
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 1px;
+    margin-top: 18px;
+    background: var(--line);
+    border: 1px solid var(--line);
+  }}
+  .live-meta div {{
+    padding: 12px;
+    background: var(--panel-2);
+  }}
+  .live-meta strong {{
+    display: block;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+  }}
+  .live-meta span {{
+    color: var(--muted);
+    font-size: 0.82rem;
+  }}
+  .live-log {{
+    display: grid;
+    gap: 10px;
+    margin-top: 18px;
+  }}
+  .live-item {{
+    display: grid;
+    grid-template-columns: 120px minmax(0, 1fr);
+    gap: 14px;
+    padding: 12px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+  }}
+  .live-image img, .live-placeholder {{
+    width: 120px;
+    height: 120px;
+    object-fit: cover;
+    background: var(--panel-2);
+  }}
+  .live-placeholder {{
+    display: grid;
+    place-items: center;
+    color: var(--faint);
+  }}
+  .live-item p, .live-item span {{
+    margin: 0;
+    color: var(--muted);
+  }}
+  .live-item h2 {{
+    margin: 8px 0;
+    font-size: 1.25rem;
+  }}
+  @media (max-width: 620px) {{
+    .live-item {{
+      grid-template-columns: 88px minmax(0, 1fr);
+    }}
+    .live-image img, .live-placeholder {{
+      width: 88px;
+      height: 88px;
+    }}
+  }}
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#live-main">Skip to live log</a>
+  <header>
+    <div class="topbar">
+      <a class="brand" href="index.html"><span class="brand-mark" aria-hidden="true"></span><span>Moth stations</span></a>
+      <nav aria-label="Live page navigation">
+        <a href="index.html">Dashboard</a>
+        <a href="#live-log">Log</a>
+      </nav>
+    </div>
+  </header>
+  <main id="live-main" class="live-shell">
+    <p class="eyebrow">10-minute iNaturalist check</p>
+    <h1>Live species log.</h1>
+    <p class="subhead">Turn on live mode to check recent iNaturalist uploads for moth species not present in the last dashboard build. Live mode stays available in this browser for 2 hours.</p>
+
+    <section class="live-panel" aria-labelledby="live-controls">
+      <div class="toggle-row">
+        <div>
+          <h2 id="live-controls">Live mode</h2>
+          <p id="live-status">Preparing live check.</p>
+        </div>
+        <label class="switch">
+          <input id="live-toggle" type="checkbox">
+          <span>Run live checks</span>
+        </label>
+      </div>
+      <div class="live-meta">
+        <div><strong id="live-remaining">off</strong><span>live mode remaining</span></div>
+        <div><strong>10 min</strong><span>scan duration</span></div>
+        <div><strong id="station-count">0</strong><span>stations checked</span></div>
+        <div><strong id="last-check">not yet</strong><span>last check</span></div>
+        <div><strong id="snapshot-time">loading</strong><span>snapshot generated</span></div>
+      </div>
+    </section>
+
+    <section aria-labelledby="live-log-title">
+      <div class="section-head">
+        <h2 id="live-log-title">New species log</h2>
+        <p>The page compares recent uploads to the species known at the last static build. Results are provisional until the regular dashboard sync runs.</p>
+      </div>
+      <div id="live-log" class="live-log">
+        <p class="empty">No live results yet. Toggle live mode to start a 10-minute scan.</p>
+      </div>
+    </section>
+  </main>
+  <script>{LIVE_JS}</script>
+</body>
+</html>
+"""
 
 
 CSS = """
@@ -906,6 +1300,7 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
         <a href="#records">Records</a>
         <a href="#unique">Unique</a>
         <a href="#species">Species</a>
+        <a href="live.html">Live</a>
       </nav>
     </div>
     <div class="hero">
@@ -975,6 +1370,15 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
 </html>
 """
     output.write_text(html, encoding="utf-8")
+    snapshot = _snapshot_payload(settings, stations, taxa)
+    (settings.public_dir / "live-snapshot.json").write_text(
+        json.dumps(snapshot, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    (settings.public_dir / "live.html").write_text(
+        _live_page(),
+        encoding="utf-8",
+    )
     if settings.custom_domain:
         (settings.public_dir / "CNAME").write_text(
             f"{settings.custom_domain.strip()}\n",
