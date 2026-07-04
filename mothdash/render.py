@@ -11,6 +11,7 @@ from typing import Any
 from .analysis import (
     active_year,
     daily_species_counts,
+    dashboard_insights,
     first_of_season,
     generated_at,
     hero_photos,
@@ -179,6 +180,25 @@ def _station_cards(summaries: list[dict[str, Any]], stations: list[Station]) -> 
                 <span><strong>{h(f"{observations:,}")}</strong> observations</span>
               </div>
               <p class="latest">Latest session: {h(latest)}</p>
+            </article>
+            """
+        )
+    return "\n".join(cards)
+
+
+def _insight_cards(insights: list[dict[str, Any]]) -> str:
+    if not insights:
+        return '<p class="empty">Insight cards will appear after observations are synced.</p>'
+    cards = []
+    for index, insight in enumerate(insights[:12], start=1):
+        cards.append(
+            f"""
+            <article class="insight-card">
+              <div class="insight-index">{index:02d}</div>
+              <p>{h(insight["category"])}</p>
+              <h3>{h(insight["title"])}</h3>
+              <span>{h(insight["body"])}</span>
+              <small>{h(insight.get("meta"))}</small>
             </article>
             """
         )
@@ -1210,6 +1230,60 @@ h2 {
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: 10px;
 }
+.insight-grid {
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  gap: 10px;
+}
+.insight-card {
+  min-height: 220px;
+  grid-column: span 4;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: linear-gradient(135deg, rgba(215, 181, 109, 0.08), rgba(255, 255, 255, 0.015) 46%), var(--panel);
+}
+.insight-card:nth-child(1),
+.insight-card:nth-child(2) {
+  grid-column: span 6;
+}
+.insight-card p,
+.insight-card small {
+  margin: 0;
+  color: var(--amber);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.76rem;
+}
+.insight-card h3 {
+  margin: 22px 0 14px;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(1.2rem, 2vw, 1.75rem);
+  font-weight: 500;
+  line-height: 1.05;
+  text-wrap: balance;
+}
+.insight-card span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.93rem;
+  text-wrap: pretty;
+}
+.insight-card small {
+  color: var(--faint);
+  padding-top: 20px;
+}
+.insight-index {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  color: rgba(243, 234, 215, 0.24);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 1.2rem;
+}
 .station-card {
   min-height: 210px;
   display: flex;
@@ -1579,6 +1653,14 @@ footer div {
   .section-head p {
     margin-top: 8px;
   }
+  .insight-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .insight-card,
+  .insight-card:nth-child(1),
+  .insight-card:nth-child(2) {
+    grid-column: span 1;
+  }
 }
 @media (max-width: 620px) {
   .topbar {
@@ -1594,6 +1676,9 @@ footer div {
   }
   .hero-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .insight-grid {
+    grid-template-columns: 1fr;
   }
   .photo-rail {
     grid-template-columns: repeat(2, 1fr);
@@ -1626,6 +1711,7 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
     all_time_calendar = daily_species_counts(settings)
     records = record_highlights(settings)
     uniques = unique_station_taxa(settings)
+    insights = dashboard_insights(settings)
 
     html = f"""<!doctype html>
 <html lang="en">
@@ -1644,6 +1730,7 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
       <a class="brand" href="#main"><span class="brand-mark" aria-hidden="true"></span><span>Moth stations</span></a>
       <nav aria-label="Dashboard sections">
         <a href="#stations">Stations</a>
+        <a href="#feed">Feed</a>
         <a href="#recent">Recent</a>
         <a href="#pulses">Firsts</a>
         <a href="#records">Records</a>
@@ -1664,6 +1751,14 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
     </div>
   </header>
   <main id="main" class="site-shell">
+    <section id="feed">
+      <div class="section-head">
+        <h2>Naturalist feed</h2>
+        <p>Build-generated headlines from the station network, meant to surface discoveries, timing shifts, and shared flight pulses before the tables.</p>
+      </div>
+      <div class="insight-grid">{_insight_cards(insights)}</div>
+    </section>
+
     <section id="stations">
       <div class="section-head">
         <h2>Station signals</h2>
@@ -1735,6 +1830,10 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
 </html>
 """
     output.write_text(html, encoding="utf-8")
+    (settings.public_dir / "insights.json").write_text(
+        json.dumps(insights, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
     snapshot = _snapshot_payload(settings, stations, taxa)
     (settings.public_dir / "live-snapshot.json").write_text(
         json.dumps(snapshot, indent=2, sort_keys=True),

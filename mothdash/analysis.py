@@ -389,6 +389,229 @@ def daily_species_counts(settings: Settings, year: int | None = None) -> list[di
     return sorted(results, key=lambda item: item["sort_key"])
 
 
+def _insight(
+    category: str,
+    title: str,
+    body: str,
+    meta: str = "",
+    score: int = 0,
+) -> dict[str, Any]:
+    return {
+        "category": category,
+        "title": title,
+        "body": body,
+        "meta": meta,
+        "score": score,
+    }
+
+
+def dashboard_insights(settings: Settings, limit: int = 16) -> list[dict[str, Any]]:
+    """Build deterministic naturalist-feed stories from the current dataset."""
+    rows = load_rows(settings)
+    if not rows:
+        return []
+
+    insights: list[dict[str, Any]] = []
+    session_dates = [row["session_date"] for row in rows if row.get("session_date")]
+    latest = max(session_dates) if session_dates else None
+    year = active_year(settings)
+
+    if latest:
+        latest_firsts = []
+        first_by_station_taxon: dict[tuple[str, int], dict[str, Any]] = {}
+        for row in rows:
+            taxon_id = row.get("taxon_id")
+            sd = row.get("session_date")
+            if not taxon_id or not sd:
+                continue
+            key = (row["station_id"], int(taxon_id))
+            current = first_by_station_taxon.get(key)
+            if current is None or sd < current["date"]:
+                first_by_station_taxon[key] = {
+                    "date": sd,
+                    "label": row["label"],
+                    "station_name": row["station_name"],
+                }
+        for item in first_by_station_taxon.values():
+            if item["date"] == latest:
+                latest_firsts.append(item)
+        latest_firsts = sorted(
+            latest_firsts,
+            key=lambda item: (item["station_name"], item["label"]),
+        )
+        for item in latest_firsts[:4]:
+            insights.append(
+                _insight(
+                    "New station record",
+                    f"{item['station_name']} added {item['label']}",
+                    "This species appeared in that station's tracked moth list for the first time on the latest session.",
+                    latest.isoformat(),
+                    92,
+                )
+            )
+
+        week_start = latest - timedelta(days=6)
+        weekly: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            sd = row.get("session_date")
+            taxon_id = row.get("taxon_id")
+            if not sd or not taxon_id or sd < week_start or sd > latest:
+                continue
+            item = weekly.setdefault(
+                row["station_id"],
+                {
+                    "station_name": row["station_name"],
+                    "observations": 0,
+                    "taxa": set(),
+                },
+            )
+            item["observations"] += 1
+            item["taxa"].add(int(taxon_id))
+        if weekly:
+            active = max(
+                weekly.values(),
+                key=lambda item: (len(item["taxa"]), item["observations"]),
+            )
+            insights.append(
+                _insight(
+                    "This week",
+                    f"{active['station_name']} is carrying the strongest weekly signal",
+                    f"{len(active['taxa'])} moth taxa and {active['observations']} observations in the latest seven-night window.",
+                    f"{week_start.isoformat()} to {latest.isoformat()}",
+                    82,
+                )
+            )
+
+    if year:
+        for pulse in first_of_season(settings, year)[:4]:
+            if pulse["spread_days"] > 2:
+                continue
+            names = [
+                station["station_name"]
+                for station in pulse["stations"].values()
+            ]
+            insights.append(
+                _insight(
+                    "Synchronized flight",
+                    f"{pulse['label']} moved through {pulse['station_count']} stations together",
+                    f"First-of-season dates were within {pulse['spread_days']} days across {', '.join(sorted(names))}.",
+                    pulse["pulse"],
+                    88 - pulse["spread_days"],
+                )
+            )
+
+        current_firsts: dict[int, date] = {}
+        historical_firsts: dict[int, date] = {}
+        labels: dict[int, str] = {}
+        for row in rows:
+            taxon_id = row.get("taxon_id")
+            sd = row.get("session_date")
+            if not taxon_id or not sd:
+                continue
+            taxon_id = int(taxon_id)
+            labels[taxon_id] = row["label"]
+            if sd.year == year:
+                if taxon_id not in current_firsts or sd < current_firsts[taxon_id]:
+                    current_firsts[taxon_id] = sd
+            elif sd.year < year:
+                if taxon_id not in historical_firsts or sd.timetuple().tm_yday < historical_firsts[taxon_id].timetuple().tm_yday:
+                    historical_firsts[taxon_id] = sd
+        early = []
+        for taxon_id, current in current_firsts.items():
+            historical = historical_firsts.get(taxon_id)
+            if not historical:
+                continue
+            delta = historical.timetuple().tm_yday - current.timetuple().tm_yday
+            if 7 <= delta <= 60:
+                early.append((delta, labels[taxon_id], current, historical))
+        for delta, label, current, historical in sorted(early, reverse=True)[:3]:
+            insights.append(
+                _insight(
+                    "Early emergence",
+                    f"{label} is running {delta} days earlier than its prior earliest date",
+                    f"This year's first tracked session was {current.isoformat()}; the previous earliest was {historical.isoformat()}.",
+                    str(year),
+                    84 + min(delta, 30),
+                )
+            )
+
+        calendar = daily_species_counts(settings, year)
+        if calendar:
+            peak = max(calendar, key=lambda item: item["total"])
+            insights.append(
+                _insight(
+                    "Peak night",
+                    f"{peak['label']} is the richest night of {year} so far",
+                    f"The network recorded {peak['total']} unique moth taxa across {peak['active_stations']} active station{'s' if peak['active_stations'] != 1 else ''}.",
+                    "unique species across stations",
+                    76,
+                )
+            )
+
+    taxa = station_taxa(settings)
+    shared = [taxon for taxon in taxa if taxon["station_count"] > 1]
+    if shared:
+        top = max(shared, key=lambda item: (item["station_count"], item["total_count"]))
+        insights.append(
+            _insight(
+                "Shared fauna",
+                f"{top['label']} is the most widely shared moth in the network",
+                f"It has appeared at {top['station_count']} tracked stations, with {top['total_count']} total observations.",
+                "all time",
+                78,
+            )
+        )
+
+    longest = None
+    for taxon in taxa:
+        for station in taxon["stations"].values():
+            first = station.get("first")
+            latest_seen = station.get("latest")
+            if not first or not latest_seen:
+                continue
+            span = (latest_seen - first).days
+            if longest is None or span > longest[0]:
+                longest = (span, taxon["label"], station["station_name"], first, latest_seen)
+    if longest and longest[0] > 0:
+        span, label, station_name, first, latest_seen = longest
+        insights.append(
+            _insight(
+                "Long flight period",
+                f"{label} has the longest tracked flight span",
+                f"{station_name} has records from {first.isoformat()} through {latest_seen.isoformat()}, a {span}-day span.",
+                "all time",
+                70,
+            )
+        )
+
+    if latest:
+        recent_unique = [
+            item for item in unique_station_taxa(settings)
+            if item.get("latest") and (latest - item["latest"]).days <= 14
+        ]
+        for item in recent_unique[:3]:
+            insights.append(
+                _insight(
+                    "Unique station species",
+                    f"{item['label']} is currently unique to {item['station_name']}",
+                    f"This species has {item['count']} tracked observation{'s' if item['count'] != 1 else ''} and has not appeared at another station yet.",
+                    f"latest {item['latest'].isoformat()}",
+                    68,
+                )
+            )
+
+    seen_titles = set()
+    deduped = []
+    for insight in sorted(insights, key=lambda item: (-item["score"], item["title"])):
+        if insight["title"] in seen_titles:
+            continue
+        seen_titles.add(insight["title"])
+        deduped.append(insight)
+        if len(deduped) >= limit:
+            break
+    return deduped
+
+
 def record_highlights(settings: Settings) -> list[dict[str, Any]]:
     highlights = []
     for taxon in station_taxa(settings):
