@@ -11,9 +11,11 @@ from .analysis import (
     active_year,
     first_of_season,
     generated_at,
+    record_highlights,
     recent_observations,
     station_summaries,
     station_taxa,
+    unique_station_taxa,
 )
 from .config import Settings, Station
 from .db import init_db
@@ -45,16 +47,21 @@ def _hero_metrics(
     taxa: list[dict[str, Any]],
     pulses: list[dict[str, Any]],
     stations: list[Station],
+    records: list[dict[str, Any]],
 ) -> str:
     total_observations = sum(item["observations"] for item in summaries)
     latest_sessions = [item["latest_session"] for item in summaries if item.get("latest_session")]
     latest = max(latest_sessions) if latest_sessions else "waiting"
+    notable = len([
+        item for item in records
+        if item.get("is_county_first") or item.get("is_state_first")
+    ])
     return "".join(
         [
             _metric("enabled stations", len([s for s in stations if s.enabled])),
             _metric("moth observations", f"{total_observations:,}"),
             _metric("unique taxa", f"{len(taxa):,}"),
-            _metric("shared firsts", f"{len(pulses):,}"),
+            _metric("iNat firsts", f"{notable:,}"),
             _metric("latest session", latest),
         ]
     )
@@ -202,6 +209,89 @@ def _pulse_cards(rows: list[dict[str, Any]]) -> str:
     return "".join(cards)
 
 
+def _flag_list(flags: list[str]) -> str:
+    return "".join(f'<span class="flag">{h(flag)}</span>' for flag in flags)
+
+
+def _record_cards(rows: list[dict[str, Any]]) -> str:
+    if not rows:
+        return '<p class="empty">No county, state, or tracked-station firsts are cached yet. Run a sync to refresh record context.</p>'
+    cards = []
+    for row in rows[:12]:
+        cards.append(
+            f"""
+            <article class="record-card">
+              <div>{_flag_list(row["flags"])}</div>
+              <h3>{h(row["label"])}</h3>
+              <p>{h(row["station_name"])} · {h(row["first"])}</p>
+            </article>
+            """
+        )
+    return "".join(cards)
+
+
+def _record_table(rows: list[dict[str, Any]]) -> str:
+    if not rows:
+        return '<p class="empty">No first-record highlights are available yet.</p>'
+    body = []
+    for row in rows[:120]:
+        body.append(
+            f"""
+            <tr>
+              <td>{h(row["label"])}</td>
+              <td>{h(row["station_name"])}</td>
+              <td>{h(row["first"])}</td>
+              <td>{_flag_list(row["flags"])}</td>
+            </tr>
+            """
+        )
+    return f"""
+    <table>
+      <thead>
+        <tr>
+          <th scope="col">Species</th>
+          <th scope="col">Station</th>
+          <th scope="col">Station first</th>
+          <th scope="col">Flags</th>
+        </tr>
+      </thead>
+      <tbody>{''.join(body)}</tbody>
+    </table>
+    """
+
+
+def _unique_station_table(rows: list[dict[str, Any]]) -> str:
+    if not rows:
+        return '<p class="empty">No station-unique moths are available yet.</p>'
+    body = []
+    for row in rows[:160]:
+        body.append(
+            f"""
+            <tr>
+              <td>{h(row["label"])}</td>
+              <td>{h(row["station_name"])}</td>
+              <td>{h(row["count"])}</td>
+              <td>{h(row["first"])}</td>
+              <td>{h(row["latest"])}</td>
+            </tr>
+            """
+        )
+    return f"""
+    <table>
+      <thead>
+        <tr>
+          <th scope="col">Species</th>
+          <th scope="col">Only station</th>
+          <th scope="col">Obs</th>
+          <th scope="col">First</th>
+          <th scope="col">Latest</th>
+        </tr>
+      </thead>
+      <tbody>{''.join(body)}</tbody>
+    </table>
+    """
+
+
 def _pulse_table(rows: list[dict[str, Any]], stations: list[Station]) -> str:
     if not rows:
         return '<p class="empty">No multi-station first-of-season records yet. Add another station and sync observations to compare seasonal timing.</p>'
@@ -257,9 +347,17 @@ def _comparison_table(rows: list[dict[str, Any]], stations: list[Station]) -> st
         for station in enabled:
             entry = row["stations"].get(station.id)
             if entry:
+                flags = []
+                if entry.get("is_state_first"):
+                    flags.append("state")
+                if entry.get("is_county_first"):
+                    flags.append("county")
+                if entry.get("first_among_tracked"):
+                    flags.append("tracked")
+                flag_html = _flag_list(flags)
                 cells.append(
                     f"<td><strong>{h(entry['count'])}</strong><br>"
-                    f"<span>{h(entry['first'])}</span></td>"
+                    f"<span>{h(entry['first'])}</span>{flag_html}</td>"
                 )
             else:
                 cells.append("<td></td>")
@@ -624,6 +722,42 @@ h2 {
   color: var(--muted);
   font-size: 0.82rem;
 }
+.record-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(270px, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.record-card {
+  min-height: 150px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 16px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.record-card h3 {
+  margin: 14px 0;
+  font-size: 1.08rem;
+  line-height: 1.2;
+}
+.record-card p {
+  margin: 0;
+  color: var(--muted);
+}
+.flag {
+  display: inline-block;
+  margin: 0 5px 5px 0;
+  padding: 2px 7px;
+  color: #1b170f;
+  background: var(--amber);
+  border-radius: 4px;
+  font-size: 0.74rem;
+  line-height: 1.4;
+  white-space: nowrap;
+}
 .table-wrap {
   overflow-x: auto;
   border: 1px solid var(--line);
@@ -747,6 +881,8 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
     year = active_year(settings)
     pulses = first_of_season(settings, year)
     taxa = station_taxa(settings)
+    records = record_highlights(settings)
+    uniques = unique_station_taxa(settings)
 
     html = f"""<!doctype html>
 <html lang="en">
@@ -767,6 +903,8 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
         <a href="#stations">Stations</a>
         <a href="#recent">Recent</a>
         <a href="#pulses">Firsts</a>
+        <a href="#records">Records</a>
+        <a href="#unique">Unique</a>
         <a href="#species">Species</a>
       </nav>
     </div>
@@ -777,7 +915,7 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
         <p class="subhead">A working dashboard for seeing which moth stations are active, what just arrived, and whether first-of-season records are breaking across the region on the same nights.</p>
       </div>
       <div class="photo-rail" aria-label="Recent moth photos">{_photo_strip(recent)}</div>
-      <div class="hero-metrics">{_hero_metrics(summaries, taxa, pulses, stations)}</div>
+      <div class="hero-metrics">{_hero_metrics(summaries, taxa, pulses, stations, records)}</div>
     </div>
   </header>
   <main id="main" class="site-shell">
@@ -807,10 +945,27 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
       <div class="table-wrap">{_pulse_table(pulses, stations)}</div>
     </section>
 
+    <section id="records">
+      <div class="section-head">
+        <h2>Record flags</h2>
+        <p>County and state labels are iNaturalist firsts. Tracked labels mark the first station in this dashboard to record that moth.</p>
+      </div>
+      <div class="record-grid">{_record_cards(records)}</div>
+      <div class="table-wrap">{_record_table(records)}</div>
+    </section>
+
+    <section id="unique">
+      <div class="section-head">
+        <h2>Moths unique to one station</h2>
+        <p>These species currently appear at only one tracked station, which can reflect habitat, effort, observer focus, or upload timing.</p>
+      </div>
+      <div class="table-wrap">{_unique_station_table(uniques)}</div>
+    </section>
+
     <section id="species">
       <div class="section-head">
         <h2>All-time station comparison</h2>
-        <p>Each cell shows the observation count and first session date for that species at that station.</p>
+        <p>Each cell shows the observation count, first session date, and any county, state, or tracked-station first flags.</p>
       </div>
       <div class="table-wrap">{_comparison_table(taxa, stations)}</div>
     </section>

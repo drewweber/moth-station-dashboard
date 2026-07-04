@@ -6,7 +6,7 @@ from typing import Any
 
 from .config import Settings, Station
 from .db import connect, init_db
-from .inat_api import iter_observations
+from .inat_api import first_observed_date, iter_observations
 
 
 SPECIES_RANKS = {
@@ -171,10 +171,121 @@ def sync_station(settings: Settings, station: Station, full: bool = False) -> tu
     return added, seen
 
 
+def _station_first_taxa(settings: Settings, station: Station) -> list[dict[str, Any]]:
+    with connect(settings.database) as conn:
+        rows = conn.execute(
+            """
+            SELECT taxon_id,
+                   MAX(taxon_name) AS taxon_name,
+                   MAX(common_name) AS common_name,
+                   MIN(observed_on) AS station_first_date
+            FROM observations
+            WHERE station_id = ?
+              AND taxon_id IS NOT NULL
+              AND observed_on IS NOT NULL
+            GROUP BY taxon_id
+            ORDER BY station_first_date
+            """,
+            (station.id,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def refresh_station_stats(settings: Settings, stations: list[Station]) -> None:
+    """Refresh cached county/state first dates for station taxa.
+
+    These are iNaturalist firsts, not absolute historical records.
+    """
+    remaining = settings.stats_refresh_limit
+    for station in stations:
+        if remaining <= 0:
+            print("[stats] refresh budget exhausted")
+            return
+        if not station.enabled:
+            continue
+        if not station.county_place_id and not station.state_place_id:
+            continue
+
+        taxa = _station_first_taxa(settings, station)
+        refreshed = 0
+        for row in taxa:
+            taxon_id = row["taxon_id"]
+            station_first = row["station_first_date"]
+            with connect(settings.database) as conn:
+                cached = conn.execute(
+                    """
+                    SELECT taxon_id FROM station_taxon_stats
+                    WHERE station_id = ?
+                      AND taxon_id = ?
+                      AND station_first_date = ?
+                      AND county_place_id IS ?
+                      AND state_place_id IS ?
+                      AND cached_at > datetime('now', '-30 days')
+                    """,
+                    (
+                        station.id,
+                        taxon_id,
+                        station_first,
+                        station.county_place_id,
+                        station.state_place_id,
+                    ),
+                ).fetchone()
+            if cached:
+                continue
+            if remaining <= 0:
+                break
+
+            county_first = None
+            state_first = None
+            if station.county_place_id:
+                county_first = first_observed_date(
+                    settings.user_agent,
+                    taxon_id=taxon_id,
+                    place_id=station.county_place_id,
+                )
+            if station.state_place_id:
+                state_first = first_observed_date(
+                    settings.user_agent,
+                    taxon_id=taxon_id,
+                    place_id=station.state_place_id,
+                )
+
+            is_county_first = bool(
+                station_first and county_first and station_first <= county_first
+            )
+            is_state_first = bool(
+                station_first and state_first and station_first <= state_first
+            )
+            with connect(settings.database) as conn:
+                conn.execute(
+                    """
+                    INSERT OR REPLACE INTO station_taxon_stats (
+                        station_id, taxon_id, county_place_id, state_place_id,
+                        station_first_date, county_first_date, state_first_date,
+                        is_county_first, is_state_first, cached_at
+                    ) VALUES (?,?,?,?,?,?,?,?,?, CURRENT_TIMESTAMP)
+                    """,
+                    (
+                        station.id,
+                        taxon_id,
+                        station.county_place_id,
+                        station.state_place_id,
+                        station_first,
+                        county_first,
+                        state_first,
+                        int(is_county_first),
+                        int(is_state_first),
+                    ),
+                )
+            refreshed += 1
+            remaining -= 1
+        print(f"[{station.id}] refreshed first-record stats for {refreshed} taxa")
+
+
 def sync_all(settings: Settings, stations: list[Station], full: bool = False) -> None:
     for station in stations:
         if not station.enabled:
             continue
         added, seen = sync_station(settings, station, full=full)
         print(f"[{station.id}] seen {seen}, stored {added}")
-
+    refresh_station_stats(settings, stations)

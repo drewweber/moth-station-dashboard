@@ -197,6 +197,12 @@ def first_of_season(settings: Settings, year: int | None = None) -> list[dict[st
 
 def station_taxa(settings: Settings) -> list[dict[str, Any]]:
     rows = load_rows(settings)
+    with connect(settings.database) as conn:
+        stats_rows = conn.execute("SELECT * FROM station_taxon_stats").fetchall()
+    stats = {
+        (row["station_id"], row["taxon_id"]): dict(row)
+        for row in stats_rows
+    }
     grouped: dict[tuple[int, str], dict[str, Any]] = {}
     for row in rows:
         taxon_id = row.get("taxon_id")
@@ -225,6 +231,12 @@ def station_taxa(settings: Settings) -> list[dict[str, Any]]:
 
     by_taxon: dict[int, dict[str, Any]] = defaultdict(lambda: {"stations": {}})
     for item in grouped.values():
+        stat = stats.get((item["station_id"], item["taxon_id"]), {})
+        item["is_county_first"] = bool(stat.get("is_county_first"))
+        item["is_state_first"] = bool(stat.get("is_state_first"))
+        item["county_first_date"] = parse_date(stat.get("county_first_date"))
+        item["state_first_date"] = parse_date(stat.get("state_first_date"))
+        item["first_among_tracked"] = False
         taxon = by_taxon[item["taxon_id"]]
         taxon["taxon_id"] = item["taxon_id"]
         taxon["label"] = item["label"]
@@ -232,12 +244,79 @@ def station_taxa(settings: Settings) -> list[dict[str, Any]]:
 
     results = []
     for item in by_taxon.values():
-        item["station_count"] = len(item["stations"])
+        station_firsts = [
+            station["first"] for station in item["stations"].values()
+            if station.get("first")
+        ]
+        earliest = min(station_firsts) if station_firsts else None
+        first_station_names = []
+        station_count = len(item["stations"])
+        for station in item["stations"].values():
+            if station_count > 1 and earliest and station.get("first") == earliest:
+                station["first_among_tracked"] = True
+                first_station_names.append(station["station_name"])
+        item["station_count"] = station_count
         item["total_count"] = sum(station["count"] for station in item["stations"].values())
+        item["first_among_tracked_date"] = earliest
+        item["first_among_tracked_stations"] = first_station_names
         results.append(dict(item))
     return sorted(results, key=lambda item: (-item["station_count"], item["label"]))
 
 
+def record_highlights(settings: Settings) -> list[dict[str, Any]]:
+    highlights = []
+    for taxon in station_taxa(settings):
+        for station in taxon["stations"].values():
+            flags = []
+            if station.get("is_state_first"):
+                flags.append("state iNat first")
+            if station.get("is_county_first"):
+                flags.append("county iNat first")
+            if station.get("first_among_tracked"):
+                flags.append("first among tracked")
+            if not flags:
+                continue
+            highlights.append({
+                "taxon_id": taxon["taxon_id"],
+                "label": taxon["label"],
+                "station_name": station["station_name"],
+                "station_id": station["station_id"],
+                "first": station["first"],
+                "count": station["count"],
+                "flags": flags,
+                "is_state_first": station.get("is_state_first"),
+                "is_county_first": station.get("is_county_first"),
+                "first_among_tracked": station.get("first_among_tracked"),
+            })
+    return sorted(
+        highlights,
+        key=lambda item: (
+            not item["is_state_first"],
+            not item["is_county_first"],
+            not item["first_among_tracked"],
+            item["first"] or date.max,
+            item["label"],
+        ),
+    )
+
+
+def unique_station_taxa(settings: Settings) -> list[dict[str, Any]]:
+    uniques = []
+    for taxon in station_taxa(settings):
+        if taxon["station_count"] != 1:
+            continue
+        station = next(iter(taxon["stations"].values()))
+        uniques.append({
+            "taxon_id": taxon["taxon_id"],
+            "label": taxon["label"],
+            "station_name": station["station_name"],
+            "station_id": station["station_id"],
+            "first": station["first"],
+            "latest": station["latest"],
+            "count": station["count"],
+        })
+    return sorted(uniques, key=lambda item: (item["station_name"], item["label"]))
+
+
 def generated_at() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M")
-

@@ -55,6 +55,20 @@ def get_json(path: str, user_agent: str, **params: Any) -> dict[str, Any]:
     raise RuntimeError(f"Failed to fetch {url}")
 
 
+def first_observed_date(user_agent: str, **params: Any) -> str | None:
+    """Return the earliest observed_on date for a query, or None."""
+    data = get_json(
+        "observations",
+        user_agent=user_agent,
+        per_page=1,
+        order_by="observed_on",
+        order="asc",
+        **params,
+    )
+    results = data.get("results") or []
+    return results[0].get("observed_on") if results else None
+
+
 def iter_observations(
     params: dict[str, Any],
     user_agent: str,
@@ -89,4 +103,3 @@ def iter_observations(
             return
         if max_pages is not None and page_count >= max_pages:
             return
-

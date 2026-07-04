@@ -8,6 +8,8 @@ The MVP builds a static dashboard from configured station queries:
 - recent observations across stations
 - first-of-season timing across stations
 - same-season spread, so synchronized flight pulses surface quickly
+- county/state iNaturalist first flags, first-among-tracked flags, and moths
+  currently unique to one station
 
 ## Setup
 
@@ -87,3 +89,5 @@ This is an intentionally small first pass:
   after major station-query changes
 - first-of-season timing is based on observed date, with records before noon
   assigned to the previous evening's moth session
+- county/state first-record context is cached and refreshed gradually so
+  scheduled builds do not make thousands of iNaturalist API calls at once

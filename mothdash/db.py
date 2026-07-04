@@ -53,6 +53,23 @@ CREATE INDEX IF NOT EXISTS idx_obs_observed
 CREATE INDEX IF NOT EXISTS idx_obs_created
     ON observations(created_at);
 
+CREATE TABLE IF NOT EXISTS station_taxon_stats (
+    station_id        TEXT NOT NULL,
+    taxon_id          INTEGER NOT NULL,
+    county_place_id   INTEGER,
+    state_place_id    INTEGER,
+    station_first_date TEXT,
+    county_first_date TEXT,
+    state_first_date  TEXT,
+    is_county_first   INTEGER,
+    is_state_first    INTEGER,
+    cached_at         TEXT DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (station_id, taxon_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_station_taxon_stats_flags
+    ON station_taxon_stats(is_county_first, is_state_first);
+
 CREATE TABLE IF NOT EXISTS sync_log (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
     station_id     TEXT NOT NULL,
@@ -82,4 +99,3 @@ def connect(path: Path):
 def init_db(path: Path) -> None:
     with connect(path) as conn:
         conn.executescript(SCHEMA)
-
