@@ -19,3 +19,53 @@ state_place_id = 48
 timezone = "America/New_York"
 public_location = "Tioga County, NY"
 notes = "Seed station from the Kingfisher Hollow Biodiversity Survey."
+
+[[stations]]
+id = "bosque-neimi"
+name = "Bosque Neimi"
+enabled = true
+project_id = "bosque-neimi"
+county_place_id = 1082
+state_place_id = 48
+timezone = "America/New_York"
+public_location = "Tompkins County, NY"
+website = "https://www.inaturalist.org/projects/bosque-neimi"
+notes = "iNaturalist project station."
+
+[[stations]]
+id = "dombroskie-homestead"
+name = "Dombroskie Homestead Inventory"
+enabled = true
+project_id = "dombroskie-homestead-inventory"
+county_place_id = 1082
+state_place_id = 48
+timezone = "America/New_York"
+public_location = "Tompkins County, NY"
+website = "https://www.inaturalist.org/projects/dombroskie-homestead-inventory"
+notes = "iNaturalist project station."
+
+[[stations]]
+id = "zeledonia-monkey-run"
+name = "Zeledonia - Monkey Run"
+enabled = true
+user_login = "zeledonia"
+place_id = 114200
+county_place_id = 1082
+state_place_id = 48
+timezone = "America/New_York"
+public_location = "Monkey Run, Tompkins County, NY"
+website = "https://www.inaturalist.org/people/zeledonia"
+notes = "Moth observations by zeledonia at Monkey Run."
+
+[[stations]]
+id = "iandavies-dove-dr"
+name = "Ian Davies - Dove Dr"
+enabled = true
+user_login = "iandavies"
+place_id = 1082
+county_place_id = 1082
+state_place_id = 48
+timezone = "America/New_York"
+public_location = "Dove Dr area, Tompkins County, NY"
+website = "https://www.inaturalist.org/people/iandavies"
+notes = "Currently scoped to iandavies moth observations in Tompkins County; narrow this with a radius if exact Dove Dr coordinates are provided."
