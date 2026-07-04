@@ -1574,11 +1574,16 @@ CSS = """
   --rust: #b66d45;
   --focus: #f0cf7a;
   --max: 1380px;
+  --topbar-height: 64px;
 }
 * { box-sizing: border-box; }
-html { scroll-behavior: smooth; }
+html {
+  scroll-behavior: smooth;
+  scroll-padding-top: calc(var(--topbar-height) + 18px);
+}
 body {
   margin: 0;
+  padding-top: var(--topbar-height);
   font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   background: var(--bg);
   color: var(--ink);
@@ -1588,7 +1593,7 @@ body {
   position: absolute;
   left: 16px;
   top: -48px;
-  z-index: 10;
+  z-index: 80;
   padding: 10px 12px;
   background: var(--amber);
   color: #17140e;
@@ -1604,13 +1609,20 @@ header {
   background: var(--bg);
 }
 .topbar {
-  width: min(var(--max), calc(100% - 32px));
-  margin: 0 auto;
+  position: fixed;
+  inset: 0 0 auto 0;
+  z-index: 50;
+  width: 100%;
   min-height: 64px;
+  padding: 0 max(16px, calc((100vw - var(--max)) / 2));
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 18px;
+  border-bottom: 1px solid rgba(240, 232, 214, 0.12);
+  background: rgba(21, 22, 17, 0.94);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
 }
 .brand {
   display: flex;
@@ -2579,10 +2591,14 @@ footer div {
   }
 }
 @media (max-width: 620px) {
+  :root {
+    --topbar-height: 128px;
+  }
   .topbar {
     align-items: flex-start;
     flex-direction: column;
-    padding: 16px 0;
+    justify-content: center;
+    padding: 14px 16px;
   }
   nav {
     justify-content: flex-start;
