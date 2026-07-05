@@ -1276,6 +1276,15 @@ function obsPhoto(obs) {
   return photo.url.replace("square", "medium");
 }
 
+function fmtMinuteStamp(date) {
+  return date.toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
 function addLogItem(item) {
   const empty = els.log.querySelector(".empty");
   if (empty) empty.remove();
@@ -1287,7 +1296,7 @@ function addLogItem(item) {
   article.innerHTML = `
     <div class="live-image">${image}</div>
     <div>
-      <p>${item.stationName} · ${item.observedOn || "undated"}</p>
+      <p>${item.stationName} · observed ${item.observedOn || "undated"} · added ${item.detectedAt}</p>
       <h2><a href="${item.url}">${item.label}</a></h2>
       <span>New to this station since the last dashboard build</span>
     </div>
@@ -1337,6 +1346,7 @@ async function runCheck() {
         stationName: station.name,
         label: observationLabel(obs),
         observedOn: obs.observed_on,
+        detectedAt: fmtMinuteStamp(now),
         url: obs.uri || `https://www.inaturalist.org/observations/${obs.id}`,
         photo: obsPhoto(obs),
       });
