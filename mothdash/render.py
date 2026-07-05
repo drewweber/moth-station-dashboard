@@ -434,7 +434,7 @@ def _unique_station_table(rows: list[dict[str, Any]]) -> str:
     if not rows:
         return '<p class="empty">No station-unique moths are available yet.</p>'
     body = []
-    for row in rows[:160]:
+    for row in rows:
         body.append(
             f"""
             <tr>
@@ -459,6 +459,88 @@ def _unique_station_table(rows: list[dict[str, Any]]) -> str:
       </thead>
       <tbody>{''.join(body)}</tbody>
     </table>
+    """
+
+
+def _unique_species_chip(row: dict[str, Any]) -> str:
+    return f"""
+    <li>
+      <strong>{h(row["label"])}</strong>
+      <span>{h(row["count"])} obs · {h(row["first"])} to {h(row["latest"])}</span>
+    </li>
+    """
+
+
+def _unique_station_sections(rows: list[dict[str, Any]], stations: list[Station]) -> str:
+    if not rows:
+        return '<p class="empty">No station-unique moths are available yet.</p>'
+
+    colors = _station_color_map(stations)
+    by_station: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        by_station.setdefault(row["station_id"], []).append(row)
+
+    panels = []
+    for station in [station for station in stations if station.enabled]:
+        station_rows = by_station.get(station.id, [])
+        count = len(station_rows)
+        if not station_rows:
+            panels.append(
+                f"""
+                <article class="unique-station-panel unique-station-empty" style="--station-color: {h(colors[station.id])}">
+                  <div class="unique-station-head">
+                    <div>
+                      <p>{h(station.public_location or "tracked station")}</p>
+                      <h3>{h(station.name)}</h3>
+                    </div>
+                    <strong>0</strong>
+                  </div>
+                  <p class="unique-empty-note">No taxa are currently unique to this station in the tracked network.</p>
+                </article>
+                """
+            )
+            continue
+
+        most_observed = sorted(station_rows, key=lambda item: (-item["count"], item["label"]))[:8]
+        recently_active = sorted(
+            station_rows,
+            key=lambda item: (item["latest"] or date.min, item["count"], item["label"]),
+            reverse=True,
+        )[:8]
+        panels.append(
+            f"""
+            <article class="unique-station-panel" style="--station-color: {h(colors[station.id])}">
+              <div class="unique-station-head">
+                <div>
+                  <p>{h(station.public_location or "tracked station")}</p>
+                  <h3>{h(station.name)}</h3>
+                </div>
+                <strong>{h(count)}</strong>
+              </div>
+              <div class="unique-lists">
+                <div>
+                  <h4>Most observed here</h4>
+                  <ul>{''.join(_unique_species_chip(row) for row in most_observed)}</ul>
+                </div>
+                <div>
+                  <h4>Recently active uniques</h4>
+                  <ul>{''.join(_unique_species_chip(row) for row in recently_active)}</ul>
+                </div>
+              </div>
+              <details class="unique-full-list">
+                <summary>Full station-unique list ({h(count)} taxa)</summary>
+                <div class="table-wrap unique-table-wrap">{_unique_station_table(sorted(station_rows, key=lambda item: item["label"]))}</div>
+              </details>
+            </article>
+            """
+        )
+
+    return f"""
+    <div class="unique-filter-row">
+      <label for="unique-filter">Filter unique moths</label>
+      <input id="unique-filter" type="search" placeholder="Try Jeweled, slug, sphinx..." data-unique-filter>
+    </div>
+    <div class="unique-station-grid">{''.join(panels)}</div>
     """
 
 
@@ -1301,8 +1383,29 @@ function initViewToggles() {
   });
 }
 
+function initUniqueFilter() {
+  const input = document.querySelector("[data-unique-filter]");
+  if (!input) return;
+  const panels = Array.from(document.querySelectorAll(".unique-station-panel"));
+  input.addEventListener("input", () => {
+    const query = input.value.trim().toLowerCase();
+    panels.forEach((panel) => {
+      let matches = !query;
+      panel.querySelectorAll(".unique-lists li, tbody tr").forEach((item) => {
+        const hit = !query || item.textContent.toLowerCase().includes(query);
+        item.hidden = !hit;
+        matches = matches || hit;
+      });
+      panel.hidden = !matches;
+      const details = panel.querySelector(".unique-full-list");
+      if (details && query && matches) details.open = true;
+    });
+  });
+}
+
 initSortableTables();
 initViewToggles();
+initUniqueFilter();
 """
 
 
@@ -2574,6 +2677,125 @@ h2 {
   margin: 0;
   color: var(--muted);
 }
+.unique-filter-row {
+  display: grid;
+  grid-template-columns: minmax(140px, 0.22fr) minmax(220px, 1fr);
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 14px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+}
+.unique-filter-row label {
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+.unique-filter-row input {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 10px 12px;
+  background: #181910;
+  color: var(--ink);
+  font: inherit;
+}
+.unique-filter-row input:focus {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+.unique-station-grid {
+  display: grid;
+  gap: 14px;
+}
+.unique-station-panel {
+  border: 1px solid var(--line);
+  border-left: 5px solid var(--station-color, var(--amber));
+  border-radius: 6px;
+  background: var(--panel);
+  overflow: hidden;
+}
+.unique-station-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 16px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.02);
+}
+.unique-station-head p {
+  margin: 0 0 5px;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+.unique-station-head h3 {
+  margin: 0;
+  font-size: 1.25rem;
+  line-height: 1.1;
+}
+.unique-station-head strong {
+  color: var(--station-color, var(--amber));
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: clamp(1.6rem, 4vw, 2.4rem);
+  line-height: 0.95;
+}
+.unique-lists {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  padding: 14px;
+}
+.unique-lists h4 {
+  margin: 0 0 8px;
+  color: var(--amber);
+  font-size: 0.9rem;
+}
+.unique-lists ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.unique-lists li {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 8px;
+  background: rgba(255, 255, 255, 0.02);
+}
+.unique-lists li strong,
+.unique-lists li span {
+  display: block;
+}
+.unique-lists li strong {
+  font-size: 0.9rem;
+  line-height: 1.2;
+}
+.unique-lists li span {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+.unique-full-list {
+  border-top: 1px solid var(--line);
+  padding: 0 14px 14px;
+}
+.unique-full-list summary {
+  cursor: pointer;
+  padding: 12px 0;
+  color: var(--amber);
+}
+.unique-table-wrap {
+  max-height: min(62vh, 620px);
+}
+.unique-empty-note {
+  margin: 0;
+  padding: 16px;
+  color: var(--muted);
+}
 .flag {
   display: inline-block;
   margin: 0 5px 5px 0;
@@ -2848,6 +3070,13 @@ footer div {
   .sighting-card {
     grid-template-columns: 92px minmax(0, 1fr);
   }
+  .unique-filter-row,
+  .unique-lists {
+    grid-template-columns: 1fr;
+  }
+  .unique-station-head {
+    gap: 12px;
+  }
   .night-summary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -2991,7 +3220,7 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
         <h2>Moths unique to one station</h2>
         <p>These species currently appear at only one tracked station, which can reflect habitat, effort, observer focus, or upload timing.</p>
       </div>
-      <div class="table-wrap">{_unique_station_table(uniques)}</div>
+      {_unique_station_sections(uniques, stations)}
     </section>
 
     <section id="calendar">
