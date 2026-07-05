@@ -336,6 +336,84 @@ def station_taxa(settings: Settings, year: int | None = None) -> list[dict[str, 
     return sorted(results, key=lambda item: (-item["station_count"], item["label"]))
 
 
+def latest_session_taxa(settings: Settings) -> dict[str, Any]:
+    rows = load_rows(settings)
+    session_dates = [row["session_date"] for row in rows if row.get("session_date")]
+    latest = max(session_dates) if session_dates else None
+    if latest is None:
+        return {"session_date": None, "taxa": [], "station_counts": {}, "observations": 0}
+
+    grouped: dict[tuple[int, str], dict[str, Any]] = {}
+    station_taxa_seen: dict[str, set[int]] = defaultdict(set)
+    observation_count = 0
+
+    for row in rows:
+        taxon_id = row.get("taxon_id")
+        if not taxon_id or row.get("session_date") != latest:
+            continue
+        observation_count += 1
+        taxon_id = int(taxon_id)
+        station_id = row["station_id"]
+        station_taxa_seen[station_id].add(taxon_id)
+        key = (taxon_id, station_id)
+        item = grouped.setdefault(
+            key,
+            {
+                "taxon_id": taxon_id,
+                "label": row["label"],
+                "station_id": station_id,
+                "station_name": row["station_name"],
+                "count": 0,
+                "first": latest,
+                "latest": latest,
+                "photo_url": None,
+                "url": None,
+                "observer_login": None,
+            },
+        )
+        item["count"] += 1
+        if row.get("photo_url") and not item["photo_url"]:
+            item["photo_url"] = row["photo_url"]
+            item["url"] = row.get("url")
+            item["observer_login"] = row.get("observer_login")
+        elif row.get("url") and not item["url"]:
+            item["url"] = row.get("url")
+            item["observer_login"] = row.get("observer_login")
+
+    by_taxon: dict[int, dict[str, Any]] = defaultdict(lambda: {"stations": {}})
+    for item in grouped.values():
+        item["is_county_first"] = False
+        item["is_state_first"] = False
+        item["first_among_tracked"] = False
+        taxon = by_taxon[item["taxon_id"]]
+        taxon["taxon_id"] = item["taxon_id"]
+        taxon["label"] = item["label"]
+        taxon["stations"][item["station_id"]] = item
+        if item.get("photo_url") and not taxon.get("photo_url"):
+            taxon["photo_url"] = item["photo_url"]
+            taxon["url"] = item.get("url")
+            taxon["photo_station_name"] = item["station_name"]
+            taxon["observer_login"] = item.get("observer_login")
+
+    taxa = []
+    for item in by_taxon.values():
+        item["station_count"] = len(item["stations"])
+        item["total_count"] = sum(station["count"] for station in item["stations"].values())
+        item["first_among_tracked_date"] = latest
+        item["first_among_tracked_stations"] = []
+        taxa.append(dict(item))
+
+    return {
+        "session_date": latest,
+        "taxa": sorted(taxa, key=lambda item: (-item["station_count"], -item["total_count"], item["label"])),
+        "station_counts": {
+            station_id: len(station_taxa)
+            for station_id, station_taxa in station_taxa_seen.items()
+        },
+        "observations": observation_count,
+    }
+
+
 def daily_species_counts(settings: Settings, year: int | None = None) -> list[dict[str, Any]]:
     rows = load_rows(settings)
     days: dict[str, dict[str, Any]] = {}

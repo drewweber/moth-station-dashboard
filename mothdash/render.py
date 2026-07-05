@@ -15,6 +15,7 @@ from .analysis import (
     first_of_season,
     generated_at,
     hero_photos,
+    latest_session_taxa,
     record_highlights,
     recent_observations,
     station_profile,
@@ -273,6 +274,88 @@ def _recent_cards(rows: list[dict[str, Any]]) -> str:
             """
         )
     return "".join(cards)
+
+
+def _last_night_dashboard(payload: dict[str, Any], stations: list[Station]) -> str:
+    session_date = payload.get("session_date")
+    taxa = payload.get("taxa") or []
+    if not session_date or not taxa:
+        return '<p class="empty">No latest-session moth observations are available yet.</p>'
+
+    colors = _station_color_map(stations)
+    station_lookup = {station.id: station for station in stations if station.enabled}
+    station_counts = payload.get("station_counts") or {}
+    active_station_ids = [
+        station.id for station in stations
+        if station.enabled and station_counts.get(station.id, 0)
+    ]
+    shared_taxa = sum(1 for row in taxa if row.get("station_count", 0) > 1)
+    station_chips = []
+    for station_id in active_station_ids:
+        station = station_lookup[station_id]
+        station_chips.append(
+            f"""
+            <span class="night-station-chip" style="--station-color: {h(colors[station_id])}">
+              {h(_station_short_label(station))}
+              <strong>{h(station_counts.get(station_id, 0))}</strong>
+            </span>
+            """
+        )
+
+    cards = []
+    for row in taxa[:36]:
+        label = h(row["label"])
+        photo_url = row.get("photo_url")
+        if photo_url:
+            image = f'<img src="{h(photo_url)}" alt="{label}" loading="lazy">'
+        else:
+            image = '<div class="night-placeholder" aria-hidden="true">no photo</div>'
+        title = label
+        if row.get("url"):
+            title = f'<a href="{h(row["url"])}">{label}</a>'
+        badges = []
+        for station_id, entry in row["stations"].items():
+            station = station_lookup.get(station_id)
+            name = _station_short_label(station) if station else entry["station_name"]
+            badges.append(
+                f'<span style="--station-color: {h(colors.get(station_id, "#d7b56d"))}">{h(name)}</span>'
+            )
+        status = "shared" if row.get("station_count", 0) > 1 else "single station"
+        cards.append(
+            f"""
+            <article class="night-card">
+              <div class="night-image">{image}</div>
+              <div class="night-copy">
+                <p>{h(status)} · {h(row.get("total_count", 0))} obs</p>
+                <h3>{title}</h3>
+                <div class="night-badges">{''.join(badges)}</div>
+              </div>
+            </article>
+            """
+        )
+
+    return f"""
+    <div class="night-summary">
+      <div>
+        <strong>{h(session_date)}</strong>
+        <span>latest moth session</span>
+      </div>
+      <div>
+        <strong>{h(len(taxa))}</strong>
+        <span>unique moth taxa</span>
+      </div>
+      <div>
+        <strong>{h(payload.get("observations", 0))}</strong>
+        <span>observations</span>
+      </div>
+      <div>
+        <strong>{h(shared_taxa)}</strong>
+        <span>shared by stations</span>
+      </div>
+    </div>
+    <div class="night-stations" aria-label="Latest session species count by station">{''.join(station_chips)}</div>
+    <div class="night-grid">{''.join(cards)}</div>
+    """
 
 
 def _pulse_cards(rows: list[dict[str, Any]]) -> str:
@@ -537,11 +620,17 @@ def _calendar_table(rows: list[dict[str, Any]], stations: list[Station], mode: s
     """
 
 
-def _view_toggle(name: str, first_id: str, first_label: str, second_id: str, second_label: str) -> str:
+def _view_toggle(name: str, *views: tuple[str, str]) -> str:
+    buttons = []
+    for index, (view_id, label) in enumerate(views):
+        active = " is-active" if index == 0 else ""
+        buttons.append(
+            f'<button type="button" class="view-toggle-button{active}" '
+            f'data-view-target="{h(view_id)}">{h(label)}</button>'
+        )
     return f"""
     <div class="view-toggle" role="group" aria-label="{h(name)}">
-      <button type="button" class="view-toggle-button is-active" data-view-target="{h(first_id)}">{h(first_label)}</button>
-      <button type="button" class="view-toggle-button" data-view-target="{h(second_id)}">{h(second_label)}</button>
+      {''.join(buttons)}
     </div>
     """
 
@@ -2329,6 +2418,111 @@ h2 {
   font-size: 1rem;
   line-height: 1.2;
 }
+.night-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border: 1px solid var(--line);
+  background: var(--panel);
+  margin-bottom: 12px;
+}
+.night-summary div {
+  padding: 14px 16px;
+  border-right: 1px solid var(--line);
+}
+.night-summary div:last-child {
+  border-right: 0;
+}
+.night-summary strong {
+  display: block;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: clamp(1.15rem, 2vw, 1.65rem);
+  line-height: 1.1;
+}
+.night-summary span {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+.night-stations {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.night-station-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  border: 1px solid color-mix(in srgb, var(--station-color) 64%, var(--line));
+  border-left-width: 5px;
+  border-radius: 4px;
+  padding: 5px 10px;
+  background: rgba(255, 255, 255, 0.025);
+  color: var(--muted);
+}
+.night-station-chip strong {
+  color: var(--ink);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.night-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(178px, 1fr));
+  gap: 10px;
+}
+.night-card {
+  display: grid;
+  grid-template-rows: 150px minmax(116px, auto);
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+}
+.night-image {
+  min-width: 0;
+  background: var(--panel-2);
+}
+.night-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.night-placeholder {
+  height: 100%;
+  display: grid;
+  place-items: center;
+  color: var(--faint);
+  font-size: 0.82rem;
+}
+.night-copy {
+  min-width: 0;
+  padding: 10px;
+}
+.night-copy p {
+  margin: 0 0 6px;
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+.night-copy h3 {
+  margin: 0 0 10px;
+  font-size: 0.95rem;
+  line-height: 1.18;
+}
+.night-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.night-badges span {
+  border-left: 4px solid var(--station-color, var(--amber));
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--muted);
+  padding: 3px 6px;
+  border-radius: 3px;
+  font-size: 0.72rem;
+}
 .pulse-card {
   padding: 16px;
   background: var(--panel-2);
@@ -2654,6 +2848,25 @@ footer div {
   .sighting-card {
     grid-template-columns: 92px minmax(0, 1fr);
   }
+  .night-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .night-summary div {
+    border-right: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+  }
+  .night-summary div:nth-child(2n) {
+    border-right: 0;
+  }
+  .night-summary div:nth-last-child(-n + 2) {
+    border-bottom: 0;
+  }
+  .night-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .night-card {
+    grid-template-rows: 132px minmax(126px, auto);
+  }
 }
 """
 
@@ -2669,8 +2882,10 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
     year = active_year(settings)
     pulses = first_of_season(settings, year)
     all_time_pulses = first_of_season(settings, all_time=True)
+    latest_night = latest_session_taxa(settings)
     taxa = station_taxa(settings)
     year_taxa = station_taxa(settings, year) if year else []
+    latest_night_taxa = latest_night.get("taxa") or []
     year_calendar = daily_species_counts(settings, year) if year else []
     all_time_calendar = daily_species_counts(settings)
     records = record_highlights(settings)
@@ -2696,6 +2911,7 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
       <nav aria-label="Dashboard sections">
         <a href="#stations">Stations</a>
         <a href="#feed">Feed</a>
+        <a href="#last-night">Last night</a>
         <a href="#recent">Recent</a>
         <a href="#pulses">Firsts</a>
         <a href="#records">Records</a>
@@ -2733,6 +2949,14 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
       <div class="cards">{_station_cards(summaries, stations)}</div>
     </section>
 
+    <section id="last-night">
+      <div class="section-head">
+        <h2>Last night</h2>
+        <p>A photo-first scan of the latest synced moth session, grouped by unique taxa so shared and station-only sightings are easy to compare.</p>
+      </div>
+      {_last_night_dashboard(latest_night, stations)}
+    </section>
+
     <section id="recent">
       <div class="section-head">
         <h2>Recent sightings</h2>
@@ -2748,7 +2972,7 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
         <p>Species appearing at two or more stations are grouped by how tightly their first session dates line up. Switch to all-time to compare first arrivals across the full station history.</p>
       </div>
       <div class="pulse-grid">{_pulse_cards(pulses)}</div>
-      {_view_toggle("First arrival view", "pulse-year", f"{year} season" if year else "Current season", "pulse-all-time", "All time")}
+      {_view_toggle("First arrival view", ("pulse-year", f"{year} season" if year else "Current season"), ("pulse-all-time", "All time"))}
       <div class="view-panel" id="pulse-year"><div class="table-wrap">{_pulse_table(pulses, stations)}</div></div>
       <div class="view-panel" id="pulse-all-time" hidden><div class="table-wrap">{_pulse_table(all_time_pulses, stations)}</div></div>
     </section>
@@ -2775,7 +2999,7 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
         <h2>Daily species calendar</h2>
         <p>Station cells show unique moth taxa per station per night. The total column is the unique species union across stations, not a sum of site counts.</p>
       </div>
-      {_view_toggle("Calendar view", "calendar-year", f"{year} dates" if year else "Current dates", "calendar-all-years", "All years")}
+      {_view_toggle("Calendar view", ("calendar-year", f"{year} dates" if year else "Current dates"), ("calendar-all-years", "All years"))}
       <div class="view-panel" id="calendar-year"><div class="table-wrap">{_calendar_table(year_calendar, stations, "year")}</div></div>
       <div class="view-panel" id="calendar-all-years" hidden><div class="table-wrap">{_calendar_table(all_time_calendar, stations, "all")}</div></div>
     </section>
@@ -2793,9 +3017,10 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
         <h2>Station species comparison</h2>
         <p>Each cell shows the observation count, first session date, and any county, state, or tracked-station first flags. Default sort favors species found across the most stations.</p>
       </div>
-      {_view_toggle("Species comparison view", "species-all-time", "All time", "species-year", f"{year} only" if year else "Current year")}
+      {_view_toggle("Species comparison view", ("species-all-time", "All time"), ("species-year", f"{year} only" if year else "Current year"), ("species-last-night", "Last night"))}
       <div class="view-panel" id="species-all-time"><div class="table-wrap">{_comparison_table(taxa, stations)}</div></div>
       <div class="view-panel" id="species-year" hidden><div class="table-wrap">{_comparison_table(year_taxa, stations)}</div></div>
+      <div class="view-panel" id="species-last-night" hidden><div class="table-wrap">{_comparison_table(latest_night_taxa, stations)}</div></div>
     </section>
   </main>
   <footer><div>Generated {h(generated_at())}. First-of-season dates use moth session dates, with records before noon assigned to the previous evening.</div></footer>
