@@ -1416,6 +1416,8 @@ const state = {
   stopAt: 0,
   known: new Map(),
   seenThisSession: new Set(),
+  seenObservations: new Set(),
+  stationSummaries: new Map(),
 };
 
 const LIVE_KEY = "mothdash-live-until";
@@ -1431,6 +1433,16 @@ function fmtTime(ms) {
 
 function setStatus(message) {
   els.status.textContent = message;
+}
+
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+  }[char]));
 }
 
 function liveUntil() {
@@ -1477,23 +1489,170 @@ function fmtMinuteStamp(date) {
   });
 }
 
-function addLogItem(item) {
-  const empty = els.log.querySelector(".empty");
-  if (empty) empty.remove();
-  const article = document.createElement("article");
-  article.className = "live-item";
-  const image = item.photo
-    ? `<img src="${item.photo}" alt="${item.label}" loading="lazy">`
-    : `<div class="live-placeholder" aria-hidden="true">sheet</div>`;
-  article.innerHTML = `
-    <div class="live-image">${image}</div>
-    <div>
-      <p>${item.stationName} · observed ${item.observedOn || "undated"} · added ${item.detectedAt}</p>
-      <h2><a href="${item.url}">${item.label}</a></h2>
-      <span>New to this station since the last dashboard build</span>
-    </div>
-  `;
-  els.log.prepend(article);
+function sessionDate(date) {
+  const session = new Date(date);
+  if (session.getHours() < 12) session.setDate(session.getDate() - 1);
+  const year = session.getFullYear();
+  const month = String(session.getMonth() + 1).padStart(2, "0");
+  const day = String(session.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function initStationSummaries() {
+  state.stationSummaries.clear();
+  for (const station of state.snapshot.stations) {
+    state.stationSummaries.set(station.id, {
+      station,
+      active: false,
+      checked: false,
+      observationCount: 0,
+      newSpeciesCount: 0,
+      latestDetectedAt: "",
+      latestObservedOn: "",
+      photos: [],
+      currentSpecies: new Map(),
+      newSpecies: new Map(),
+      error: "",
+    });
+  }
+}
+
+function addSpecies(map, item) {
+  if (!map.has(item.taxonId)) {
+    map.set(item.taxonId, item);
+    return;
+  }
+  const existing = map.get(item.taxonId);
+  existing.count += item.count || 1;
+  if (item.photo && !existing.photo) existing.photo = item.photo;
+}
+
+function updateStationSummary(station, observations, now) {
+  const summary = state.stationSummaries.get(station.id);
+  if (!summary) return { newSpecies: 0, currentObs: 0 };
+
+  summary.checked = true;
+  summary.error = "";
+  const currentSession = sessionDate(now);
+  let newSpecies = 0;
+  let currentObs = 0;
+  const known = stationKnownSet(station);
+
+  for (const obs of observations) {
+    if (obs.observed_on && obs.observed_on !== currentSession) continue;
+    const taxon = obs.taxon || {};
+    const taxonId = taxon.id;
+    if (!taxonId) continue;
+    const observationKey = `${station.id}:${obs.id || `${taxonId}:${obs.observed_on || ""}`}`;
+    if (state.seenObservations.has(observationKey)) continue;
+    state.seenObservations.add(observationKey);
+
+    currentObs += 1;
+    summary.active = true;
+    summary.observationCount += 1;
+    summary.latestDetectedAt = fmtMinuteStamp(now);
+    summary.latestObservedOn = obs.observed_on || summary.latestObservedOn;
+
+    const item = {
+      taxonId,
+      label: observationLabel(obs),
+      url: obs.uri || `https://www.inaturalist.org/observations/${obs.id}`,
+      photo: obsPhoto(obs),
+      count: 1,
+    };
+    addSpecies(summary.currentSpecies, item);
+    if (item.photo && !summary.photos.some((photo) => photo.url === item.photo)) {
+      summary.photos.unshift({ url: item.photo, label: item.label, href: item.url });
+      summary.photos = summary.photos.slice(0, 6);
+    }
+
+    if (known.has(taxonId)) continue;
+    const key = `${station.id}:${taxonId}`;
+    if (state.seenThisSession.has(key)) continue;
+    state.seenThisSession.add(key);
+    known.add(taxonId);
+    newSpecies += 1;
+    summary.newSpeciesCount += 1;
+    addSpecies(summary.newSpecies, item);
+  }
+
+  return { newSpecies, currentObs };
+}
+
+function renderSpeciesList(species, emptyText) {
+  const items = Array.from(species.values())
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
+    .slice(0, 8);
+  if (!items.length) return `<p class="live-muted">${escapeHtml(emptyText)}</p>`;
+  return `<ul>${items.map((item) => `
+    <li>
+      <a href="${escapeHtml(item.url)}">${escapeHtml(item.label)}</a>
+      <span>${item.count > 1 ? `${item.count} obs` : "1 obs"}</span>
+    </li>
+  `).join("")}</ul>`;
+}
+
+function renderStationSummaries() {
+  const summaries = Array.from(state.stationSummaries.values()).sort((a, b) => {
+    if (a.active !== b.active) return a.active ? -1 : 1;
+    if (a.newSpeciesCount !== b.newSpeciesCount) return b.newSpeciesCount - a.newSpeciesCount;
+    if (a.observationCount !== b.observationCount) return b.observationCount - a.observationCount;
+    return a.station.name.localeCompare(b.station.name);
+  });
+  const activeCount = summaries.filter((summary) => summary.active).length;
+  const supportedCount = summaries.filter((summary) => summary.station.live_supported).length;
+  els.stationCount.textContent = `${activeCount} / ${supportedCount}`;
+
+  els.log.innerHTML = summaries.map((summary) => {
+    const station = summary.station;
+    const status = !station.live_supported
+      ? "live unavailable"
+      : summary.active
+        ? "active tonight"
+        : summary.checked
+          ? "no current-night uploads"
+          : "waiting";
+    const photos = summary.photos.length
+      ? summary.photos.map((photo) => `
+          <a href="${escapeHtml(photo.href)}" class="live-thumb">
+            <img src="${escapeHtml(photo.url)}" alt="${escapeHtml(photo.label)}" loading="lazy">
+          </a>
+        `).join("")
+      : `<div class="live-photo-empty">No current-night photos yet</div>`;
+    const classes = [
+      "live-station-card",
+      summary.active ? "is-active" : "is-quiet",
+      station.live_supported ? "" : "is-disabled",
+    ].filter(Boolean).join(" ");
+
+    return `
+      <article class="${classes}">
+        <div class="live-station-head">
+          <div>
+            <p>${escapeHtml(station.public_location || "tracked station")}</p>
+            <h2>${escapeHtml(station.name)}</h2>
+          </div>
+          <span>${escapeHtml(status)}</span>
+        </div>
+        <div class="live-stats">
+          <div><strong>${summary.observationCount}</strong><span>current-night uploads</span></div>
+          <div><strong>${summary.newSpeciesCount}</strong><span>new station species</span></div>
+          <div><strong>${escapeHtml(summary.latestDetectedAt || "not yet")}</strong><span>latest added</span></div>
+        </div>
+        <div class="live-photo-strip">${photos}</div>
+        <div class="live-station-lists">
+          <div>
+            <h3>New since build</h3>
+            ${renderSpeciesList(summary.newSpecies, station.live_supported ? "No new station species yet." : station.live_note)}
+          </div>
+          <div>
+            <h3>Seen tonight</h3>
+            ${renderSpeciesList(summary.currentSpecies, summary.checked ? "No current-night uploads in this scan." : "Waiting for the first check.")}
+          </div>
+        </div>
+      </article>
+    `;
+  }).join("");
 }
 
 async function fetchStation(station, createdAfter) {
@@ -1521,31 +1680,21 @@ async function runCheck() {
   const createdAfter = new Date(Date.now() - state.snapshot.live_mode_hours * 60 * 60 * 1000).toISOString();
   setStatus(`Checking iNaturalist at ${now.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`);
   let found = 0;
+  let activeUploads = 0;
   for (const station of state.snapshot.stations) {
     if (!station.live_supported) continue;
-    const known = stationKnownSet(station);
     const data = await fetchStation(station, createdAfter);
-    for (const obs of data.results || []) {
-      const taxon = obs.taxon || {};
-      const taxonId = taxon.id;
-      if (!taxonId || known.has(taxonId)) continue;
-      const key = `${station.id}:${taxonId}`;
-      if (state.seenThisSession.has(key)) continue;
-      state.seenThisSession.add(key);
-      known.add(taxonId);
-      found += 1;
-      addLogItem({
-        stationName: station.name,
-        label: observationLabel(obs),
-        observedOn: obs.observed_on,
-        detectedAt: fmtMinuteStamp(now),
-        url: obs.uri || `https://www.inaturalist.org/observations/${obs.id}`,
-        photo: obsPhoto(obs),
-      });
-    }
+    const result = updateStationSummary(station, data.results || [], now);
+    found += result.newSpecies;
+    activeUploads += result.currentObs;
   }
   els.lastCheck.textContent = now.toLocaleString();
-  setStatus(found ? `Found ${found} new station species.` : "No new station species found in this check.");
+  renderStationSummaries();
+  setStatus(found
+    ? `Found ${found} new station species across active stations.`
+    : activeUploads
+      ? `Found ${activeUploads} current-night uploads; no new station species in this check.`
+      : "No additional current-night uploads since the previous check.");
 }
 
 function stopScan(message) {
@@ -1583,7 +1732,8 @@ async function loadSnapshot() {
   if (!response.ok) throw new Error("Could not load live snapshot.");
   state.snapshot = await response.json();
   els.snapshotTime.textContent = state.snapshot.generated_at;
-  els.stationCount.textContent = state.snapshot.stations.filter((station) => station.live_supported).length;
+  initStationSummaries();
+  renderStationSummaries();
 }
 
 async function init() {
@@ -1631,8 +1781,8 @@ def _live_page() -> str:
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Live species log · Moth Station Dashboard</title>
-  <meta name="description" content="Run a short live check for moth species newly appearing at tracked iNaturalist stations.">
+  <title>Live station summary · Moth Station Dashboard</title>
+  <meta name="description" content="Run a short live check for current-night iNaturalist activity at tracked moth stations.">
   <meta name="theme-color" content="#151611">
   <style>{CSS}
   .live-shell {{
@@ -1688,44 +1838,151 @@ def _live_page() -> str:
   }}
   .live-log {{
     display: grid;
-    gap: 10px;
+    gap: 14px;
     margin-top: 18px;
   }}
-  .live-item {{
+  .live-station-card {{
     display: grid;
-    grid-template-columns: 120px minmax(0, 1fr);
     gap: 14px;
-    padding: 12px;
+    padding: 16px;
     background: var(--panel);
     border: 1px solid var(--line);
+    border-left: 5px solid var(--line);
     border-radius: 6px;
   }}
-  .live-image img, .live-placeholder {{
-    width: 120px;
-    height: 120px;
-    object-fit: cover;
-    background: var(--panel-2);
+  .live-station-card.is-active {{
+    border-left-color: var(--amber);
+    background: color-mix(in srgb, var(--panel) 86%, var(--amber));
   }}
-  .live-placeholder {{
-    display: grid;
-    place-items: center;
-    color: var(--faint);
+  .live-station-card.is-disabled {{
+    opacity: 0.72;
   }}
-  .live-item p, .live-item span {{
+  .live-station-head {{
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 14px;
+  }}
+  .live-station-head p {{
     margin: 0;
     color: var(--muted);
+    font-size: 0.82rem;
   }}
-  .live-item h2 {{
-    margin: 8px 0;
-    font-size: 1.25rem;
+  .live-station-head h2 {{
+    margin: 4px 0 0;
+    font-size: clamp(1.18rem, 3vw, 1.7rem);
+    line-height: 1.1;
+  }}
+  .live-station-head > span {{
+    flex: 0 0 auto;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 5px 8px;
+    color: var(--amber);
+    background: var(--panel-2);
+    font-size: 0.78rem;
+  }}
+  .live-stats {{
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 1px;
+    background: var(--line);
+    border: 1px solid var(--line);
+  }}
+  .live-stats div {{
+    min-width: 0;
+    padding: 10px;
+    background: var(--panel-2);
+  }}
+  .live-stats strong,
+  .live-stats span {{
+    display: block;
+  }}
+  .live-stats strong {{
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+    overflow-wrap: anywhere;
+  }}
+  .live-stats span {{
+    color: var(--muted);
+    font-size: 0.76rem;
+  }}
+  .live-photo-strip {{
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 6px;
+  }}
+  .live-thumb,
+  .live-photo-empty {{
+    aspect-ratio: 1;
+    min-width: 0;
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    overflow: hidden;
+  }}
+  .live-thumb img {{
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }}
+  .live-photo-empty {{
+    grid-column: 1 / -1;
+    display: grid;
+    place-items: center;
+    min-height: 76px;
+    color: var(--faint);
+    font-size: 0.82rem;
+  }}
+  .live-station-lists {{
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }}
+  .live-station-lists h3 {{
+    margin: 0 0 8px;
+    color: var(--amber);
+    font-size: 0.9rem;
+  }}
+  .live-station-lists ul {{
+    display: grid;
+    gap: 6px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }}
+  .live-station-lists li {{
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    min-width: 0;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 6px;
+  }}
+  .live-station-lists li a {{
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }}
+  .live-station-lists li span,
+  .live-muted {{
+    color: var(--muted);
+    font-size: 0.78rem;
+  }}
+  .live-muted {{
+    margin: 0;
   }}
   @media (max-width: 620px) {{
-    .live-item {{
-      grid-template-columns: 88px minmax(0, 1fr);
+    .live-station-head,
+    .live-station-lists {{
+      grid-template-columns: 1fr;
+      flex-direction: column;
     }}
-    .live-image img, .live-placeholder {{
-      width: 88px;
-      height: 88px;
+    .live-stats {{
+      grid-template-columns: 1fr;
+    }}
+    .live-photo-strip {{
+      grid-template-columns: repeat(3, minmax(0, 1fr));
     }}
   }}
   </style>
@@ -1743,8 +2000,8 @@ def _live_page() -> str:
   </header>
   <main id="live-main" class="live-shell">
     <p class="eyebrow">10-minute iNaturalist check</p>
-    <h1>Live species log.</h1>
-    <p class="subhead">Turn on live mode to check recent iNaturalist uploads for moth species not present in the last dashboard build. Live mode stays available in this browser for 2 hours.</p>
+    <h1>Live station summary.</h1>
+    <p class="subhead">Turn on live mode to check recent iNaturalist uploads and feature stations with observations from the current moth night. Live mode stays available in this browser for 2 hours.</p>
 
     <section class="live-panel" aria-labelledby="live-controls">
       <div class="toggle-row">
@@ -1760,7 +2017,7 @@ def _live_page() -> str:
       <div class="live-meta">
         <div><strong id="live-remaining">off</strong><span>live mode remaining</span></div>
         <div><strong>10 min</strong><span>scan duration</span></div>
-        <div><strong id="station-count">0</strong><span>stations checked</span></div>
+        <div><strong id="station-count">0 / 0</strong><span>active / checkable stations</span></div>
         <div><strong id="last-check">not yet</strong><span>last check</span></div>
         <div><strong id="snapshot-time">loading</strong><span>snapshot generated</span></div>
       </div>
@@ -1768,11 +2025,11 @@ def _live_page() -> str:
 
     <section aria-labelledby="live-log-title">
       <div class="section-head">
-        <h2 id="live-log-title">New species log</h2>
-        <p>The page compares recent uploads to the species known at the last static build. Results are provisional until the regular dashboard sync runs.</p>
+        <h2 id="live-log-title">Live station summary</h2>
+        <p>Active stations rise to the top when current-night uploads appear. New station species are still flagged, but the main view is organized around each station's night.</p>
       </div>
       <div id="live-log" class="live-log">
-        <p class="empty">No live results yet. Toggle live mode to start a 10-minute scan.</p>
+        <p class="empty">No live station results yet. Toggle live mode to start a 10-minute scan.</p>
       </div>
     </section>
   </main>
