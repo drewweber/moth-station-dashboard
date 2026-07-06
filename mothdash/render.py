@@ -1593,25 +1593,30 @@ function renderSpeciesList(species, emptyText) {
 }
 
 function renderStationSummaries() {
-  const summaries = Array.from(state.stationSummaries.values()).sort((a, b) => {
+  const allSummaries = Array.from(state.stationSummaries.values());
+  const summaries = allSummaries.filter((summary) => summary.active).sort((a, b) => {
     if (a.active !== b.active) return a.active ? -1 : 1;
     if (a.newSpeciesCount !== b.newSpeciesCount) return b.newSpeciesCount - a.newSpeciesCount;
     if (a.observationCount !== b.observationCount) return b.observationCount - a.observationCount;
     return a.station.name.localeCompare(b.station.name);
   });
-  const activeCount = summaries.filter((summary) => summary.active).length;
-  const supportedCount = summaries.filter((summary) => summary.station.live_supported).length;
+  const activeCount = summaries.length;
+  const supportedCount = allSummaries.filter((summary) => summary.station.live_supported).length;
   els.stationCount.textContent = `${activeCount} / ${supportedCount}`;
+
+  if (!summaries.length) {
+    const hasChecked = allSummaries.some((summary) => summary.checked);
+    els.log.innerHTML = `
+      <p class="empty">${hasChecked
+        ? "No stations have current-night uploads yet. The next live check will add station cards as activity appears."
+        : "No active stations yet. Toggle live mode to start a 10-minute scan."}</p>
+    `;
+    return;
+  }
 
   els.log.innerHTML = summaries.map((summary) => {
     const station = summary.station;
-    const status = !station.live_supported
-      ? "live unavailable"
-      : summary.active
-        ? "active tonight"
-        : summary.checked
-          ? "no current-night uploads"
-          : "waiting";
+    const status = "active tonight";
     const photos = summary.photos.length
       ? summary.photos.map((photo) => `
           <a href="${escapeHtml(photo.href)}" class="live-thumb">
@@ -1621,8 +1626,7 @@ function renderStationSummaries() {
       : `<div class="live-photo-empty">No current-night photos yet</div>`;
     const classes = [
       "live-station-card",
-      summary.active ? "is-active" : "is-quiet",
-      station.live_supported ? "" : "is-disabled",
+      "is-active",
     ].filter(Boolean).join(" ");
 
     return `
@@ -1690,11 +1694,14 @@ async function runCheck() {
   }
   els.lastCheck.textContent = now.toLocaleString();
   renderStationSummaries();
+  const activeStations = Array.from(state.stationSummaries.values()).filter((summary) => summary.active).length;
   setStatus(found
     ? `Found ${found} new station species across active stations.`
     : activeUploads
       ? `Found ${activeUploads} current-night uploads; no new station species in this check.`
-      : "No additional current-night uploads since the previous check.");
+      : activeStations
+        ? "No additional current-night uploads since the previous check."
+        : "No current-night station uploads found in this check.");
 }
 
 function stopScan(message) {
