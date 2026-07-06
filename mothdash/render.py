@@ -1492,10 +1492,34 @@ function fmtMinuteStamp(date) {
 function sessionDate(date) {
   const session = new Date(date);
   if (session.getHours() < 12) session.setDate(session.getDate() - 1);
-  const year = session.getFullYear();
-  const month = String(session.getMonth() + 1).padStart(2, "0");
-  const day = String(session.getDate()).padStart(2, "0");
+  return isoDate(session);
+}
+
+function isoDate(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function previousSessionDate(date) {
+  const session = new Date(date);
+  if (session.getHours() < 12) session.setDate(session.getDate() - 1);
+  session.setDate(session.getDate() - 1);
+  return isoDate(session);
+}
+
+function activeSessionDates(date) {
+  const sessions = [sessionDate(date)];
+  if (date.getHours() >= 12) sessions.push(previousSessionDate(date));
+  return new Set(sessions);
+}
+
+function sessionWindowStart(date) {
+  const session = new Date(date);
+  session.setDate(session.getDate() - 1);
+  session.setHours(12, 0, 0, 0);
+  return session;
 }
 
 function initStationSummaries() {
@@ -1527,19 +1551,18 @@ function addSpecies(map, item) {
   if (item.photo && !existing.photo) existing.photo = item.photo;
 }
 
-function updateStationSummary(station, observations, now) {
+function updateStationSummary(station, observations, now, activeSessions) {
   const summary = state.stationSummaries.get(station.id);
   if (!summary) return { newSpecies: 0, currentObs: 0 };
 
   summary.checked = true;
   summary.error = "";
-  const currentSession = sessionDate(now);
   let newSpecies = 0;
   let currentObs = 0;
   const known = stationKnownSet(station);
 
   for (const obs of observations) {
-    if (obs.observed_on && obs.observed_on !== currentSession) continue;
+    if (obs.observed_on && !activeSessions.has(obs.observed_on)) continue;
     const taxon = obs.taxon || {};
     const taxonId = taxon.id;
     if (!taxonId) continue;
@@ -1608,7 +1631,7 @@ function renderStationSummaries() {
     const hasChecked = allSummaries.some((summary) => summary.checked);
     els.log.innerHTML = `
       <p class="empty">${hasChecked
-        ? "No stations have current-night uploads yet. The next live check will add station cards as activity appears."
+        ? "No stations have recent-night uploads yet. The next live check will add station cards as activity appears."
         : "No active stations yet. Toggle live mode to start a 10-minute scan."}</p>
     `;
     return;
@@ -1616,14 +1639,14 @@ function renderStationSummaries() {
 
   els.log.innerHTML = summaries.map((summary) => {
     const station = summary.station;
-    const status = "active tonight";
+    const status = "active updates";
     const photos = summary.photos.length
       ? summary.photos.map((photo) => `
           <a href="${escapeHtml(photo.href)}" class="live-thumb">
             <img src="${escapeHtml(photo.url)}" alt="${escapeHtml(photo.label)}" loading="lazy">
           </a>
         `).join("")
-      : `<div class="live-photo-empty">No current-night photos yet</div>`;
+      : `<div class="live-photo-empty">No recent-night photos yet</div>`;
     const classes = [
       "live-station-card",
       "is-active",
@@ -1639,7 +1662,7 @@ function renderStationSummaries() {
           <span>${escapeHtml(status)}</span>
         </div>
         <div class="live-stats">
-          <div><strong>${summary.observationCount}</strong><span>current-night uploads</span></div>
+          <div><strong>${summary.observationCount}</strong><span>recent-night uploads</span></div>
           <div><strong>${summary.newSpeciesCount}</strong><span>new station species</span></div>
           <div><strong>${escapeHtml(summary.latestDetectedAt || "not yet")}</strong><span>latest added</span></div>
         </div>
@@ -1651,7 +1674,7 @@ function renderStationSummaries() {
           </div>
           <div>
             <h3>Seen tonight</h3>
-            ${renderSpeciesList(summary.currentSpecies, summary.checked ? "No current-night uploads in this scan." : "Waiting for the first check.")}
+            ${renderSpeciesList(summary.currentSpecies, summary.checked ? "No recent-night uploads in this scan." : "Waiting for the first check.")}
           </div>
         </div>
       </article>
@@ -1681,14 +1704,15 @@ async function runCheck() {
     return;
   }
   const now = new Date();
-  const createdAfter = new Date(Date.now() - state.snapshot.live_mode_hours * 60 * 60 * 1000).toISOString();
+  const activeSessions = activeSessionDates(now);
+  const createdAfter = sessionWindowStart(now).toISOString();
   setStatus(`Checking iNaturalist at ${now.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`);
   let found = 0;
   let activeUploads = 0;
   for (const station of state.snapshot.stations) {
     if (!station.live_supported) continue;
     const data = await fetchStation(station, createdAfter);
-    const result = updateStationSummary(station, data.results || [], now);
+    const result = updateStationSummary(station, data.results || [], now, activeSessions);
     found += result.newSpecies;
     activeUploads += result.currentObs;
   }
@@ -1698,10 +1722,10 @@ async function runCheck() {
   setStatus(found
     ? `Found ${found} new station species across active stations.`
     : activeUploads
-      ? `Found ${activeUploads} current-night uploads; no new station species in this check.`
+      ? `Found ${activeUploads} recent-night uploads; no new station species in this check.`
       : activeStations
-        ? "No additional current-night uploads since the previous check."
-        : "No current-night station uploads found in this check.");
+        ? "No additional recent-night uploads since the previous check."
+        : "No recent-night station uploads found in this check.");
 }
 
 function stopScan(message) {
@@ -1789,7 +1813,7 @@ def _live_page() -> str:
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Live station summary · Moth Station Dashboard</title>
-  <meta name="description" content="Run a short live check for current-night iNaturalist activity at tracked moth stations.">
+  <meta name="description" content="Run a short live check for recent-night iNaturalist activity at tracked moth stations.">
   <meta name="theme-color" content="#151611">
   <style>{CSS}
   .live-shell {{
@@ -2033,7 +2057,7 @@ def _live_page() -> str:
     <section aria-labelledby="live-log-title">
       <div class="section-head">
         <h2 id="live-log-title">Live station summary</h2>
-        <p>Active stations rise to the top when current-night uploads appear. New station species are still flagged, but the main view is organized around each station's night.</p>
+        <p>Active stations rise to the top when recent-night uploads appear. New station species are still flagged, but the main view is organized around each station's night.</p>
       </div>
       <div id="live-log" class="live-log">
         <p class="empty">No live station results yet. Toggle live mode to start a 10-minute scan.</p>
