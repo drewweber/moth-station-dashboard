@@ -1565,7 +1565,7 @@ function updateStationSummary(station, observations, now, activeSessions) {
     if (obs.observed_on && !activeSessions.has(obs.observed_on)) continue;
     const taxon = obs.taxon || {};
     const taxonId = taxon.id;
-    if (!taxonId) continue;
+    if (!taxonId || taxon.rank !== "species") continue;
     const observationKey = `${station.id}:${obs.id || `${taxonId}:${obs.observed_on || ""}`}`;
     if (state.seenObservations.has(observationKey)) continue;
     state.seenObservations.add(observationKey);
@@ -1602,8 +1602,12 @@ function updateStationSummary(station, observations, now, activeSessions) {
   return { newSpecies, currentObs };
 }
 
-function renderSpeciesList(species, emptyText) {
+function renderSpeciesList(species, emptyText, excludedSpecies = new Set()) {
+  const excluded = excludedSpecies instanceof Map
+    ? new Set(excludedSpecies.keys())
+    : excludedSpecies;
   const items = Array.from(species.values())
+    .filter((item) => !excluded.has(item.taxonId))
     .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
     .slice(0, 8);
   if (!items.length) return `<p class="live-muted">${escapeHtml(emptyText)}</p>`;
@@ -1631,7 +1635,7 @@ function renderStationSummaries() {
     const hasChecked = allSummaries.some((summary) => summary.checked);
     els.log.innerHTML = `
       <p class="empty">${hasChecked
-        ? "No stations have recent-night uploads yet. The next live check will add station cards as activity appears."
+        ? "No stations have recent-night species-level uploads yet. The next live check will add station cards as activity appears."
         : "No active stations yet. Toggle live mode to start a 10-minute scan."}</p>
     `;
     return;
@@ -1662,7 +1666,7 @@ function renderStationSummaries() {
           <span>${escapeHtml(status)}</span>
         </div>
         <div class="live-stats">
-          <div><strong>${summary.observationCount}</strong><span>recent-night uploads</span></div>
+          <div><strong>${summary.observationCount}</strong><span>species-level uploads</span></div>
           <div><strong>${summary.newSpeciesCount}</strong><span>new station species</span></div>
           <div><strong>${escapeHtml(summary.latestDetectedAt || "not yet")}</strong><span>latest added</span></div>
         </div>
@@ -1674,7 +1678,7 @@ function renderStationSummaries() {
           </div>
           <div>
             <h3>Seen tonight</h3>
-            ${renderSpeciesList(summary.currentSpecies, summary.checked ? "No recent-night uploads in this scan." : "Waiting for the first check.")}
+            ${renderSpeciesList(summary.currentSpecies, summary.checked ? "No additional species-level moths in this scan." : "Waiting for the first check.", summary.newSpecies)}
           </div>
         </div>
       </article>
@@ -1722,10 +1726,10 @@ async function runCheck() {
   setStatus(found
     ? `Found ${found} new station species across active stations.`
     : activeUploads
-      ? `Found ${activeUploads} recent-night uploads; no new station species in this check.`
+      ? `Found ${activeUploads} recent-night species-level uploads; no new station species in this check.`
       : activeStations
-        ? "No additional recent-night uploads since the previous check."
-        : "No recent-night station uploads found in this check.");
+        ? "No additional recent-night species-level uploads since the previous check."
+        : "No recent-night station species-level uploads found in this check.");
 }
 
 function stopScan(message) {
@@ -2057,7 +2061,7 @@ def _live_page() -> str:
     <section aria-labelledby="live-log-title">
       <div class="section-head">
         <h2 id="live-log-title">Live station summary</h2>
-        <p>Active stations rise to the top when recent-night uploads appear. New station species are still flagged, but the main view is organized around each station's night.</p>
+        <p>Active stations rise to the top when recent-night species-level uploads appear. New station species are still flagged, but the main view is organized around each station's night.</p>
       </div>
       <div id="live-log" class="live-log">
         <p class="empty">No live station results yet. Toggle live mode to start a 10-minute scan.</p>
