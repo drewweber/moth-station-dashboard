@@ -1687,19 +1687,32 @@ function renderStationSummaries() {
 }
 
 async function fetchStation(station, createdAfter) {
-  const params = new URLSearchParams();
+  const baseParams = new URLSearchParams();
   for (const [key, value] of Object.entries(station.query || {})) {
     if (value === null || value === undefined || value === "") continue;
-    params.set(key, String(value));
+    baseParams.set(key, String(value));
   }
-  params.set("created_d1", createdAfter);
-  params.set("order_by", "created_at");
-  params.set("order", "desc");
-  params.set("per_page", "50");
-  const url = `${state.snapshot.api_base}/observations?${params.toString()}`;
-  const response = await fetch(url, { headers: { accept: "application/json" } });
-  if (!response.ok) throw new Error(`${station.name}: iNaturalist returned ${response.status}`);
-  return response.json();
+  baseParams.set("created_d1", createdAfter);
+  baseParams.set("order_by", "created_at");
+  baseParams.set("order", "desc");
+  baseParams.set("per_page", "200");
+
+  const results = [];
+  let total = 0;
+  let page = 1;
+  do {
+    const params = new URLSearchParams(baseParams);
+    params.set("page", String(page));
+    const url = `${state.snapshot.api_base}/observations?${params.toString()}`;
+    const response = await fetch(url, { headers: { accept: "application/json" } });
+    if (!response.ok) throw new Error(`${station.name}: iNaturalist returned ${response.status}`);
+    const data = await response.json();
+    total = data.total_results || 0;
+    results.push(...(data.results || []));
+    page += 1;
+  } while (results.length < total && page <= 5);
+
+  return { results };
 }
 
 async function runCheck() {
