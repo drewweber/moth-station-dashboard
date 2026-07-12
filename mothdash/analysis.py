@@ -473,6 +473,7 @@ def _insight(
     body: str,
     meta: str = "",
     score: int = 0,
+    subject: str = "",
 ) -> dict[str, Any]:
     return {
         "category": category,
@@ -480,6 +481,7 @@ def _insight(
         "body": body,
         "meta": meta,
         "score": score,
+        "subject": subject,
     }
 
 
@@ -499,14 +501,20 @@ def _select_varied_insights(
 
     selected = []
     selected_titles = set()
+    selected_subjects = set()
     category_counts: dict[str, int] = defaultdict(int)
     diversity_target = min(limit, 12)
     for insight in ordered:
         category = insight["category"]
         if category_counts[category]:
             continue
+        subject = insight.get("subject")
+        if subject and subject in selected_subjects:
+            continue
         selected.append(insight)
         selected_titles.add(insight["title"])
+        if subject:
+            selected_subjects.add(subject)
         category_counts[category] += 1
         if len(selected) >= diversity_target:
             break
@@ -519,8 +527,13 @@ def _select_varied_insights(
         category = insight["category"]
         if category_counts[category] >= category_limit:
             continue
+        subject = insight.get("subject")
+        if subject and subject in selected_subjects:
+            continue
         selected.append(insight)
         selected_titles.add(insight["title"])
+        if subject:
+            selected_subjects.add(subject)
         category_counts[category] += 1
 
     return selected
@@ -599,6 +612,7 @@ def dashboard_insights(settings: Settings, limit: int = 16) -> list[dict[str, An
                         f"Its first network record came from {', '.join(station_names)} on the latest moth night.",
                         latest.isoformat(),
                         97,
+                        subject=f"taxon:{item['taxon_id']}",
                     )
                 )
             else:
@@ -609,6 +623,7 @@ def dashboard_insights(settings: Settings, limit: int = 16) -> list[dict[str, An
                         "This species appeared in that station's tracked moth list for the first time on the latest session.",
                         latest.isoformat(),
                         92,
+                        subject=f"taxon:{item['taxon_id']}",
                     )
                 )
 
@@ -622,6 +637,7 @@ def dashboard_insights(settings: Settings, limit: int = 16) -> list[dict[str, An
                         f"It was recorded across {', '.join(station_names)} during the latest session.",
                         latest.isoformat(),
                         94,
+                        subject=f"taxon:{taxon_id}",
                     )
                 )
 
@@ -636,6 +652,7 @@ def dashboard_insights(settings: Settings, limit: int = 16) -> list[dict[str, An
                             f"The previous tracked session was {previous_dates[-1].isoformat()}; it reappeared at {', '.join(station_names)}.",
                             latest.isoformat(),
                             80 + min(gap // 20, 9),
+                            subject=f"taxon:{taxon_id}",
                         )
                     )
 
@@ -648,6 +665,7 @@ def dashboard_insights(settings: Settings, limit: int = 16) -> list[dict[str, An
                         f"The latest came from {', '.join(station_names)} and adds useful evidence for its regional flight timing.",
                         latest.isoformat(),
                         83 - regional_records,
+                        subject=f"taxon:{taxon_id}",
                     )
                 )
 
@@ -722,6 +740,7 @@ def dashboard_insights(settings: Settings, limit: int = 16) -> list[dict[str, An
                     f"First-of-season dates were within {pulse['spread_days']} days across {', '.join(sorted(names))}.",
                     pulse["pulse"],
                     88 - pulse["spread_days"],
+                    subject=f"taxon:{pulse['taxon_id']}",
                 )
             )
 
@@ -748,8 +767,8 @@ def dashboard_insights(settings: Settings, limit: int = 16) -> list[dict[str, An
                 continue
             delta = historical.timetuple().tm_yday - current.timetuple().tm_yday
             if 7 <= delta <= 60:
-                early.append((delta, labels[taxon_id], current, historical))
-        for delta, label, current, historical in sorted(early, reverse=True)[:3]:
+                early.append((delta, labels[taxon_id], current, historical, taxon_id))
+        for delta, label, current, historical, taxon_id in sorted(early, reverse=True)[:3]:
             insights.append(
                 _insight(
                     "Early emergence",
@@ -757,6 +776,7 @@ def dashboard_insights(settings: Settings, limit: int = 16) -> list[dict[str, An
                     f"This year's first tracked session was {current.isoformat()}; the previous earliest was {historical.isoformat()}.",
                     str(year),
                     84 + min(delta, 30),
+                    subject=f"taxon:{taxon_id}",
                 )
             )
 
@@ -784,6 +804,7 @@ def dashboard_insights(settings: Settings, limit: int = 16) -> list[dict[str, An
                 f"It has appeared at {top['station_count']} tracked stations, with {top['total_count']} total observations.",
                 "all time",
                 78,
+                subject=f"taxon:{top['taxon_id']}",
             )
         )
 
@@ -796,9 +817,16 @@ def dashboard_insights(settings: Settings, limit: int = 16) -> list[dict[str, An
                 continue
             span = (latest_seen - first).days
             if longest is None or span > longest[0]:
-                longest = (span, taxon["label"], station["station_name"], first, latest_seen)
+                longest = (
+                    span,
+                    taxon["label"],
+                    station["station_name"],
+                    first,
+                    latest_seen,
+                    taxon["taxon_id"],
+                )
     if longest and longest[0] > 0:
-        span, label, station_name, first, latest_seen = longest
+        span, label, station_name, first, latest_seen, taxon_id = longest
         insights.append(
             _insight(
                 "Long flight period",
@@ -806,6 +834,7 @@ def dashboard_insights(settings: Settings, limit: int = 16) -> list[dict[str, An
                 f"{station_name} has records from {first.isoformat()} through {latest_seen.isoformat()}, a {span}-day span.",
                 "all time",
                 70,
+                subject=f"taxon:{taxon_id}",
             )
         )
 
@@ -824,6 +853,7 @@ def dashboard_insights(settings: Settings, limit: int = 16) -> list[dict[str, An
                     f"This species has {item['count']} tracked observation{'s' if item['count'] != 1 else ''} and has not appeared at another station yet.",
                     f"latest {item['latest'].isoformat()}",
                     68,
+                    subject=f"taxon:{item['taxon_id']}",
                 )
             )
 
@@ -839,6 +869,7 @@ def dashboard_insights(settings: Settings, limit: int = 16) -> list[dict[str, An
                 f"Across the tracked record it has {spotlight['total_count']} observation{'s' if spotlight['total_count'] != 1 else ''} from {station_count} station{'s' if station_count != 1 else ''}.",
                 "rotates with each new moth night",
                 60,
+                subject=f"taxon:{spotlight['taxon_id']}",
             )
         )
 
