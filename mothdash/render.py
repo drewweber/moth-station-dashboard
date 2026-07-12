@@ -1168,12 +1168,16 @@ def _public_live_query(settings: Settings, station: Station) -> tuple[dict[str, 
 
 def _snapshot_payload(settings: Settings, stations: list[Station], taxa: list[dict[str, Any]]) -> dict[str, Any]:
     known_taxa: dict[str, list[int]] = {}
+    first_dates: dict[str, dict[str, str]] = {}
     for taxon in taxa:
         taxon_id = taxon.get("taxon_id")
         if not taxon_id:
             continue
-        for station_id in taxon["stations"]:
+        for station_id, station_taxon in taxon["stations"].items():
             known_taxa.setdefault(station_id, []).append(int(taxon_id))
+            first = station_taxon.get("first")
+            if first:
+                first_dates.setdefault(station_id, {})[str(taxon_id)] = first.isoformat()
 
     enabled = []
     for station in stations:
@@ -1188,6 +1192,7 @@ def _snapshot_payload(settings: Settings, stations: list[Station], taxa: list[di
             "live_supported": live_supported,
             "live_note": "" if live_supported else "Live polling disabled for precise-location queries.",
             "known_taxa": sorted(known_taxa.get(station.id, [])),
+            "first_dates": first_dates.get(station.id, {}),
         })
 
     return {
@@ -1466,6 +1471,10 @@ function stationKnownSet(station) {
   return state.known.get(station.id);
 }
 
+function stationFirstDate(station, taxonId) {
+  return (station.first_dates || {})[String(taxonId)] || "";
+}
+
 function observationLabel(obs) {
   const taxon = obs.taxon || {};
   const common = taxon.preferred_common_name;
@@ -1562,6 +1571,7 @@ function updateStationSummary(station, observations, now, eventWindow) {
   let stationFirsts = 0;
   let currentObs = 0;
   const known = stationKnownSet(station);
+  const eventDate = isoDate(eventWindow.start);
 
   for (const obs of observations) {
     if (!observationInEvent(obs, eventWindow)) continue;
@@ -1591,7 +1601,9 @@ function updateStationSummary(station, observations, now, eventWindow) {
       summary.photos = summary.photos.slice(0, 6);
     }
 
-    if (known.has(taxonId)) continue;
+    const firstDate = stationFirstDate(station, taxonId);
+    const isFirstThisEvent = firstDate === eventDate || (!firstDate && !known.has(taxonId));
+    if (!isFirstThisEvent) continue;
     const key = `${station.id}:${taxonId}`;
     if (state.seenThisSession.has(key)) continue;
     state.seenThisSession.add(key);
@@ -1625,8 +1637,8 @@ function renderStationSummaries() {
   const allSummaries = Array.from(state.stationSummaries.values());
   const summaries = allSummaries.filter((summary) => summary.active).sort((a, b) => {
     if (a.active !== b.active) return a.active ? -1 : 1;
-    if (a.currentSpecies.size !== b.currentSpecies.size) return b.currentSpecies.size - a.currentSpecies.size;
     if (a.stationFirstCount !== b.stationFirstCount) return b.stationFirstCount - a.stationFirstCount;
+    if (a.currentSpecies.size !== b.currentSpecies.size) return b.currentSpecies.size - a.currentSpecies.size;
     if (a.observationCount !== b.observationCount) return b.observationCount - a.observationCount;
     return a.station.name.localeCompare(b.station.name);
   });
@@ -1676,13 +1688,13 @@ function renderStationSummaries() {
         </div>
         <div class="live-photo-strip">${photos}</div>
         <div class="live-station-lists">
-          <div>
-            <h3>Current moth event</h3>
-            ${renderSpeciesList(summary.currentSpecies, station.live_supported ? "No species-level moths in this event yet." : station.live_note, new Set(), 40)}
+          <div class="live-firsts">
+            <h3>New species this event</h3>
+            ${renderSpeciesList(summary.stationFirstSpecies, summary.checked ? "No new station species in this event yet." : "Waiting for the first check.", new Set(), 20)}
           </div>
           <div>
-            <h3>New to station</h3>
-            ${renderSpeciesList(summary.stationFirstSpecies, summary.checked ? "No station-first species in this event yet." : "Waiting for the first check.", new Set(), 12)}
+            <h3>Other species this event</h3>
+            ${renderSpeciesList(summary.currentSpecies, station.live_supported ? "No other species-level moths in this event yet." : station.live_note, summary.stationFirstSpecies, 40)}
           </div>
         </div>
       </article>
@@ -1741,9 +1753,9 @@ async function runCheck() {
   renderStationSummaries();
   const activeStations = Array.from(state.stationSummaries.values()).filter((summary) => summary.active).length;
   setStatus(found
-    ? `Found ${found} station-first species in the current moth event.`
+    ? `Found ${found} new station species in the current moth event.`
     : activeUploads
-      ? `Found ${activeUploads} current-event species-level uploads; no station-first species in this check.`
+      ? `Found ${activeUploads} current-event species-level uploads; no new station species in this check.`
       : activeStations
         ? "No additional current-event species-level uploads since the previous check."
         : "No current-event station species-level uploads found in this check.");
@@ -1996,6 +2008,14 @@ def _live_page() -> str:
     color: var(--amber);
     font-size: 0.9rem;
   }}
+  .live-firsts {{
+    border-left: 3px solid var(--amber);
+    background: color-mix(in srgb, var(--amber) 7%, transparent);
+    padding: 10px 12px;
+  }}
+  .live-firsts h3 {{
+    font-size: 1rem;
+  }}
   .live-station-lists ul {{
     display: grid;
     gap: 6px;
@@ -2078,7 +2098,7 @@ def _live_page() -> str:
     <section aria-labelledby="live-log-title">
       <div class="section-head">
         <h2 id="live-log-title">Live station summary</h2>
-        <p>Active stations rise to the top when current-event species-level uploads appear. Station-first species are flagged, but the main view is organized around the 12pm-to-12pm moth event.</p>
+        <p>Active stations appear when species-level uploads arrive. New station species from the current 12pm-to-12pm event are shown first and are not repeated in the rest of the event list.</p>
       </div>
       <div id="live-log" class="live-log">
         <p class="empty">No live station results yet. Toggle live mode to start a 10-minute scan.</p>
