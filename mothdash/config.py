@@ -23,6 +23,9 @@ STATION_META_KEYS = {
     "habitat",
     "light_setup",
     "station_history",
+    "live_place_id",
+    "live_project_id",
+    "live_user_login",
 }
 
 ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
@@ -59,9 +62,16 @@ class Station:
     habitat: str = ""
     light_setup: str = ""
     station_history: str = ""
+    live_query: dict[str, Any] | None = None
 
     def api_params(self, settings: Settings) -> dict[str, Any]:
         params = dict(self.query)
+        params.setdefault("taxon_id", settings.default_taxon_id)
+        params.setdefault("without_taxon_id", settings.default_without_taxon_id)
+        return params
+
+    def live_api_params(self, settings: Settings) -> dict[str, Any]:
+        params = dict(self.live_query or self.query)
         params.setdefault("taxon_id", settings.default_taxon_id)
         params.setdefault("without_taxon_id", settings.default_without_taxon_id)
         return params
@@ -107,6 +117,11 @@ def load_config(path: str | Path = "stations.toml") -> tuple[Settings, list[Stat
             for k, v in raw_station.items()
             if k not in STATION_META_KEYS and v is not None
         }
+        live_query = {
+            key.removeprefix("live_"): value
+            for key, value in raw_station.items()
+            if key.startswith("live_") and value is not None
+        }
         stations.append(
             Station(
                 id=station_id,
@@ -123,6 +138,7 @@ def load_config(path: str | Path = "stations.toml") -> tuple[Settings, list[Stat
                 habitat=str(raw_station.get("habitat", "")),
                 light_setup=str(raw_station.get("light_setup", "")),
                 station_history=str(raw_station.get("station_history", "")),
+                live_query=live_query or None,
             )
         )
 
