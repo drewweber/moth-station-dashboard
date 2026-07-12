@@ -483,6 +483,49 @@ def _insight(
     }
 
 
+def _select_varied_insights(
+    insights: list[dict[str, Any]],
+    limit: int,
+    category_limit: int = 2,
+) -> list[dict[str, Any]]:
+    """Keep the feed timely without allowing one template to dominate it."""
+    ordered = []
+    seen_titles = set()
+    for insight in sorted(insights, key=lambda item: (-item["score"], item["title"])):
+        if insight["title"] in seen_titles:
+            continue
+        seen_titles.add(insight["title"])
+        ordered.append(insight)
+
+    selected = []
+    selected_titles = set()
+    category_counts: dict[str, int] = defaultdict(int)
+    diversity_target = min(limit, 12)
+    for insight in ordered:
+        category = insight["category"]
+        if category_counts[category]:
+            continue
+        selected.append(insight)
+        selected_titles.add(insight["title"])
+        category_counts[category] += 1
+        if len(selected) >= diversity_target:
+            break
+
+    for insight in ordered:
+        if len(selected) >= limit:
+            break
+        if insight["title"] in selected_titles:
+            continue
+        category = insight["category"]
+        if category_counts[category] >= category_limit:
+            continue
+        selected.append(insight)
+        selected_titles.add(insight["title"])
+        category_counts[category] += 1
+
+    return selected
+
+
 def dashboard_insights(settings: Settings, limit: int = 16) -> list[dict[str, Any]]:
     """Build deterministic naturalist-feed stories from the current dataset."""
     rows = load_rows(settings)
@@ -493,15 +536,38 @@ def dashboard_insights(settings: Settings, limit: int = 16) -> list[dict[str, An
     session_dates = [row["session_date"] for row in rows if row.get("session_date")]
     latest = max(session_dates) if session_dates else None
     year = active_year(settings)
+    taxon_sessions: dict[int, set[date]] = defaultdict(set)
+    taxon_observations: dict[int, set[int]] = defaultdict(set)
+    taxon_labels: dict[int, str] = {}
+    for row in rows:
+        taxon_id = row.get("taxon_id")
+        sd = row.get("session_date")
+        if not taxon_id or not sd:
+            continue
+        taxon_id = int(taxon_id)
+        taxon_sessions[taxon_id].add(sd)
+        if row.get("inat_obs_id"):
+            taxon_observations[taxon_id].add(int(row["inat_obs_id"]))
+        taxon_labels[taxon_id] = row["label"]
 
     if latest:
         latest_firsts = []
+        latest_by_taxon: dict[int, dict[str, Any]] = {}
         first_by_station_taxon: dict[tuple[str, int], dict[str, Any]] = {}
         for row in rows:
             taxon_id = row.get("taxon_id")
             sd = row.get("session_date")
             if not taxon_id or not sd:
                 continue
+            taxon_id = int(taxon_id)
+            if sd == latest:
+                current = latest_by_taxon.setdefault(
+                    taxon_id,
+                    {"stations": set(), "observations": set(), "label": row["label"]},
+                )
+                current["stations"].add(row["station_name"])
+                if row.get("inat_obs_id"):
+                    current["observations"].add(int(row["inat_obs_id"]))
             key = (row["station_id"], int(taxon_id))
             current = first_by_station_taxon.get(key)
             if current is None or sd < current["date"]:
@@ -509,7 +575,13 @@ def dashboard_insights(settings: Settings, limit: int = 16) -> list[dict[str, An
                     "date": sd,
                     "label": row["label"],
                     "station_name": row["station_name"],
+                    "taxon_id": taxon_id,
                 }
+        network_firsts = {
+            taxon_id: min(dates)
+            for taxon_id, dates in taxon_sessions.items()
+            if dates
+        }
         for item in first_by_station_taxon.values():
             if item["date"] == latest:
                 latest_firsts.append(item)
@@ -517,16 +589,91 @@ def dashboard_insights(settings: Settings, limit: int = 16) -> list[dict[str, An
             latest_firsts,
             key=lambda item: (item["station_name"], item["label"]),
         )
-        for item in latest_firsts[:4]:
-            insights.append(
-                _insight(
-                    "New station record",
-                    f"{item['station_name']} added {item['label']}",
-                    "This species appeared in that station's tracked moth list for the first time on the latest session.",
-                    latest.isoformat(),
-                    92,
+        for item in latest_firsts:
+            if network_firsts.get(item["taxon_id"]) == latest:
+                station_names = sorted(latest_by_taxon[item["taxon_id"]]["stations"])
+                insights.append(
+                    _insight(
+                        "Network newcomer",
+                        f"{item['label']} just entered the tracked network",
+                        f"Its first network record came from {', '.join(station_names)} on the latest moth night.",
+                        latest.isoformat(),
+                        97,
+                    )
                 )
-            )
+            else:
+                insights.append(
+                    _insight(
+                        "New station record",
+                        f"{item['station_name']} added {item['label']}",
+                        "This species appeared in that station's tracked moth list for the first time on the latest session.",
+                        latest.isoformat(),
+                        92,
+                    )
+                )
+
+        for taxon_id, item in latest_by_taxon.items():
+            station_names = sorted(item["stations"])
+            if len(station_names) > 1 and len(item["observations"]) > 1:
+                insights.append(
+                    _insight(
+                        "Same-night connection",
+                        f"{item['label']} connected {len(station_names)} stations in one moth night",
+                        f"It was recorded across {', '.join(station_names)} during the latest session.",
+                        latest.isoformat(),
+                        94,
+                    )
+                )
+
+            previous_dates = sorted(day for day in taxon_sessions[taxon_id] if day < latest)
+            if previous_dates:
+                gap = (latest - previous_dates[-1]).days
+                if gap >= 30:
+                    insights.append(
+                        _insight(
+                            "Back in flight",
+                            f"{item['label']} returned after {gap} quiet days",
+                            f"The previous tracked session was {previous_dates[-1].isoformat()}; it reappeared at {', '.join(station_names)}.",
+                            latest.isoformat(),
+                            80 + min(gap // 20, 9),
+                        )
+                    )
+
+            regional_records = len(taxon_observations[taxon_id])
+            if regional_records <= 3 and network_firsts.get(taxon_id) != latest:
+                insights.append(
+                    _insight(
+                        "Under-documented find",
+                        f"{item['label']} has only {regional_records} tracked network record{'s' if regional_records != 1 else ''}",
+                        f"The latest came from {', '.join(station_names)} and adds useful evidence for its regional flight timing.",
+                        latest.isoformat(),
+                        83 - regional_records,
+                    )
+                )
+
+        try:
+            history_date = latest.replace(year=latest.year - 1)
+        except ValueError:
+            history_date = None
+        if history_date:
+            then_taxa = {
+                int(row["taxon_id"])
+                for row in rows
+                if row.get("taxon_id") and row.get("session_date") == history_date
+            }
+            now_taxa = set(latest_by_taxon)
+            echoes = sorted(then_taxa & now_taxa, key=lambda taxon_id: taxon_labels[taxon_id])
+            if echoes:
+                examples = ", ".join(taxon_labels[taxon_id] for taxon_id in echoes[:3])
+                insights.append(
+                    _insight(
+                        "This date in history",
+                        f"{len(echoes)} species echoed the same moth night one year later",
+                        f"Recorded on both {history_date.isoformat()} and {latest.isoformat()}, including {examples}.",
+                        "year-over-year return",
+                        79,
+                    )
+                )
 
         week_start = latest - timedelta(days=6)
         weekly: dict[str, dict[str, Any]] = {}
@@ -665,7 +812,9 @@ def dashboard_insights(settings: Settings, limit: int = 16) -> list[dict[str, An
     if latest:
         recent_unique = [
             item for item in unique_station_taxa(settings)
-            if item.get("latest") and (latest - item["latest"]).days <= 14
+            if item.get("latest")
+            and item["latest"] < latest
+            and (latest - item["latest"]).days <= 14
         ]
         for item in recent_unique[:3]:
             insights.append(
@@ -678,16 +827,22 @@ def dashboard_insights(settings: Settings, limit: int = 16) -> list[dict[str, An
                 )
             )
 
-    seen_titles = set()
-    deduped = []
-    for insight in sorted(insights, key=lambda item: (-item["score"], item["title"])):
-        if insight["title"] in seen_titles:
-            continue
-        seen_titles.add(insight["title"])
-        deduped.append(insight)
-        if len(deduped) >= limit:
-            break
-    return deduped
+    if latest and taxa:
+        spotlight = sorted(taxa, key=lambda item: (item["label"], item["taxon_id"]))[
+            latest.toordinal() % len(taxa)
+        ]
+        station_count = spotlight["station_count"]
+        insights.append(
+            _insight(
+                "Species spotlight",
+                spotlight["label"],
+                f"Across the tracked record it has {spotlight['total_count']} observation{'s' if spotlight['total_count'] != 1 else ''} from {station_count} station{'s' if station_count != 1 else ''}.",
+                "rotates with each new moth night",
+                60,
+            )
+        )
+
+    return _select_varied_insights(insights, limit)
 
 
 def station_profile(settings: Settings, station_id: str) -> dict[str, Any]:
