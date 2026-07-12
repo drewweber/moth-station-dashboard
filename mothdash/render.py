@@ -981,7 +981,7 @@ def _network_accumulation(rows: list[dict[str, Any]]) -> str:
     """
 
 
-def _monthly_overlays(rows: list[dict[str, Any]]) -> str:
+def _monthly_overlays(rows: list[dict[str, Any]], stations: list[Station]) -> str:
     if not rows:
         return '<p class="empty">Monthly overlays will appear after synced observations.</p>'
     width = 720
@@ -996,6 +996,8 @@ def _monthly_overlays(rows: list[dict[str, Any]]) -> str:
         [month["species"] for row in rows for month in row["months"]] + [1]
     )
     colors = ["#d7b56d", "#8aa77a", "#7fb3d5", "#cf7d92", "#9b8ed4"]
+    enabled_stations = [station for station in stations if station.enabled]
+    station_colors = _station_color_map(stations)
     polylines = []
     markers = []
     labels = []
@@ -1013,11 +1015,34 @@ def _monthly_overlays(rows: list[dict[str, Any]]) -> str:
         for x, y, month in points:
             if month["species"] == 0:
                 continue
+            station_values = {
+                item["station_id"]: item["species"]
+                for item in month.get("stations", [])
+            }
+            station_rows = "".join(
+                f'<li><i style="--station-color: {h(station_colors[station.id])}"></i>'
+                f'<span>{h(_station_short_label(station))}</span>'
+                f'<strong>{h(station_values.get(station.id, 0))}</strong></li>'
+                for station in enabled_stations
+            )
+            tooltip_html = (
+                f'<div class="monthly-tooltip-head"><strong>{h(month["label"])} {h(row["year"])}</strong>'
+                f'<span>{h(month["species"])} network species</span></div>'
+                f'<ul>{station_rows}</ul>'
+            )
+            aria_values = "; ".join(
+                f"{station.name}: {station_values.get(station.id, 0)}"
+                for station in enabled_stations
+            )
+            visible_point = f'<circle class="monthly-point" style="--series-color: {h(color)}" cx="{x:.1f}" cy="{y:.1f}" r="3"></circle>'
             markers.append(
                 f"""
-                <circle class="monthly-point" style="--series-color: {h(color)}" cx="{x:.1f}" cy="{y:.1f}" r="3">
-                  <title>{h(row["year"])} {h(month["label"])} · {h(month["species"])} species</title>
-                </circle>
+                <g class="monthly-point-group" tabindex="0" role="img"
+                   aria-label="{h(row['year'])} {h(month['label'])}: {h(month['species'])} network species; {h(aria_values)}"
+                   data-tooltip-html="{h(tooltip_html)}">
+                  <circle class="monthly-hit-target" cx="{x:.1f}" cy="{y:.1f}" r="11"></circle>
+                  {visible_point}
+                </g>
                 """
             )
         last_x, last_y, _ = points[-1]
@@ -1035,7 +1060,7 @@ def _monthly_overlays(rows: list[dict[str, Any]]) -> str:
     <figure class="monthly-overlay-chart">
       <svg viewBox="0 0 {width} {height}" role="img" aria-labelledby="monthly-overlay-title monthly-overlay-desc" preserveAspectRatio="none">
         <title id="monthly-overlay-title">Monthly species richness by year</title>
-        <desc id="monthly-overlay-desc">One line per year showing unique moth taxa by month across the station network.</desc>
+        <desc id="monthly-overlay-desc">One line per year showing unique moth species by month across the station network. Focus or point at a month to compare station values.</desc>
         <line class="chart-axis" x1="{left}" y1="{top + plot_height}" x2="{left + plot_width}" y2="{top + plot_height}"></line>
         <line class="chart-axis" x1="{left}" y1="{top}" x2="{left}" y2="{top + plot_height}"></line>
         <line class="chart-grid" x1="{left}" y1="{top}" x2="{left + plot_width}" y2="{top}"></line>
@@ -1046,6 +1071,7 @@ def _monthly_overlays(rows: list[dict[str, Any]]) -> str:
         {''.join(markers)}
         {''.join(labels)}
       </svg>
+      <div class="monthly-tooltip" role="tooltip" hidden></div>
     </figure>
     """
 
@@ -1131,8 +1157,8 @@ def _trend_section(trends: dict[str, Any], stations: list[Station]) -> str:
       </article>
       <article class="trend-panel">
         <h3>Monthly overlays</h3>
-        <p>Unique moth taxa by month, with one line per synced year.</p>
-        {_monthly_overlays(trends["monthly_overlays"])}
+        <p>Unique moth species by month, with one line per synced year. Hover, tap, or focus a point for station values.</p>
+        {_monthly_overlays(trends["monthly_overlays"], stations)}
       </article>
       <article class="trend-panel">
         <h3>Rank abundance</h3>
@@ -1422,9 +1448,63 @@ function initUniqueFilter() {
   });
 }
 
+function initMonthlyTooltips() {
+  document.querySelectorAll(".monthly-overlay-chart").forEach((figure) => {
+    const tooltip = figure.querySelector(".monthly-tooltip");
+    if (!tooltip) return;
+
+    const positionTooltip = (target, event) => {
+      const figureRect = figure.getBoundingClientRect();
+      const targetRect = target.getBoundingClientRect();
+      const anchorX = event?.clientX || (targetRect.left + targetRect.width / 2);
+      const anchorY = event?.clientY || targetRect.top;
+      let left = anchorX - figureRect.left + 12;
+      let top = anchorY - figureRect.top + 12;
+      const maxLeft = Math.max(8, figureRect.width - tooltip.offsetWidth - 8);
+      left = Math.max(8, Math.min(left, maxLeft));
+      if (top + tooltip.offsetHeight > figureRect.height - 8) {
+        top = Math.max(8, anchorY - figureRect.top - tooltip.offsetHeight - 12);
+      }
+      tooltip.style.left = `${left}px`;
+      tooltip.style.top = `${top}px`;
+    };
+
+    const showTooltip = (target, event) => {
+      tooltip.innerHTML = target.dataset.tooltipHtml || "";
+      tooltip.hidden = false;
+      positionTooltip(target, event);
+    };
+    const hideTooltip = () => {
+      tooltip.hidden = true;
+    };
+
+    figure.querySelectorAll(".monthly-point-group").forEach((target) => {
+      target.addEventListener("pointerenter", (event) => showTooltip(target, event));
+      target.addEventListener("pointermove", (event) => positionTooltip(target, event));
+      target.addEventListener("pointerleave", () => {
+        if (document.activeElement !== target) hideTooltip();
+      });
+      target.addEventListener("focus", () => showTooltip(target));
+      target.addEventListener("blur", hideTooltip);
+      target.addEventListener("click", (event) => {
+        event.preventDefault();
+        target.focus();
+        showTooltip(target, event);
+      });
+      target.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+          hideTooltip();
+          target.blur();
+        }
+      });
+    });
+  });
+}
+
 initSortableTables();
 initViewToggles();
 initUniqueFilter();
+initMonthlyTooltips();
 """
 
 
@@ -2650,6 +2730,7 @@ h2 {
 }
 .monthly-overlay-chart {
   margin: 0;
+  position: relative;
 }
 .monthly-overlay-chart svg {
   width: 100%;
@@ -2669,6 +2750,75 @@ h2 {
   stroke: var(--series-color);
   stroke-width: 2;
   vector-effect: non-scaling-stroke;
+}
+.monthly-hit-target {
+  fill: transparent;
+  stroke: transparent;
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+  cursor: crosshair;
+}
+.monthly-point-group:focus {
+  outline: none;
+}
+.monthly-point-group:hover .monthly-hit-target,
+.monthly-point-group:focus .monthly-hit-target {
+  fill: rgba(215, 181, 109, 0.12);
+  stroke: var(--amber);
+}
+.monthly-point-group:hover .monthly-point,
+.monthly-point-group:focus .monthly-point {
+  fill: var(--amber);
+  stroke-width: 3;
+}
+.monthly-tooltip {
+  position: absolute;
+  z-index: 4;
+  width: min(240px, calc(100% - 16px));
+  border: 1px solid var(--amber);
+  background: rgba(21, 22, 17, 0.97);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.32);
+  padding: 10px 12px;
+  pointer-events: none;
+}
+.monthly-tooltip-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 7px;
+}
+.monthly-tooltip-head strong {
+  color: var(--paper);
+}
+.monthly-tooltip-head span {
+  color: var(--amber);
+  font-size: 0.72rem;
+  text-align: right;
+}
+.monthly-tooltip ul {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.monthly-tooltip li {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+.monthly-tooltip li i {
+  width: 7px;
+  height: 7px;
+  background: var(--station-color);
+}
+.monthly-tooltip li strong {
+  color: var(--paper);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 .monthly-label {
   fill: var(--series-color);

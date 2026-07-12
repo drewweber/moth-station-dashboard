@@ -420,7 +420,7 @@ def daily_species_counts(settings: Settings, year: int | None = None) -> list[di
     for row in rows:
         taxon_id = row.get("taxon_id")
         sd = row.get("session_date")
-        if not taxon_id or sd is None:
+        if not taxon_id or sd is None or row.get("rank") != "species":
             continue
         if year is not None:
             if sd.year != year:
@@ -808,31 +808,48 @@ def dashboard_insights(settings: Settings, limit: int = 16) -> list[dict[str, An
             )
         )
 
+    seasonal_dates: dict[tuple[str, int], dict[str, Any]] = {}
+    for row in rows:
+        taxon_id = row.get("taxon_id")
+        sd = row.get("session_date")
+        if not taxon_id or not sd or row.get("rank") != "species":
+            continue
+        taxon_id = int(taxon_id)
+        item = seasonal_dates.setdefault(
+            (row["station_id"], taxon_id),
+            {
+                "taxon_id": taxon_id,
+                "label": row["label"],
+                "station_name": row["station_name"],
+                "days": set(),
+            },
+        )
+        item["days"].add(date(2000, sd.month, sd.day))
+
     longest = None
-    for taxon in taxa:
-        for station in taxon["stations"].values():
-            first = station.get("first")
-            latest_seen = station.get("latest")
-            if not first or not latest_seen:
-                continue
-            span = (latest_seen - first).days
-            if longest is None or span > longest[0]:
-                longest = (
-                    span,
-                    taxon["label"],
-                    station["station_name"],
-                    first,
-                    latest_seen,
-                    taxon["taxon_id"],
-                )
+    for item in seasonal_dates.values():
+        days = sorted(item["days"])
+        if len(days) < 3:
+            continue
+        span = (days[-1] - days[0]).days
+        if longest is None or span > longest[0]:
+            longest = (
+                span,
+                item["label"],
+                item["station_name"],
+                days[0],
+                days[-1],
+                item["taxon_id"],
+                len(days),
+            )
     if longest and longest[0] > 0:
-        span, label, station_name, first, latest_seen, taxon_id = longest
+        span, label, station_name, first, latest_seen, taxon_id, session_count = longest
         insights.append(
             _insight(
                 "Long flight period",
-                f"{label} has the longest tracked flight span",
-                f"{station_name} has records from {first.isoformat()} through {latest_seen.isoformat()}, a {span}-day span.",
-                "all time",
+                f"{label} has the longest tracked seasonal flight window",
+                f"{station_name} has records from {first:%b} {first.day} through {latest_seen:%b} {latest_seen.day} across {session_count} distinct moth dates, a {span}-day seasonal window.",
+                "month and day across synced years",
                 70,
                 subject=f"taxon:{taxon_id}",
             )
@@ -1163,11 +1180,25 @@ def trend_summary(settings: Settings) -> dict[str, Any]:
             )
 
     by_year_month: dict[int, dict[int, set[int]]] = defaultdict(lambda: defaultdict(set))
+    by_year_month_station: dict[
+        int, dict[int, dict[str, dict[str, Any]]]
+    ] = defaultdict(lambda: defaultdict(dict))
     for row in rows:
         taxon_id = row.get("taxon_id")
         sd = row.get("session_date")
-        if taxon_id and sd:
-            by_year_month[sd.year][sd.month].add(int(taxon_id))
+        if not taxon_id or not sd or row.get("rank") != "species":
+            continue
+        taxon_id = int(taxon_id)
+        by_year_month[sd.year][sd.month].add(taxon_id)
+        station = by_year_month_station[sd.year][sd.month].setdefault(
+            row["station_id"],
+            {
+                "station_id": row["station_id"],
+                "station_name": row["station_name"],
+                "taxa": set(),
+            },
+        )
+        station["taxa"].add(taxon_id)
     monthly_overlays = []
     for year, months in sorted(by_year_month.items()):
         values = [
@@ -1175,6 +1206,17 @@ def trend_summary(settings: Settings) -> dict[str, Any]:
                 "month": month,
                 "label": date(2000, month, 1).strftime("%b"),
                 "species": len(months.get(month, set())),
+                "stations": [
+                    {
+                        "station_id": station["station_id"],
+                        "station_name": station["station_name"],
+                        "species": len(station["taxa"]),
+                    }
+                    for station in sorted(
+                        by_year_month_station[year].get(month, {}).values(),
+                        key=lambda value: value["station_name"],
+                    )
+                ],
             }
             for month in range(1, 13)
         ]
