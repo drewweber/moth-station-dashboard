@@ -851,27 +851,91 @@ def _expected_next_list(rows: list[dict[str, Any]]) -> str:
     return f'<ul class="profile-species-list profile-watch-list">{"".join(items)}</ul>'
 
 
-def _profile_species_list(rows: list[dict[str, Any]], empty: str) -> str:
+def _signature_species_gallery(rows: list[dict[str, Any]]) -> str:
     if not rows:
-        return f'<p class="empty">{h(empty)}</p>'
-    items = []
+        return '<p class="empty">Signature species will appear after observations are shared across stations.</p>'
+    cards = []
     for row in rows:
-        detail = []
-        if "count" in row:
-            detail.append(f"{row['count']} obs")
-        if "share" in row:
-            detail.append(f"{row['share']:.0%} of network records")
-        elif row.get("latest"):
-            detail.append(f"latest {row['latest']}")
-        items.append(
-            f"""
-            <li>
-              <span>{h(row["label"])}</span>
-              <small>{h(" · ".join(detail))}</small>
-            </li>
-            """
+        label = h(row["label"])
+        media = (
+            f'<img src="{h(row["photo_url"])}" alt="{label}" loading="lazy">'
+            if row.get("photo_url")
+            else '<div class="signature-placeholder" aria-hidden="true">No photo</div>'
         )
-    return f'<ul class="profile-species-list">{"".join(items)}</ul>'
+        content = f"""
+          <div class="signature-media">{media}</div>
+          <div class="signature-copy">
+            <h3>{label}</h3>
+            <p>{h(row['count'])} observations here · {h(f"{row['share']:.0%}")} of its network records</p>
+            <small>Recorded at {h(row['station_count'])} tracked stations</small>
+          </div>
+        """
+        if row.get("url"):
+            cards.append(
+                f'<a class="signature-card" href="{h(row["url"])}" aria-label="View {label} on iNaturalist">{content}</a>'
+            )
+        else:
+            cards.append(f'<article class="signature-card">{content}</article>')
+    return f'<div class="signature-gallery">{"".join(cards)}</div>'
+
+
+def _distinctive_records(data: dict[str, Any]) -> str:
+    if not data.get("total"):
+        return '<p class="empty">No station-only species are available yet.</p>'
+
+    def record_rows(rows: list[dict[str, Any]], repeated: bool) -> str:
+        if not rows:
+            return '<p class="distinctive-empty">None in the current dataset.</p>'
+        items = []
+        for row in rows:
+            label = h(row["label"])
+            if repeated:
+                dates = str(row["first"])
+                if row.get("latest") and row["latest"] != row["first"]:
+                    dates += f" to {row['latest']}"
+                detail = (
+                    f"{row['session_count']} moth nights · {row['count']} observations · {dates}"
+                )
+            else:
+                detail = f"One moth night · {row['latest']}"
+            title = (
+                f'<a href="{h(row["url"])}">{label}</a>'
+                if row.get("url")
+                else label
+            )
+            items.append(
+                f"""
+                <li>
+                  <span>{title}</span>
+                  <small>{h(detail)}</small>
+                </li>
+                """
+            )
+        return f'<ol class="distinctive-list">{"".join(items)}</ol>'
+
+    return f"""
+      <div class="distinctive-overview" aria-label="Distinctive record summary">
+        <strong>{h(data['total'])}</strong>
+        <span>species currently found only here</span>
+        <small>{h(data['repeated_count'])} repeated across nights · {h(data['one_night_count'])} single-night records</small>
+      </div>
+      <div class="distinctive-ledger">
+        <section class="distinctive-group">
+          <div class="distinctive-heading">
+            <p>Repeated signal</p>
+            <span>Station-only species returning on multiple moth nights.</span>
+          </div>
+          {record_rows(data['repeated'], True)}
+        </section>
+        <section class="distinctive-group">
+          <div class="distinctive-heading">
+            <p>Worth confirming</p>
+            <span>Single-night leads to watch for here and across the network.</span>
+          </div>
+          {record_rows(data['one_night'], False)}
+        </section>
+      </div>
+    """
 
 
 def _profile_recent(rows: list[dict[str, Any]]) -> str:
@@ -1334,17 +1398,17 @@ def _station_profile_page(station: Station, profile: dict[str, Any], color: str)
     <section>
       <div class="section-head">
         <h2>Signature species</h2>
-        <p>Species most associated with this station based on its share of current network observations.</p>
+        <p>Shared species that lean most strongly toward this station, based on its share of their network observations.</p>
       </div>
-      {_profile_species_list(profile["signature_species"], "Signature species will appear after synced observations.")}
+      {_signature_species_gallery(profile["signature_species"])}
     </section>
 
     <section>
       <div class="section-head">
-        <h2>Frequently unique here</h2>
-        <p>Species currently recorded at this station and no other tracked station.</p>
+        <h2>Distinctive records</h2>
+        <p>Species found nowhere else in the tracked network, separated into repeat evidence and one-night leads.</p>
       </div>
-      {_profile_species_list(profile["unique_species"], "No station-unique species are available yet.")}
+      {_distinctive_records(profile["distinctive_records"])}
     </section>
 
     <section>
@@ -2611,10 +2675,13 @@ h2 {
   fill: var(--ink);
   font-weight: 650;
 }
-.profile-species-list {
+.profile-species-list,
+.distinctive-list {
   list-style: none;
   margin: 0;
   padding: 0;
+}
+.profile-species-list {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: 10px;
@@ -2639,6 +2706,171 @@ h2 {
 }
 .profile-watch-list li {
   min-height: 92px;
+}
+.signature-gallery {
+  display: grid;
+  grid-template-columns: 1.5fr repeat(3, minmax(0, 1fr));
+  min-height: 340px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--panel);
+}
+.signature-card {
+  min-width: 0;
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  min-height: 340px;
+  overflow: hidden;
+  color: var(--ink);
+  border-left: 1px solid var(--line);
+  text-decoration: none;
+}
+.signature-card:first-child {
+  border-left: 0;
+}
+.signature-media,
+.signature-media img,
+.signature-placeholder {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.signature-media img {
+  object-fit: cover;
+  transition: transform 220ms ease;
+}
+.signature-placeholder {
+  display: grid;
+  place-items: center;
+  color: var(--faint);
+  background: var(--panel-2);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.75rem;
+}
+.signature-copy {
+  width: 100%;
+  position: relative;
+  z-index: 1;
+  padding: 48px 14px 14px;
+  background: linear-gradient(to bottom, transparent, rgba(16, 17, 13, 0.94) 46%);
+}
+.signature-copy h3,
+.signature-copy p,
+.signature-copy small {
+  margin: 0;
+}
+.signature-copy h3 {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.16rem;
+  font-weight: 500;
+  line-height: 1.05;
+}
+.signature-card:first-child .signature-copy h3 {
+  font-size: 1.48rem;
+}
+.signature-copy p,
+.signature-copy small {
+  display: block;
+  margin-top: 7px;
+  color: var(--ink);
+  font-size: 0.78rem;
+  line-height: 1.3;
+}
+.signature-copy small {
+  color: var(--muted);
+}
+.signature-card:hover .signature-media img {
+  transform: scale(1.025);
+}
+.signature-card:focus-visible {
+  outline: 3px solid var(--amber);
+  outline-offset: -3px;
+}
+.distinctive-overview {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline;
+  column-gap: 12px;
+  padding: 0 0 18px;
+  border-bottom: 1px solid var(--line);
+}
+.distinctive-overview strong {
+  grid-row: span 2;
+  color: var(--amber);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 3rem;
+  font-weight: 500;
+  line-height: 0.9;
+}
+.distinctive-overview span {
+  color: var(--ink);
+  font-size: 1rem;
+}
+.distinctive-overview small {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+.distinctive-ledger {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 40px;
+  padding-top: 24px;
+}
+.distinctive-heading p,
+.distinctive-heading span {
+  margin: 0;
+}
+.distinctive-heading p {
+  color: var(--amber);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.82rem;
+  text-transform: uppercase;
+}
+.distinctive-heading span {
+  display: block;
+  min-height: 42px;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 0.85rem;
+  line-height: 1.35;
+}
+.distinctive-list {
+  margin-top: 10px;
+  counter-reset: distinctive;
+}
+.distinctive-list li {
+  counter-increment: distinctive;
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  padding: 11px 0;
+  border-top: 1px solid var(--line);
+}
+.distinctive-list li::before {
+  content: counter(distinctive, decimal-leading-zero);
+  color: var(--faint);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.68rem;
+}
+.distinctive-list span,
+.distinctive-list small {
+  grid-column: 2;
+}
+.distinctive-list span,
+.distinctive-list a {
+  color: var(--ink);
+  line-height: 1.25;
+}
+.distinctive-list a:hover {
+  color: var(--amber);
+}
+.distinctive-list small,
+.distinctive-empty {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.76rem;
 }
 .trend-grid {
   display: grid;
@@ -3517,6 +3749,21 @@ footer div {
   .profile-context {
     grid-template-columns: 1fr;
   }
+  .signature-gallery {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .signature-card,
+  .signature-card:first-child {
+    min-height: 280px;
+    border: 1px solid var(--line);
+  }
+  .signature-card:nth-child(odd) {
+    border-left: 0;
+  }
+  .distinctive-ledger {
+    grid-template-columns: 1fr;
+    gap: 30px;
+  }
   .trend-grid {
     grid-template-columns: 1fr;
   }
@@ -3572,6 +3819,30 @@ footer div {
   }
   .sighting-card {
     grid-template-columns: 92px minmax(0, 1fr);
+  }
+  .signature-gallery {
+    grid-template-columns: 1fr;
+  }
+  .signature-card,
+  .signature-card:first-child,
+  .signature-card:nth-child(odd) {
+    min-height: 260px;
+    border: 0;
+    border-top: 1px solid var(--line);
+  }
+  .signature-card:first-child {
+    min-height: 320px;
+    border-top: 0;
+  }
+  .signature-copy h3,
+  .signature-card:first-child .signature-copy h3 {
+    font-size: 1.3rem;
+  }
+  .distinctive-overview {
+    align-items: start;
+  }
+  .distinctive-overview strong {
+    font-size: 2.5rem;
   }
   .unique-filter-row,
   .unique-lists {

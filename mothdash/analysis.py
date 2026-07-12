@@ -973,37 +973,84 @@ def station_profile(settings: Settings, station_id: str) -> dict[str, Any]:
         if accumulation[-1]["species"] != len(seen):
             accumulation.append({"date": max(dates), "species": len(seen)})
 
+    taxon_evidence: dict[int, dict[str, Any]] = {}
+    for row in species_rows:
+        taxon_id = int(row["taxon_id"])
+        item = taxon_evidence.setdefault(
+            taxon_id,
+            {
+                "dates": set(),
+                "photo_url": None,
+                "photo_date": None,
+                "url": None,
+            },
+        )
+        sd = row.get("session_date")
+        if sd:
+            item["dates"].add(sd)
+        if row.get("photo_url") and (
+            item["photo_date"] is None or (sd and sd >= item["photo_date"])
+        ):
+            item["photo_url"] = row["photo_url"]
+            item["photo_date"] = sd
+            item["url"] = row.get("url")
+        elif row.get("url") and not item["url"]:
+            item["url"] = row["url"]
+
     signature = []
     for taxon in taxa:
         if taxon["taxon_id"] not in taxa_seen:
             continue
         entry = taxon["stations"].get(station_id)
-        if not entry:
+        if not entry or taxon["station_count"] < 2:
             continue
+        evidence = taxon_evidence.get(taxon["taxon_id"], {})
         total = max(1, taxon["total_count"])
         share = entry["count"] / total
         signature.append(
             {
+                "taxon_id": taxon["taxon_id"],
                 "label": taxon["label"],
                 "count": entry["count"],
                 "network_count": total,
                 "station_count": taxon["station_count"],
                 "share": share,
+                "photo_url": evidence.get("photo_url"),
+                "url": evidence.get("url"),
             }
         )
     signature = sorted(
         signature,
-        key=lambda item: (-item["share"], -item["count"], item["label"]),
-    )[:12]
+        key=lambda item: (
+            not bool(item.get("photo_url")),
+            -item["share"],
+            -item["count"],
+            item["label"],
+        ),
+    )[:4]
 
-    station_uniques = [
-        item for item in unique_taxa
-        if item["station_id"] == station_id and item["taxon_id"] in taxa_seen
-    ]
-    station_uniques = sorted(
-        station_uniques,
-        key=lambda item: (-item["count"], item["label"]),
-    )[:12]
+    station_uniques = []
+    for unique in unique_taxa:
+        if unique["station_id"] != station_id or unique["taxon_id"] not in taxa_seen:
+            continue
+        evidence = taxon_evidence.get(unique["taxon_id"], {})
+        seen_dates = sorted(evidence.get("dates", set()))
+        station_uniques.append({
+            **unique,
+            "session_count": len(seen_dates),
+            "first": seen_dates[0] if seen_dates else unique.get("first"),
+            "latest": seen_dates[-1] if seen_dates else unique.get("latest"),
+            "url": evidence.get("url"),
+        })
+    repeated_exclusives = sorted(
+        [item for item in station_uniques if item["session_count"] >= 2],
+        key=lambda item: (-item["session_count"], -item["count"], item["label"]),
+    )[:8]
+    one_night_leads = sorted(
+        [item for item in station_uniques if item["session_count"] == 1],
+        key=lambda item: (item["latest"] or date.min, item["label"]),
+        reverse=True,
+    )[:8]
 
     recent = sorted(
         rows,
@@ -1100,7 +1147,17 @@ def station_profile(settings: Settings, station_id: str) -> dict[str, Any]:
         "phenology_weeks": phenology_weeks,
         "accumulation": accumulation,
         "signature_species": signature,
-        "unique_species": station_uniques,
+        "distinctive_records": {
+            "total": len(station_uniques),
+            "repeated_count": sum(
+                1 for item in station_uniques if item["session_count"] >= 2
+            ),
+            "one_night_count": sum(
+                1 for item in station_uniques if item["session_count"] == 1
+            ),
+            "repeated": repeated_exclusives,
+            "one_night": one_night_leads,
+        },
         "expected_next": expected_next,
         "recent": recent,
         "narrative": " ".join(narrative_bits) if narrative_bits else "This station is configured and waiting for synced moth observations.",
