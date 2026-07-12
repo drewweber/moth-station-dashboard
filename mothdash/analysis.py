@@ -19,22 +19,11 @@ def parse_date(value: str | None) -> date | None:
         return None
 
 
-def seasonal_window(days: set[date]) -> tuple[date, date, int] | None:
-    """Return the shortest month/day arc containing all observations."""
-    if len(days) < 2:
-        return None
-    ordered = sorted(day.timetuple().tm_yday for day in days)
-    year_days = 366
-    gaps = []
-    for index, day_of_year in enumerate(ordered):
-        next_day = ordered[index + 1] if index + 1 < len(ordered) else ordered[0] + year_days
-        gaps.append((next_day - day_of_year, index))
-    largest_gap, gap_index = max(gaps)
-    start_day = ordered[(gap_index + 1) % len(ordered)]
-    end_day = ordered[gap_index]
-    start = date(2000, 1, 1) + timedelta(days=start_day - 1)
-    end = date(2000, 1, 1) + timedelta(days=end_day - 1)
-    return start, end, year_days - largest_gap
+def flight_season_date(day: date) -> tuple[int, date]:
+    """Group January with the preceding winter and normalize month/day."""
+    season_year = day.year - 1 if day.month == 1 else day.year
+    normalized_year = 2001 if day.month == 1 else 2000
+    return season_year, date(normalized_year, day.month, day.day)
 
 
 def session_date(observed_on: str | None, observed_at: str | None, cutoff_hour: int) -> date | None:
@@ -826,33 +815,34 @@ def dashboard_insights(settings: Settings, limit: int = 16) -> list[dict[str, An
             )
         )
 
-    seasonal_dates: dict[tuple[str, int], dict[str, Any]] = {}
+    seasonal_dates: dict[tuple[str, int, int], dict[str, Any]] = {}
     for row in rows:
         taxon_id = row.get("taxon_id")
         sd = row.get("session_date")
         if not taxon_id or not sd or row.get("rank") != "species":
             continue
         taxon_id = int(taxon_id)
+        season_year, normalized_date = flight_season_date(sd)
         item = seasonal_dates.setdefault(
-            (row["station_id"], taxon_id),
+            (row["station_id"], taxon_id, season_year),
             {
                 "taxon_id": taxon_id,
                 "label": row["label"],
                 "station_name": row["station_name"],
+                "season_year": season_year,
                 "days": set(),
             },
         )
-        item["days"].add(date(2000, sd.month, sd.day))
+        item["days"].add(normalized_date)
 
     longest = None
     for item in seasonal_dates.values():
         days = sorted(item["days"])
         if len(days) < 3:
             continue
-        window = seasonal_window(set(days))
-        if not window:
-            continue
-        first, latest_seen, span = window
+        first = days[0]
+        latest_seen = days[-1]
+        span = (latest_seen - first).days
         if longest is None or span > longest[0]:
             longest = (
                 span,
@@ -862,16 +852,16 @@ def dashboard_insights(settings: Settings, limit: int = 16) -> list[dict[str, An
                 latest_seen,
                 item["taxon_id"],
                 len(days),
+                item["season_year"],
             )
     if longest and longest[0] > 0:
-        span, label, station_name, first, latest_seen, taxon_id, session_count = longest
-        crossing_note = " across New Year" if first > latest_seen else ""
+        span, label, station_name, first, latest_seen, taxon_id, session_count, season_year = longest
         insights.append(
             _insight(
                 "Long flight period",
                 f"{label} has the longest tracked seasonal flight window",
-                f"{station_name} has records from {first:%b} {first.day} through {latest_seen:%b} {latest_seen.day}{crossing_note} across {session_count} distinct moth dates, a {span}-day seasonal window.",
-                "month and day across synced years",
+                f"{station_name} has records from {first:%b} {first.day} through {latest_seen:%b} {latest_seen.day} within the {season_year} flight season across {session_count} distinct moth dates, a {span}-day window.",
+                "longest single tracked season",
                 70,
                 subject=f"taxon:{taxon_id}",
             )
