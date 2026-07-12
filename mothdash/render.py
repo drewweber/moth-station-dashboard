@@ -25,7 +25,7 @@ from .analysis import (
     unique_station_taxa,
 )
 from .config import Settings, Station
-from .db import init_db
+from .db import connect, init_db
 
 
 FALLBACK_COLORS = [
@@ -1169,6 +1169,19 @@ def _public_live_query(settings: Settings, station: Station) -> tuple[dict[str, 
 def _snapshot_payload(settings: Settings, stations: list[Station], taxa: list[dict[str, Any]]) -> dict[str, Any]:
     known_taxa: dict[str, list[int]] = {}
     first_dates: dict[str, dict[str, str]] = {}
+    with connect(settings.database) as conn:
+        regional_counts = {
+            str(row["taxon_id"]): int(row["observation_count"])
+            for row in conn.execute(
+                """
+                SELECT o.taxon_id, COUNT(DISTINCT o.inat_obs_id) AS observation_count
+                FROM observations o
+                JOIN stations s ON s.id = o.station_id
+                WHERE s.enabled = 1 AND o.taxon_id IS NOT NULL
+                GROUP BY o.taxon_id
+                """
+            ).fetchall()
+        }
     for taxon in taxa:
         taxon_id = taxon.get("taxon_id")
         if not taxon_id:
@@ -1201,6 +1214,7 @@ def _snapshot_payload(settings: Settings, stations: list[Station], taxa: list[di
         "live_mode_hours": 2,
         "scan_minutes": 10,
         "poll_seconds": 60,
+        "regional_counts": regional_counts,
         "stations": enabled,
     }
 
@@ -1594,6 +1608,7 @@ function updateStationSummary(station, observations, now, eventWindow) {
       url: obs.uri || `https://www.inaturalist.org/observations/${obs.id}`,
       photo: obsPhoto(obs),
       count: 1,
+      regionalCount: Number((state.snapshot.regional_counts || {})[String(taxonId)] || 0),
     };
     addSpecies(summary.currentSpecies, item);
     if (item.photo && !summary.photos.some((photo) => photo.url === item.photo)) {
@@ -1616,19 +1631,23 @@ function updateStationSummary(station, observations, now, eventWindow) {
   return { stationFirsts, currentObs };
 }
 
-function renderSpeciesList(species, emptyText, excludedSpecies = new Set(), limit = 24) {
+function renderSpeciesList(species, emptyText, excludedSpecies = new Set(), limit = 24, rarityFirst = false) {
   const excluded = excludedSpecies instanceof Map
     ? new Set(excludedSpecies.keys())
     : excludedSpecies;
   const items = Array.from(species.values())
     .filter((item) => !excluded.has(item.taxonId))
-    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
+    .sort((a, b) => rarityFirst
+      ? a.regionalCount - b.regionalCount || b.count - a.count || a.label.localeCompare(b.label)
+      : b.count - a.count || a.label.localeCompare(b.label))
     .slice(0, limit);
   if (!items.length) return `<p class="live-muted">${escapeHtml(emptyText)}</p>`;
   return `<ul>${items.map((item) => `
     <li>
       <a href="${escapeHtml(item.url)}">${escapeHtml(item.label)}</a>
-      <span>${item.count > 1 ? `${item.count} obs` : "1 obs"}</span>
+      <span>${rarityFirst
+        ? `${item.count} event · ${item.regionalCount} regional`
+        : item.count > 1 ? `${item.count} obs` : "1 obs"}</span>
     </li>
   `).join("")}</ul>`;
 }
@@ -1694,7 +1713,7 @@ function renderStationSummaries() {
           </div>
           <div>
             <h3>Other species this event</h3>
-            ${renderSpeciesList(summary.currentSpecies, station.live_supported ? "No other species-level moths in this event yet." : station.live_note, summary.stationFirstSpecies, 40)}
+            ${renderSpeciesList(summary.currentSpecies, station.live_supported ? "No other species-level moths in this event yet." : station.live_note, summary.stationFirstSpecies, 40, true)}
           </div>
         </div>
       </article>
@@ -2040,6 +2059,11 @@ def _live_page() -> str:
   .live-muted {{
     color: var(--muted);
     font-size: 0.78rem;
+  }}
+  .live-station-lists li span {{
+    flex: 0 0 auto;
+    text-align: right;
+    white-space: nowrap;
   }}
   .live-muted {{
     margin: 0;
