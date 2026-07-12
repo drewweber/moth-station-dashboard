@@ -912,8 +912,12 @@ def station_profile(settings: Settings, station_id: str) -> dict[str, Any]:
     ]
     taxa = station_taxa(settings)
     unique_taxa = unique_station_taxa(settings)
+    species_rows = [
+        row for row in rows
+        if row.get("taxon_id") and row.get("rank") == "species"
+    ]
 
-    taxa_seen = {int(row["taxon_id"]) for row in rows if row.get("taxon_id")}
+    taxa_seen = {int(row["taxon_id"]) for row in species_rows}
     dates = [row["session_date"] for row in rows if row.get("session_date")]
     latest = max(dates) if dates else None
     first = min(dates) if dates else None
@@ -922,7 +926,7 @@ def station_profile(settings: Settings, station_id: str) -> dict[str, Any]:
     by_week: dict[int, dict[str, Any]] = defaultdict(
         lambda: {"taxa": set(), "observations": 0}
     )
-    for row in rows:
+    for row in species_rows:
         taxon_id = row.get("taxon_id")
         sd = row.get("session_date")
         if taxon_id and sd:
@@ -951,7 +955,7 @@ def station_profile(settings: Settings, station_id: str) -> dict[str, Any]:
         )
 
     taxa_by_date: dict[date, set[int]] = defaultdict(set)
-    for row in rows:
+    for row in species_rows:
         taxon_id = row.get("taxon_id")
         sd = row.get("session_date")
         if taxon_id and sd:
@@ -971,6 +975,8 @@ def station_profile(settings: Settings, station_id: str) -> dict[str, Any]:
 
     signature = []
     for taxon in taxa:
+        if taxon["taxon_id"] not in taxa_seen:
+            continue
         entry = taxon["stations"].get(station_id)
         if not entry:
             continue
@@ -992,7 +998,7 @@ def station_profile(settings: Settings, station_id: str) -> dict[str, Any]:
 
     station_uniques = [
         item for item in unique_taxa
-        if item["station_id"] == station_id
+        if item["station_id"] == station_id and item["taxon_id"] in taxa_seen
     ]
     station_uniques = sorted(
         station_uniques,
@@ -1011,14 +1017,14 @@ def station_profile(settings: Settings, station_id: str) -> dict[str, Any]:
     expected_next = []
     if latest:
         latest_year_taxa = {
-            int(row["taxon_id"]) for row in rows
+            int(row["taxon_id"]) for row in species_rows
             if row.get("taxon_id")
             and row.get("session_date")
             and row["session_date"].year == latest.year
         }
         start_day = latest.timetuple().tm_yday
         next_window: dict[int, dict[str, Any]] = {}
-        for row in rows:
+        for row in species_rows:
             taxon_id = row.get("taxon_id")
             sd = row.get("session_date")
             if not taxon_id or not sd:
@@ -1060,11 +1066,14 @@ def station_profile(settings: Settings, station_id: str) -> dict[str, Any]:
     active_sessions = len({row["session_date"] for row in rows if row.get("session_date")})
     observations = len(rows)
     species = len(taxa_seen)
-    unique_count = len([item for item in unique_taxa if item["station_id"] == station_id])
+    unique_count = len([
+        item for item in unique_taxa
+        if item["station_id"] == station_id and item["taxon_id"] in taxa_seen
+    ])
     narrative_bits = []
     if species:
         narrative_bits.append(
-            f"This station has documented {species} moth taxa from {observations} observations."
+            f"This station has documented {species} moth species from {observations} observations."
         )
     if active_sessions:
         narrative_bits.append(
@@ -1072,7 +1081,7 @@ def station_profile(settings: Settings, station_id: str) -> dict[str, Any]:
         )
     if unique_count:
         narrative_bits.append(
-            f"{unique_count} taxa are currently unique to this station within the tracked network."
+            f"{unique_count} species are currently unique to this station within the tracked network."
         )
     if signature:
         narrative_bits.append(

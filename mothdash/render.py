@@ -1253,7 +1253,7 @@ def _station_profile_page(station: Station, profile: dict[str, Any], color: str)
     )
     metrics = "".join(
         [
-            _profile_metric("moth taxa", f"{profile['species']:,}"),
+            _profile_metric("moth species", f"{profile['species']:,}"),
             _profile_metric("observations", f"{profile['observations']:,}"),
             _profile_metric("moth sessions", f"{profile['active_sessions']:,}"),
             _profile_metric("unique here", f"{profile['unique_count']:,}"),
@@ -1302,7 +1302,7 @@ def _station_profile_page(station: Station, profile: dict[str, Any], color: str)
     <section>
       <div class="section-head">
         <h2>Seasonal richness</h2>
-        <p>Unique moth taxa by month, using all synced observations for this station.</p>
+        <p>Unique moth species by month, using all synced observations for this station.</p>
       </div>
       <div class="profile-chart">{_seasonal_bars(profile)}</div>
     </section>
@@ -1310,7 +1310,7 @@ def _station_profile_page(station: Station, profile: dict[str, Any], color: str)
     <section>
       <div class="section-head">
         <h2>Phenology calendar</h2>
-        <p>Weekly unique moth taxa for this station across all synced years. Darker weeks have richer station activity.</p>
+        <p>Weekly unique moth species for this station across all synced years. Darker weeks have richer station activity.</p>
       </div>
       <div class="profile-chart">{_profile_phenology_calendar(profile)}</div>
     </section>
@@ -3729,7 +3729,7 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
     <section id="calendar">
       <div class="section-head">
         <h2>Daily species calendar</h2>
-        <p>Station cells show unique moth taxa per station per night. The total column is the unique species union across stations, not a sum of site counts.</p>
+        <p>Station cells show unique moth species per station per night. The total column is the unique species union across stations, not a sum of site counts.</p>
       </div>
       {_view_toggle("Calendar view", ("calendar-year", f"{year} dates" if year else "Current dates"), ("calendar-all-years", "All years"))}
       <div class="view-panel" id="calendar-year"><div class="table-wrap">{_calendar_table(year_calendar, stations, "year")}</div></div>
