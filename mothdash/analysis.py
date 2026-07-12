@@ -19,6 +19,24 @@ def parse_date(value: str | None) -> date | None:
         return None
 
 
+def seasonal_window(days: set[date]) -> tuple[date, date, int] | None:
+    """Return the shortest month/day arc containing all observations."""
+    if len(days) < 2:
+        return None
+    ordered = sorted(day.timetuple().tm_yday for day in days)
+    year_days = 366
+    gaps = []
+    for index, day_of_year in enumerate(ordered):
+        next_day = ordered[index + 1] if index + 1 < len(ordered) else ordered[0] + year_days
+        gaps.append((next_day - day_of_year, index))
+    largest_gap, gap_index = max(gaps)
+    start_day = ordered[(gap_index + 1) % len(ordered)]
+    end_day = ordered[gap_index]
+    start = date(2000, 1, 1) + timedelta(days=start_day - 1)
+    end = date(2000, 1, 1) + timedelta(days=end_day - 1)
+    return start, end, year_days - largest_gap
+
+
 def session_date(observed_on: str | None, observed_at: str | None, cutoff_hour: int) -> date | None:
     base = parse_date(observed_on)
     if base is None:
@@ -831,24 +849,28 @@ def dashboard_insights(settings: Settings, limit: int = 16) -> list[dict[str, An
         days = sorted(item["days"])
         if len(days) < 3:
             continue
-        span = (days[-1] - days[0]).days
+        window = seasonal_window(set(days))
+        if not window:
+            continue
+        first, latest_seen, span = window
         if longest is None or span > longest[0]:
             longest = (
                 span,
                 item["label"],
                 item["station_name"],
-                days[0],
-                days[-1],
+                first,
+                latest_seen,
                 item["taxon_id"],
                 len(days),
             )
     if longest and longest[0] > 0:
         span, label, station_name, first, latest_seen, taxon_id, session_count = longest
+        crossing_note = " across New Year" if first > latest_seen else ""
         insights.append(
             _insight(
                 "Long flight period",
                 f"{label} has the longest tracked seasonal flight window",
-                f"{station_name} has records from {first:%b} {first.day} through {latest_seen:%b} {latest_seen.day} across {session_count} distinct moth dates, a {span}-day seasonal window.",
+                f"{station_name} has records from {first:%b} {first.day} through {latest_seen:%b} {latest_seen.day}{crossing_note} across {session_count} distinct moth dates, a {span}-day seasonal window.",
                 "month and day across synced years",
                 70,
                 subject=f"taxon:{taxon_id}",
