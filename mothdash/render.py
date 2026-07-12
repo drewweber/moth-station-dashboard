@@ -1666,7 +1666,7 @@ function renderStationSummaries() {
           <span>${escapeHtml(status)}</span>
         </div>
         <div class="live-stats">
-          <div><strong>${summary.observationCount}</strong><span>species-level uploads</span></div>
+          <div><strong>${summary.observationCount}</strong><span>moth-night uploads</span></div>
           <div><strong>${summary.newSpeciesCount}</strong><span>new station species</span></div>
           <div><strong>${escapeHtml(summary.latestDetectedAt || "not yet")}</strong><span>latest added</span></div>
         </div>
@@ -1677,8 +1677,8 @@ function renderStationSummaries() {
             ${renderSpeciesList(summary.newSpecies, station.live_supported ? "No new station species yet." : station.live_note)}
           </div>
           <div>
-            <h3>Seen tonight</h3>
-            ${renderSpeciesList(summary.currentSpecies, summary.checked ? "No additional species-level moths in this scan." : "Waiting for the first check.", summary.newSpecies)}
+            <h3>Also in this moth night</h3>
+            ${renderSpeciesList(summary.currentSpecies, summary.checked ? "No additional species beyond the new-build list." : "Waiting for the first check.", summary.newSpecies)}
           </div>
         </div>
       </article>
