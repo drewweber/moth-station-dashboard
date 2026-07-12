@@ -1173,6 +1173,7 @@ def trend_summary(settings: Settings) -> dict[str, Any]:
         return {
             "phenology": [],
             "network_accumulation": [],
+            "station_launches": [],
             "monthly_overlays": [],
             "rank_abundance": [],
             "station_similarity": [],
@@ -1228,9 +1229,18 @@ def trend_summary(settings: Settings) -> dict[str, Any]:
         )
 
     taxa_by_date: dict[date, set[int]] = defaultdict(set)
+    station_first_dates: dict[str, dict[str, Any]] = {}
     for row in rows:
         taxon_id = row.get("taxon_id")
         sd = row.get("session_date")
+        if sd:
+            launch = station_first_dates.get(row["station_id"])
+            if launch is None or sd < launch["date"]:
+                station_first_dates[row["station_id"]] = {
+                    "station_id": row["station_id"],
+                    "station_name": row["station_name"],
+                    "date": sd,
+                }
         if taxon_id and sd:
             taxa_by_date[sd].add(int(taxon_id))
     seen = set()
@@ -1258,6 +1268,16 @@ def trend_summary(settings: Settings) -> dict[str, Any]:
                     "new_species": 0,
                 }
             )
+    station_launches = [
+        {
+            **launch,
+            "date": launch["date"].isoformat(),
+        }
+        for launch in sorted(
+            station_first_dates.values(),
+            key=lambda item: (item["date"], item["station_name"]),
+        )
+    ]
 
     by_year_month: dict[int, dict[int, set[int]]] = defaultdict(lambda: defaultdict(set))
     by_year_month_station: dict[
@@ -1361,6 +1381,7 @@ def trend_summary(settings: Settings) -> dict[str, Any]:
     return {
         "phenology": phenology,
         "network_accumulation": network_accumulation,
+        "station_launches": station_launches,
         "monthly_overlays": monthly_overlays,
         "rank_abundance": rank_abundance,
         "station_similarity": station_similarity,
@@ -1395,12 +1416,13 @@ def record_highlights(settings: Settings) -> list[dict[str, Any]]:
     return sorted(
         highlights,
         key=lambda item: (
-            not item["is_state_first"],
-            not item["is_county_first"],
-            not item["first_among_tracked"],
-            item["first"] or date.max,
+            item["first"] or date.min,
+            item["is_state_first"],
+            item["is_county_first"],
+            item["first_among_tracked"],
             item["label"],
         ),
+        reverse=True,
     )
 
 

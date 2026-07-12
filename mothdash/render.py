@@ -413,7 +413,7 @@ def _record_table(rows: list[dict[str, Any]]) -> str:
             <tr>
               <td>{h(row["label"])}</td>
               <td>{h(row["station_name"])}</td>
-              <td>{h(row["first"])}</td>
+              <td data-sort-value="{h(row['first'])}">{h(row["first"])}</td>
               <td>{_flag_list(row["flags"])}</td>
             </tr>
             """
@@ -424,7 +424,7 @@ def _record_table(rows: list[dict[str, Any]]) -> str:
         <tr>
           <th scope="col">{_sort_button("Species")}</th>
           <th scope="col">{_sort_button("Station")}</th>
-          <th scope="col">{_sort_button("Station first", "date")}</th>
+          <th scope="col">{_sort_button("Station first", "date", "desc")}</th>
           <th scope="col">{_sort_button("Flags")}</th>
         </tr>
       </thead>
@@ -694,8 +694,8 @@ def _calendar_table(rows: list[dict[str, Any]], stations: list[Station], mode: s
     <table class="sortable-table calendar-table" aria-label="{h(label)} species counts by station">
       <thead>
         <tr>
-          <th scope="col">{_sort_button(label, "text")}</th>
-          <th scope="col">{_sort_button("Active stations", "number", "desc")}</th>
+          <th scope="col">{_sort_button(label, "date", "desc")}</th>
+          <th scope="col">{_sort_button("Active stations", "number")}</th>
           <th scope="col">{_sort_button("Unique spp.", "number")}</th>
           {headers}
         </tr>
@@ -989,7 +989,11 @@ def _phenology_ribbons(rows: list[dict[str, Any]]) -> str:
     return "".join(items)
 
 
-def _network_accumulation(rows: list[dict[str, Any]]) -> str:
+def _network_accumulation(
+    rows: list[dict[str, Any]],
+    launches: list[dict[str, Any]],
+    stations: list[Station],
+) -> str:
     if not rows:
         return '<p class="empty">Network accumulation will appear after synced observations.</p>'
     max_species = max(row["species"] for row in rows)
@@ -1022,6 +1026,30 @@ def _network_accumulation(rows: list[dict[str, Any]]) -> str:
             </circle>
             """
         )
+    colors = _station_color_map(stations)
+    station_lookup = {station.id: station for station in stations}
+    launch_markers = []
+    launch_legend = []
+    for launch in launches:
+        launch_date = date.fromisoformat(launch["date"])
+        if launch_date < min_date or launch_date > max_date:
+            continue
+        x = left + ((launch_date.toordinal() - min_date.toordinal()) / date_span * plot_width)
+        color = colors.get(launch["station_id"], FALLBACK_COLORS[0])
+        station = station_lookup.get(launch["station_id"])
+        short_label = _station_short_label(station) if station else launch["station_name"]
+        launch_markers.append(
+            f"""
+            <g class="station-launch-marker" style="--station-color: {h(color)}">
+              <line x1="{x:.1f}" y1="{top}" x2="{x:.1f}" y2="{top + plot_height}"></line>
+              <circle cx="{x:.1f}" cy="{top + plot_height:.1f}" r="4.2"></circle>
+              <title>{h(launch['station_name'])} came online {h(launch_date)}</title>
+            </g>
+            """
+        )
+        launch_legend.append(
+            f'<li style="--station-color: {h(color)}"><i></i><span>{h(short_label)}</span><time datetime="{h(launch_date)}">{h(launch_date)}</time></li>'
+        )
     latest = rows[-1]
     return f"""
     <figure class="accumulation-line-chart network-line-chart">
@@ -1036,10 +1064,15 @@ def _network_accumulation(rows: list[dict[str, Any]]) -> str:
         <text class="chart-label" x="{left}" y="{height - 12}" text-anchor="start">{h(min_date)}</text>
         <text class="chart-label" x="{left + plot_width}" y="{height - 12}" text-anchor="end">{h(max_date)}</text>
         <polygon class="accumulation-area" points="{area_attr}"></polygon>
+        {''.join(launch_markers)}
         <polyline class="accumulation-line" points="{point_attr}"></polyline>
         {''.join(markers)}
         <text class="chart-callout" x="{points[-1][0] - 8:.1f}" y="{points[-1][1] - 10:.1f}" text-anchor="end">{h(latest["species"])} species</text>
       </svg>
+      <div class="station-launches">
+        <p>Stations online</p>
+        <ul>{''.join(launch_legend)}</ul>
+      </div>
     </figure>
     """
 
@@ -1061,11 +1094,15 @@ def _monthly_overlays(rows: list[dict[str, Any]], stations: list[Station]) -> st
     colors = ["#d7b56d", "#8aa77a", "#7fb3d5", "#cf7d92", "#9b8ed4"]
     enabled_stations = [station for station in stations if station.enabled]
     station_colors = _station_color_map(stations)
+    series_rows = rows[-5:]
     polylines = []
     markers = []
-    labels = []
-    for index, row in enumerate(rows[-5:]):
+    legend = []
+    for index, row in enumerate(series_rows):
         color = colors[index % len(colors)]
+        legend.append(
+            f'<li style="--series-color: {h(color)}"><i></i><strong>{h(row["year"])}</strong><span>{h(row["total_species"])} total species</span></li>'
+        )
         points = []
         for month in row["months"]:
             x = left + ((month["month"] - 1) / 11 * plot_width)
@@ -1108,10 +1145,6 @@ def _monthly_overlays(rows: list[dict[str, Any]], stations: list[Station]) -> st
                 </g>
                 """
             )
-        last_x, last_y, _ = points[-1]
-        labels.append(
-            f'<text class="monthly-label" style="--series-color: {h(color)}" x="{last_x + 8:.1f}" y="{last_y + 4:.1f}">{h(row["year"])}</text>'
-        )
     month_labels = []
     for month in [1, 4, 7, 10, 12]:
         x = left + ((month - 1) / 11 * plot_width)
@@ -1121,6 +1154,7 @@ def _monthly_overlays(rows: list[dict[str, Any]], stations: list[Station]) -> st
         )
     return f"""
     <figure class="monthly-overlay-chart">
+      <ul class="monthly-legend" aria-label="Year legend">{''.join(legend)}</ul>
       <svg viewBox="0 0 {width} {height}" role="img" aria-labelledby="monthly-overlay-title monthly-overlay-desc" preserveAspectRatio="none">
         <title id="monthly-overlay-title">Monthly species richness by year</title>
         <desc id="monthly-overlay-desc">One line per year showing unique moth species by month across the station network. Focus or point at a month to compare station values.</desc>
@@ -1132,7 +1166,6 @@ def _monthly_overlays(rows: list[dict[str, Any]], stations: list[Station]) -> st
         {''.join(month_labels)}
         {''.join(polylines)}
         {''.join(markers)}
-        {''.join(labels)}
       </svg>
       <div class="monthly-tooltip" role="tooltip" hidden></div>
     </figure>
@@ -1216,7 +1249,7 @@ def _trend_section(trends: dict[str, Any], stations: list[Station]) -> str:
       <article class="trend-panel">
         <h3>Network accumulation</h3>
         <p>Running species list across all tracked stations.</p>
-        {_network_accumulation(trends["network_accumulation"])}
+        {_network_accumulation(trends["network_accumulation"], trends["station_launches"], stations)}
       </article>
       <article class="trend-panel">
         <h3>Monthly overlays</h3>
@@ -3050,9 +3083,89 @@ h2 {
 .network-line-chart circle {
   stroke: var(--leaf);
 }
+.station-launch-marker line {
+  stroke: var(--station-color);
+  stroke-width: 1;
+  stroke-dasharray: 3 5;
+  opacity: 0.7;
+  vector-effect: non-scaling-stroke;
+}
+.network-line-chart .station-launch-marker circle {
+  fill: var(--panel);
+  stroke: var(--station-color);
+  stroke-width: 3;
+  vector-effect: non-scaling-stroke;
+}
+.station-launches {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 10px 2px 0;
+}
+.station-launches p {
+  flex: 0 0 auto;
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+}
+.station-launches ul,
+.monthly-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.station-launches li {
+  display: grid;
+  grid-template-columns: 8px auto;
+  align-items: center;
+  column-gap: 6px;
+  color: var(--ink);
+  font-size: 0.72rem;
+}
+.station-launches li i {
+  grid-row: span 2;
+  width: 7px;
+  height: 7px;
+  border: 2px solid var(--station-color);
+  border-radius: 50%;
+}
+.station-launches time {
+  color: var(--muted);
+  font-size: 0.64rem;
+  font-variant-numeric: tabular-nums;
+}
 .monthly-overlay-chart {
   margin: 0;
   position: relative;
+}
+.monthly-legend {
+  margin-bottom: 10px;
+}
+.monthly-legend li {
+  display: grid;
+  grid-template-columns: 20px auto;
+  align-items: center;
+  column-gap: 7px;
+}
+.monthly-legend i {
+  grid-row: span 2;
+  width: 20px;
+  height: 3px;
+  background: var(--series-color);
+}
+.monthly-legend strong {
+  color: var(--ink);
+  font-size: 0.74rem;
+  line-height: 1;
+}
+.monthly-legend span {
+  color: var(--muted);
+  font-size: 0.64rem;
+  line-height: 1.2;
 }
 .monthly-overlay-chart svg {
   width: 100%;
@@ -3141,12 +3254,6 @@ h2 {
 .monthly-tooltip li strong {
   color: var(--paper);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-}
-.monthly-label {
-  fill: var(--series-color);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.78rem;
-  font-weight: 650;
 }
 .rank-row {
   display: grid;
@@ -3501,6 +3608,18 @@ h2 {
 .record-card p {
   margin: 0;
   color: var(--muted);
+}
+.record-archive {
+  border-top: 1px solid var(--line);
+}
+.record-archive summary {
+  cursor: pointer;
+  padding: 13px 2px;
+  color: var(--amber);
+  font-size: 0.86rem;
+}
+.record-archive[open] summary {
+  margin-bottom: 8px;
 }
 .unique-filter-row {
   display: grid;
@@ -4101,11 +4220,14 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
 
     <section id="records">
       <div class="section-head">
-        <h2>Record flags</h2>
-        <p>County and state labels are iNaturalist firsts. Tracked labels mark the first station in this dashboard to record that moth.</p>
+        <h2>Recent firsts</h2>
+        <p>The newest county, state, and tracked-network firsts, ordered by observation date.</p>
       </div>
       <div class="record-grid">{_record_cards(records)}</div>
-      <div class="table-wrap">{_record_table(records)}</div>
+      <details class="record-archive">
+        <summary>Browse all flagged firsts ({h(len(records))})</summary>
+        <div class="table-wrap">{_record_table(records)}</div>
+      </details>
     </section>
 
     <section id="unique">
