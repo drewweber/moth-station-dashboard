@@ -838,7 +838,7 @@ def dashboard_insights(settings: Settings, limit: int = 16) -> list[dict[str, An
     longest = None
     for item in seasonal_dates.values():
         days = sorted(item["days"])
-        if len(days) < 3:
+        if len(days) < 10:
             continue
         first = days[0]
         latest_seen = days[-1]
