@@ -1089,6 +1089,8 @@ def station_profile(settings: Settings, station_id: str) -> dict[str, Any]:
                     "records": 0,
                     "days": [],
                     "seen_this_year": taxon_id in latest_year_taxa,
+                    "photo_url": taxon_evidence.get(taxon_id, {}).get("photo_url"),
+                    "url": taxon_evidence.get(taxon_id, {}).get("url"),
                 },
             )
             item["records"] += 1

@@ -721,25 +721,6 @@ def _profile_metric(label: str, value: Any) -> str:
     return f'<div class="profile-metric"><strong>{h(value)}</strong><span>{h(label)}</span></div>'
 
 
-def _profile_context(station: Station) -> str:
-    items = [
-        ("Habitat", station.habitat),
-        ("Light setup", station.light_setup),
-        ("Station history", station.station_history),
-    ]
-    rows = []
-    for label, value in items:
-        rows.append(
-            f"""
-            <article class="profile-context-item">
-              <p>{h(label)}</p>
-              <span>{h(value) if value else "Not documented yet."}</span>
-            </article>
-            """
-        )
-    return "".join(rows)
-
-
 def _seasonal_bars(profile: dict[str, Any]) -> str:
     rows = profile["seasonal_richness"]
     max_species = max([row["species"] for row in rows] + [1])
@@ -839,16 +820,31 @@ def _expected_next_list(rows: list[dict[str, Any]]) -> str:
         return '<p class="empty">No next-flight suggestions are available from the current station history.</p>'
     items = []
     for row in rows:
+        label = h(row["label"])
         status = "already seen this year" if row["seen_this_year"] else "not yet seen this year"
+        media = (
+            f'<img src="{h(row["photo_url"])}" alt="{label}" loading="lazy">'
+            if row.get("photo_url")
+            else '<div class="watch-placeholder" aria-hidden="true">No photo</div>'
+        )
+        title = (
+            f'<a href="{h(row["url"])}">{label}</a>'
+            if row.get("url")
+            else label
+        )
         items.append(
             f"""
-            <li>
-              <span>{h(row["label"])}</span>
-              <small>{h(row["window"])} · {h(row["records"])} historical record{'s' if row["records"] != 1 else ''} · {h(status)}</small>
+            <li class="watch-card">
+              <div class="watch-image">{media}</div>
+              <div class="watch-copy">
+                <span>{title}</span>
+                <small>{h(row["window"])} · {h(row["records"])} historical record{'s' if row["records"] != 1 else ''}</small>
+                <em>{h(status)}</em>
+              </div>
             </li>
             """
         )
-    return f'<ul class="profile-species-list profile-watch-list">{"".join(items)}</ul>'
+    return f'<ul class="watch-grid">{"".join(items)}</ul>'
 
 
 def _signature_species_gallery(rows: list[dict[str, Any]]) -> str:
@@ -1360,7 +1356,6 @@ def _station_profile_page(station: Station, profile: dict[str, Any], color: str)
         <h2>Station story</h2>
         <p>{h(profile["narrative"])}</p>
       </div>
-      <div class="profile-context">{_profile_context(station)}</div>
     </section>
 
     <section>
@@ -1390,7 +1385,7 @@ def _station_profile_page(station: Station, profile: dict[str, Any], color: str)
     <section>
       <div class="section-head">
         <h2>Watch next</h2>
-        <p>Species historically recorded at this station in the 30 calendar days after the latest synced session.</p>
+        <p>A visual field guide to species historically recorded here in the 30 calendar days after the latest synced session.</p>
       </div>
       {_expected_next_list(profile["expected_next"])}
     </section>
@@ -2393,28 +2388,33 @@ nav a {
   margin-top: 14px;
 }
 .profile-metrics {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 1px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
   margin-top: 30px;
-  border: 1px solid var(--line);
-  background: var(--line);
 }
 .profile-metric {
-  min-height: 92px;
-  padding: 12px;
-  background: var(--panel);
+  min-width: 0;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 9px 14px;
+  border: 1px solid color-mix(in srgb, var(--station-color) 46%, var(--line));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--station-color) 9%, var(--panel));
 }
 .profile-metric strong {
-  display: block;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: clamp(1.02rem, 1.8vw, 1.5rem);
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 0.96rem;
   color: var(--ink);
+  font-weight: 720;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 .profile-metric span {
   color: var(--muted);
-  font-size: 0.82rem;
+  font-size: 0.76rem;
+  white-space: nowrap;
 }
 .hero-copy {
   grid-column: 1;
@@ -2553,27 +2553,6 @@ h2 {
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: 10px;
 }
-.profile-context {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-}
-.profile-context-item {
-  min-height: 150px;
-  padding: 16px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--panel);
-}
-.profile-context-item p {
-  margin: 0 0 12px;
-  color: var(--amber);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.78rem;
-}
-.profile-context-item span {
-  color: var(--muted);
-}
 .profile-chart {
   padding: 14px;
   border: 1px solid var(--line);
@@ -2668,12 +2647,14 @@ h2 {
 .chart-label,
 .chart-callout {
   fill: var(--muted);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.78rem;
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
 }
 .chart-callout {
   fill: var(--ink);
-  font-weight: 650;
+  font-size: 0.76rem;
+  font-weight: 720;
 }
 .profile-species-list,
 .distinctive-list {
@@ -2704,8 +2685,74 @@ h2 {
   color: var(--muted);
   font-size: 0.78rem;
 }
-.profile-watch-list li {
-  min-height: 92px;
+.watch-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(330px, 1fr));
+  gap: 10px;
+}
+.watch-card {
+  min-width: 0;
+  min-height: 124px;
+  display: grid;
+  grid-template-columns: 118px minmax(0, 1fr);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--panel);
+}
+.watch-image {
+  min-height: 124px;
+  background: var(--panel-2);
+}
+.watch-image img,
+.watch-placeholder {
+  width: 100%;
+  height: 100%;
+}
+.watch-image img {
+  display: block;
+  object-fit: cover;
+}
+.watch-placeholder {
+  display: grid;
+  place-items: center;
+  color: var(--faint);
+  font-size: 0.72rem;
+}
+.watch-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 12px;
+}
+.watch-copy span,
+.watch-copy a {
+  color: var(--ink);
+  font-weight: 650;
+  line-height: 1.18;
+}
+.watch-copy a:hover {
+  color: var(--amber);
+}
+.watch-copy small,
+.watch-copy em {
+  display: block;
+  margin-top: 7px;
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-style: normal;
+  line-height: 1.3;
+}
+.watch-copy em {
+  margin-top: 5px;
+  color: var(--amber);
+  font-size: 0.68rem;
+  text-transform: uppercase;
 }
 .signature-gallery {
   display: grid;
@@ -3745,10 +3792,6 @@ footer div {
   .hero-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-  .profile-metrics,
-  .profile-context {
-    grid-template-columns: 1fr;
-  }
   .signature-gallery {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -3819,6 +3862,12 @@ footer div {
   }
   .sighting-card {
     grid-template-columns: 92px minmax(0, 1fr);
+  }
+  .watch-grid {
+    grid-template-columns: 1fr;
+  }
+  .watch-card {
+    grid-template-columns: 104px minmax(0, 1fr);
   }
   .signature-gallery {
     grid-template-columns: 1fr;
