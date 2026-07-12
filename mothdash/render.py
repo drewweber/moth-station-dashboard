@@ -150,7 +150,10 @@ def _photo_strip(rows: list[dict[str, Any]]) -> str:
             f"""
             <a class="photo-tile" href="{h(row.get("url"))}" aria-label="{h(label)} at {h(station)}">
               <img src="{h(url)}" alt="{h(label)}" loading="lazy">
-              <span>{h(station)}</span>
+              <span>
+                <strong>{h(label)}</strong>
+                <small>{h(station)}</small>
+              </span>
             </a>
             """
         )
@@ -2446,56 +2449,69 @@ h1, h2 {
 }
 .hero-metrics {
   grid-column: 1;
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 1px;
-  border: 1px solid var(--line);
-  background: var(--line);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 .hero-metric {
-  min-height: 92px;
-  padding: 12px;
-  background: var(--panel);
+  min-width: 0;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 9px 14px;
+  border: 1px solid color-mix(in srgb, var(--amber) 46%, var(--line));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--amber) 9%, var(--panel));
 }
 .hero-metric strong {
-  display: block;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: clamp(1.18rem, 2.2vw, 1.7rem);
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 0.96rem;
+  font-weight: 720;
   color: var(--ink);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 .hero-metric-compact strong {
-  font-size: clamp(0.95rem, 1.45vw, 1.18rem);
+  font-size: 0.88rem;
 }
 .hero-metric span {
   color: var(--muted);
-  font-size: 0.82rem;
+  font-size: 0.76rem;
+  white-space: nowrap;
 }
 .photo-rail {
   grid-column: 2;
   grid-row: 1 / span 2;
   display: grid;
   grid-template-columns: repeat(4, 1fr);
+  grid-auto-flow: row dense;
+  grid-auto-rows: 132px;
   gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+  border-radius: 6px;
 }
 .photo-tile {
+  min-width: 0;
+  min-height: 0;
   position: relative;
   display: block;
-  min-height: 132px;
   overflow: hidden;
   background: #322f21;
   color: var(--ink);
   text-decoration: none;
 }
-.photo-tile:nth-child(1),
+.photo-tile:nth-child(1) {
+  grid-column: span 2;
+  grid-row: span 2;
+}
 .photo-tile:nth-child(6) {
   grid-column: span 2;
 }
 .photo-tile img {
+  display: block;
   width: 100%;
   height: 100%;
-  min-height: 132px;
   object-fit: cover;
   filter: saturate(0.95) contrast(1.08) brightness(1.08);
   opacity: 0.96;
@@ -2505,15 +2521,42 @@ h1, h2 {
   transform: scale(1.025);
   opacity: 1;
 }
+.photo-tile:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: -3px;
+  z-index: 2;
+}
 .photo-tile span {
   position: absolute;
-  left: 8px;
-  bottom: 8px;
-  max-width: calc(100% - 16px);
-  padding: 3px 7px;
-  background: rgba(21, 22, 17, 0.82);
+  inset: auto 0 0;
+  min-width: 0;
+  padding: 28px 10px 9px;
+  background: linear-gradient(to bottom, transparent, rgba(14, 15, 11, 0.92) 56%);
   color: var(--ink);
-  font-size: 0.72rem;
+}
+.photo-tile strong,
+.photo-tile small {
+  display: block;
+  min-width: 0;
+}
+.photo-tile strong {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 0.75rem;
+  font-weight: 650;
+  line-height: 1.16;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.photo-tile small {
+  margin-top: 4px;
+  overflow: hidden;
+  color: var(--amber);
+  font-size: 0.64rem;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .photo-empty {
   min-height: 280px;
@@ -3789,8 +3832,15 @@ footer div {
     grid-column: auto;
     grid-row: auto;
   }
+  .hero-copy {
+    order: 1;
+  }
   .hero-metrics {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    order: 2;
+  }
+  .photo-rail {
+    order: 3;
+    grid-auto-rows: 146px;
   }
   .signature-gallery {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -3847,18 +3897,38 @@ footer div {
   h1 {
     font-size: clamp(3rem, 17vw, 5rem);
   }
-  .hero-metrics {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
   .insight-grid {
     grid-template-columns: 1fr;
   }
   .photo-rail {
-    grid-template-columns: repeat(2, 1fr);
+    width: calc(100vw - 16px);
+    margin-right: calc(50% - 50vw);
+    padding-right: 16px;
+    display: grid;
+    grid-template-columns: none;
+    grid-template-rows: 230px;
+    grid-auto-flow: column;
+    grid-auto-columns: min(78vw, 320px);
+    grid-auto-rows: auto;
+    gap: 8px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    border-radius: 0;
+    scroll-padding-left: 0;
+    scroll-snap-type: x mandatory;
+    scrollbar-width: none;
+    overscroll-behavior-inline: contain;
+    touch-action: pan-x;
   }
+  .photo-rail::-webkit-scrollbar {
+    display: none;
+  }
+  .photo-tile,
   .photo-tile:nth-child(1),
   .photo-tile:nth-child(6) {
-    grid-column: span 1;
+    grid-column: auto;
+    grid-row: 1;
+    scroll-snap-align: start;
   }
   .sighting-card {
     grid-template-columns: 92px minmax(0, 1fr);
