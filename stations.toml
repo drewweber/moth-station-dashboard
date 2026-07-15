@@ -39,7 +39,7 @@ notes = "iNaturalist project station."
 
 [[stations]]
 id = "dombroskie-homestead"
-name = "Dombroskie Homestead Inventory"
+name = "Dombroskie Homestead"
 enabled = true
 project_id = "dombroskie-homestead-inventory"
 county_place_id = 1082
