@@ -87,7 +87,7 @@ def _sort_button(label: str, sort_type: str = "text", default: str = "") -> str:
 
 def _station_short_label(station: Station) -> str:
     labels = {
-        "kingfisher": "KH",
+        "kingfisher": "Kingfisher",
         "bosque-neimi": "Bosque",
         "dombroskie-homestead": "Dombroskie",
         "zeledonia-monkey-run": "Monkey Run",
@@ -428,13 +428,25 @@ def _record_cards(rows: list[dict[str, Any]]) -> str:
     for index, row in enumerate(rows):
         default_hidden = index >= RECORD_CARD_PREVIEW_LIMIT
         hidden_attr = " hidden" if default_hidden else ""
+        label = h(row["label"])
+        photo_url = row.get("photo_url")
+        if photo_url:
+            image = f'<img src="{h(photo_url)}" alt="{label}" loading="lazy">'
+        else:
+            image = '<div class="record-placeholder" aria-hidden="true">no photo</div>'
+        title = label
+        if row.get("url"):
+            title = f'<a href="{h(row["url"])}">{label}</a>'
         cards.append(
             f"""
             <article class="record-card" data-flags="{h('|'.join(row["flags"]))}"
               data-station-id="{h(row["station_id"])}" data-default-hidden="{"true" if default_hidden else "false"}"{hidden_attr}>
-              <div>{_flag_list(row["flags"])}</div>
-              <h3>{h(row["label"])}</h3>
-              <p>{h(row["station_name"])} · {h(row["first"])}</p>
+              <div class="record-image">{image}</div>
+              <div class="record-copy">
+                <div class="record-flags">{_flag_list(row["flags"])}</div>
+                <h3>{title}</h3>
+                <p>{h(row["station_name"])} · {h(row["first"])}</p>
+              </div>
             </article>
             """
         )
@@ -848,19 +860,26 @@ def _accumulation_bars(profile: dict[str, Any]) -> str:
     area_attr = f"{left},{top + plot_height:.1f} {point_attr} {left + plot_width:.1f},{top + plot_height:.1f}"
     markers = []
     for x, y, row in points:
+        tooltip_html = (
+            f'<div class="monthly-tooltip-head"><strong>{h(row["date"])}</strong>'
+            f'<span>{h(row["species"])} species</span></div>'
+        )
         markers.append(
             f"""
-            <circle cx="{x:.1f}" cy="{y:.1f}" r="3.2">
-              <title>{h(row["date"])} · {h(row["species"])} species</title>
-            </circle>
+            <g class="monthly-point-group" style="--series-color: var(--amber)" tabindex="0" role="img"
+               aria-label="{h(row['date'])}: {h(row['species'])} species"
+               data-tooltip-html="{h(tooltip_html)}">
+              <circle class="monthly-hit-target" cx="{x:.1f}" cy="{y:.1f}" r="11"></circle>
+              <circle class="monthly-point" cx="{x:.1f}" cy="{y:.1f}" r="3.2"></circle>
+            </g>
             """
         )
     latest = rows[-1]
     return f"""
     <figure class="accumulation-line-chart">
-      <svg viewBox="0 0 {width} {height}" role="img" aria-labelledby="accumulation-title accumulation-desc" preserveAspectRatio="none">
+      <svg viewBox="0 0 {width} {height}" role="img" aria-labelledby="accumulation-title accumulation-desc">
         <title id="accumulation-title">Station species accumulation curve</title>
-        <desc id="accumulation-desc">Running moth species count from {h(min_date)} to {h(max_date)}, ending at {h(latest["species"])} species.</desc>
+        <desc id="accumulation-desc">Running moth species count from {h(min_date)} to {h(max_date)}, ending at {h(latest["species"])} species. Focus or point at a node to see its date and count.</desc>
         <line class="chart-axis" x1="{left}" y1="{top + plot_height}" x2="{left + plot_width}" y2="{top + plot_height}"></line>
         <line class="chart-axis" x1="{left}" y1="{top}" x2="{left}" y2="{top + plot_height}"></line>
         <line class="chart-grid" x1="{left}" y1="{top}" x2="{left + plot_width}" y2="{top}"></line>
@@ -873,6 +892,7 @@ def _accumulation_bars(profile: dict[str, Any]) -> str:
         {''.join(markers)}
         <text class="chart-callout" x="{points[-1][0] - 8:.1f}" y="{points[-1][1] - 10:.1f}" text-anchor="end">{h(latest["species"])} species</text>
       </svg>
+      <div class="monthly-tooltip" role="tooltip" hidden></div>
     </figure>
     """
 
@@ -1098,11 +1118,18 @@ def _network_accumulation(
     area_attr = f"{left},{top + plot_height:.1f} {point_attr} {left + plot_width:.1f},{top + plot_height:.1f}"
     markers = []
     for x, y, row, row_date in points:
+        tooltip_html = (
+            f'<div class="monthly-tooltip-head"><strong>{h(row_date)}</strong>'
+            f'<span>{h(row["species"])} species · +{h(row["new_species"])} new</span></div>'
+        )
         markers.append(
             f"""
-            <circle cx="{x:.1f}" cy="{y:.1f}" r="3.1">
-              <title>{h(row_date)} · {h(row["species"])} species · +{h(row["new_species"])} new</title>
-            </circle>
+            <g class="monthly-point-group" style="--series-color: var(--amber)" tabindex="0" role="img"
+               aria-label="{h(row_date)}: {h(row['species'])} species, {h(row['new_species'])} new"
+               data-tooltip-html="{h(tooltip_html)}">
+              <circle class="monthly-hit-target" cx="{x:.1f}" cy="{y:.1f}" r="11"></circle>
+              <circle class="monthly-point" cx="{x:.1f}" cy="{y:.1f}" r="3.1"></circle>
+            </g>
             """
         )
     colors = _station_color_map(stations)
@@ -1132,7 +1159,7 @@ def _network_accumulation(
     latest = rows[-1]
     return f"""
     <figure class="accumulation-line-chart network-line-chart">
-      <svg viewBox="0 0 {width} {height}" role="img" aria-labelledby="network-accumulation-title network-accumulation-desc" preserveAspectRatio="none">
+      <svg viewBox="0 0 {width} {height}" role="img" aria-labelledby="network-accumulation-title network-accumulation-desc">
         <title id="network-accumulation-title">Network species accumulation curve</title>
         <desc id="network-accumulation-desc">Running network moth species count from {h(min_date)} to {h(max_date)}, ending at {h(latest["species"])} species.</desc>
         <line class="chart-axis" x1="{left}" y1="{top + plot_height}" x2="{left + plot_width}" y2="{top + plot_height}"></line>
@@ -1148,6 +1175,7 @@ def _network_accumulation(
         {''.join(markers)}
         <text class="chart-callout" x="{points[-1][0] - 8:.1f}" y="{points[-1][1] - 10:.1f}" text-anchor="end">{h(latest["species"])} species</text>
       </svg>
+      <div class="monthly-tooltip" role="tooltip" hidden></div>
       <div class="station-launches">
         <p>Stations online</p>
         <ul>{''.join(launch_legend)}</ul>
@@ -1234,7 +1262,7 @@ def _monthly_overlays(rows: list[dict[str, Any]], stations: list[Station]) -> st
     return f"""
     <figure class="monthly-overlay-chart">
       <ul class="monthly-legend" aria-label="Year legend">{''.join(legend)}</ul>
-      <svg viewBox="0 0 {width} {height}" role="img" aria-labelledby="monthly-overlay-title monthly-overlay-desc" preserveAspectRatio="none">
+      <svg viewBox="0 0 {width} {height}" role="img" aria-labelledby="monthly-overlay-title monthly-overlay-desc">
         <title id="monthly-overlay-title">Monthly species richness by year</title>
         <desc id="monthly-overlay-desc">One line per year showing unique moth species by month across the station network. Focus or point at a month to compare station values.</desc>
         <line class="chart-axis" x1="{left}" y1="{top + plot_height}" x2="{left + plot_width}" y2="{top + plot_height}"></line>
@@ -1664,7 +1692,7 @@ function initRecordFilters() {
 }
 
 function initMonthlyTooltips() {
-  document.querySelectorAll(".monthly-overlay-chart").forEach((figure) => {
+  document.querySelectorAll(".monthly-overlay-chart, .accumulation-line-chart").forEach((figure) => {
     const tooltip = figure.querySelector(".monthly-tooltip");
     if (!tooltip) return;
 
@@ -2896,10 +2924,13 @@ h2 {
 }
 .accumulation-line-chart {
   margin: 0;
+  position: relative;
 }
 .accumulation-line-chart svg {
   width: 100%;
-  height: clamp(230px, 32vw, 340px);
+  aspect-ratio: 720 / 260;
+  height: auto;
+  max-height: 340px;
   display: block;
 }
 .chart-axis,
@@ -3377,7 +3408,9 @@ h2 {
 }
 .monthly-overlay-chart svg {
   width: 100%;
-  height: clamp(230px, 32vw, 340px);
+  aspect-ratio: 720 / 260;
+  height: auto;
+  max-height: 340px;
   display: block;
 }
 .monthly-line {
@@ -3798,18 +3831,42 @@ h2 {
   margin-bottom: 14px;
 }
 .record-card {
-  min-height: 150px;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  padding: 16px;
+  display: grid;
+  grid-template-rows: 150px minmax(116px, auto);
+  min-width: 0;
+  overflow: hidden;
   background: var(--panel-2);
   border: 1px solid var(--line);
   border-radius: 6px;
 }
+.record-image {
+  min-width: 0;
+  background: var(--panel);
+}
+.record-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.record-placeholder {
+  height: 100%;
+  display: grid;
+  place-items: center;
+  color: var(--faint);
+  font-size: 0.82rem;
+}
+.record-copy {
+  min-width: 0;
+  padding: 12px 16px;
+}
+.record-flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
 .record-card h3 {
-  margin: 14px 0;
-  font-size: 1.08rem;
+  margin: 10px 0 6px;
+  font-size: 1.02rem;
   line-height: 1.2;
 }
 .record-card p {
@@ -4392,8 +4449,8 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
         <a href="#stations">Stations</a>
         <a href="#feed">Feed</a>
         <a href="#recent">Recent</a>
-        <a href="#pulses">Firsts</a>
-        <a href="#records">Records</a>
+        <a href="#pulses">First arrivals</a>
+        <a href="#records">Firsts</a>
         <a href="#unique">Unique</a>
         <a href="#calendar">Calendar</a>
         <a href="#trends">Trends</a>
