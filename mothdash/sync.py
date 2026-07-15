@@ -286,6 +286,13 @@ def sync_all(settings: Settings, stations: list[Station], full: bool = False) ->
     for station in stations:
         if not station.enabled:
             continue
+        if not station.active:
+            # Inactive stations keep their historical data but are no longer
+            # queried for new iNaturalist observations.
+            init_db(settings.database)
+            _upsert_station(settings, station)
+            print(f"[{station.id}] skipped (inactive)")
+            continue
         added, seen = sync_station(settings, station, full=full)
         print(f"[{station.id}] seen {seen}, stored {added}")
     refresh_station_stats(settings, stations)

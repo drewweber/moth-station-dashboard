@@ -13,6 +13,7 @@ STATION_META_KEYS = {
     "id",
     "name",
     "enabled",
+    "active",
     "timezone",
     "county_place_id",
     "state_place_id",
@@ -52,6 +53,7 @@ class Station:
     id: str
     name: str
     enabled: bool
+    active: bool
     query: dict[str, Any]
     timezone: str = "America/New_York"
     county_place_id: int | None = None
@@ -129,6 +131,7 @@ def load_config(path: str | Path = "stations.toml") -> tuple[Settings, list[Stat
                 id=station_id,
                 name=str(raw_station.get("name", station_id)),
                 enabled=bool(raw_station.get("enabled", True)),
+                active=bool(raw_station.get("active", True)),
                 query=query,
                 timezone=str(raw_station.get("timezone", "America/New_York")),
                 county_place_id=raw_station.get("county_place_id"),

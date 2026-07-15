@@ -17,6 +17,7 @@ from .analysis import (
     hero_photos,
     latest_session_taxa,
     record_highlights,
+    recent_days_taxa,
     recent_observations,
     station_profile,
     station_summaries,
@@ -92,7 +93,7 @@ def _station_short_label(station: Station) -> str:
         "zeledonia-monkey-run": "Monkey Run",
         "iandavies-dove-dr": "Dove Dr",
         "durfee-hill": "Durfee",
-        "tompkins-map-area": "Map Area",
+        "tompkins-map-area": "Woodlawn",
     }
     return labels.get(station.id, station.name.split()[0])
 
@@ -165,7 +166,10 @@ def _photo_strip(rows: list[dict[str, Any]]) -> str:
 
 
 def _station_cards(summaries: list[dict[str, Any]], stations: list[Station]) -> str:
-    enabled = [station for station in stations if station.enabled]
+    enabled = sorted(
+        (station for station in stations if station.enabled),
+        key=lambda station: station.name.lower(),
+    )
     if not enabled:
         return '<p class="empty">No stations are enabled. Add one in stations.toml and run a sync.</p>'
     by_station = _summary_map(summaries)
@@ -176,12 +180,15 @@ def _station_cards(summaries: list[dict[str, Any]], stations: list[Station]) -> 
         observations = item["observations"] if item else 0
         latest = item["latest_session"] if item else "not synced"
         location = station.public_location or "configured station"
-        status = "active" if item else "queued"
+        if not station.active:
+            status = "inactive"
+        else:
+            status = "active" if item else "queued"
         cards.append(
             f"""
             <article class="station-card" style="--station-color: {_station_color(station, index)}">
               <div>
-                <p class="station-status">{h(status)}</p>
+                <p class="station-status station-status-{h(status).replace(" ", "-")}">{h(status)}</p>
                 <h3><a href="{h(_station_page_path(station))}">{h(station.name)}</a></h3>
                 <p>{h(location)}</p>
               </div>
@@ -279,11 +286,16 @@ def _recent_cards(rows: list[dict[str, Any]]) -> str:
     return "".join(cards)
 
 
-def _last_night_dashboard(payload: dict[str, Any], stations: list[Station]) -> str:
-    session_date = payload.get("session_date")
+def _taxa_period_dashboard(
+    payload: dict[str, Any],
+    stations: list[Station],
+    period_caption: str,
+    empty_message: str,
+) -> str:
+    period_label = payload.get("period_label")
     taxa = payload.get("taxa") or []
-    if not session_date or not taxa:
-        return '<p class="empty">No latest-session moth observations are available yet.</p>'
+    if not period_label or not taxa:
+        return f'<p class="empty">{h(empty_message)}</p>'
 
     colors = _station_color_map(stations)
     station_lookup = {station.id: station for station in stations if station.enabled}
@@ -340,8 +352,8 @@ def _last_night_dashboard(payload: dict[str, Any], stations: list[Station]) -> s
     return f"""
     <div class="night-summary">
       <div>
-        <strong>{h(session_date)}</strong>
-        <span>latest moth session</span>
+        <strong>{h(period_label)}</strong>
+        <span>{h(period_caption)}</span>
       </div>
       <div>
         <strong>{h(len(taxa))}</strong>
@@ -356,9 +368,27 @@ def _last_night_dashboard(payload: dict[str, Any], stations: list[Station]) -> s
         <span>shared by stations</span>
       </div>
     </div>
-    <div class="night-stations" aria-label="Latest session species count by station">{''.join(station_chips)}</div>
+    <div class="night-stations" aria-label="Species count by station">{''.join(station_chips)}</div>
     <div class="night-grid">{''.join(cards)}</div>
     """
+
+
+def _last_night_dashboard(payload: dict[str, Any], stations: list[Station]) -> str:
+    return _taxa_period_dashboard(
+        payload,
+        stations,
+        "latest moth session",
+        "No latest-session moth observations are available yet.",
+    )
+
+
+def _recent_week_dashboard(payload: dict[str, Any], stations: list[Station]) -> str:
+    return _taxa_period_dashboard(
+        payload,
+        stations,
+        "past 7 nights",
+        "No moth observations from the past 7 nights are available yet.",
+    )
 
 
 def _pulse_cards(rows: list[dict[str, Any]]) -> str:
@@ -386,14 +416,22 @@ def _flag_list(flags: list[str]) -> str:
     return "".join(f'<span class="flag">{h(flag)}</span>' for flag in flags)
 
 
+RECORD_FLAG_TYPES = ("state iNat first", "county iNat first", "first among tracked")
+RECORD_CARD_PREVIEW_LIMIT = 12
+RECORD_TABLE_PREVIEW_LIMIT = 120
+
+
 def _record_cards(rows: list[dict[str, Any]]) -> str:
     if not rows:
         return '<p class="empty">No county, state, or tracked-station firsts are cached yet. Run a sync to refresh record context.</p>'
     cards = []
-    for row in rows[:12]:
+    for index, row in enumerate(rows):
+        default_hidden = index >= RECORD_CARD_PREVIEW_LIMIT
+        hidden_attr = " hidden" if default_hidden else ""
         cards.append(
             f"""
-            <article class="record-card">
+            <article class="record-card" data-flags="{h('|'.join(row["flags"]))}"
+              data-station-id="{h(row["station_id"])}" data-default-hidden="{"true" if default_hidden else "false"}"{hidden_attr}>
               <div>{_flag_list(row["flags"])}</div>
               <h3>{h(row["label"])}</h3>
               <p>{h(row["station_name"])} · {h(row["first"])}</p>
@@ -407,10 +445,13 @@ def _record_table(rows: list[dict[str, Any]]) -> str:
     if not rows:
         return '<p class="empty">No first-record highlights are available yet.</p>'
     body = []
-    for row in rows[:120]:
+    for index, row in enumerate(rows):
+        default_hidden = index >= RECORD_TABLE_PREVIEW_LIMIT
+        hidden_attr = " hidden" if default_hidden else ""
         body.append(
             f"""
-            <tr>
+            <tr data-flags="{h('|'.join(row["flags"]))}" data-station-id="{h(row["station_id"])}"
+              data-default-hidden="{"true" if default_hidden else "false"}"{hidden_attr}>
               <td>{h(row["label"])}</td>
               <td>{h(row["station_name"])}</td>
               <td data-sort-value="{h(row['first'])}">{h(row["first"])}</td>
@@ -430,6 +471,44 @@ def _record_table(rows: list[dict[str, Any]]) -> str:
       </thead>
       <tbody>{''.join(body)}</tbody>
     </table>
+    """
+
+
+def _record_filters(stations: list[Station]) -> str:
+    location_options = "".join(
+        f'<option value="{h(station.id)}">{h(station.name)}</option>'
+        for station in sorted(
+            (station for station in stations if station.enabled),
+            key=lambda station: station.name.lower(),
+        )
+    )
+    flag_labels = {
+        "state iNat first": "State iNat first",
+        "county iNat first": "County iNat first",
+        "first among tracked": "First among tracked",
+    }
+    type_options = "".join(
+        f'<option value="{h(flag_type)}">{h(flag_labels.get(flag_type, flag_type))}</option>'
+        for flag_type in RECORD_FLAG_TYPES
+    )
+    return f"""
+    <div class="record-filter-row">
+      <div>
+        <label for="record-filter-type">Type of first</label>
+        <select id="record-filter-type" data-record-filter="type">
+          <option value="">All types</option>
+          {type_options}
+        </select>
+      </div>
+      <div>
+        <label for="record-filter-location">Location</label>
+        <select id="record-filter-location" data-record-filter="location">
+          <option value="">All locations</option>
+          {location_options}
+        </select>
+      </div>
+    </div>
+    <p class="empty" data-record-empty hidden>No firsts match that type and location yet.</p>
     """
 
 
@@ -1549,6 +1628,41 @@ function initUniqueFilter() {
   });
 }
 
+function initRecordFilters() {
+  const section = document.querySelector("#records");
+  if (!section) return;
+  const typeSelect = section.querySelector('[data-record-filter="type"]');
+  const locationSelect = section.querySelector('[data-record-filter="location"]');
+  const emptyMessage = section.querySelector("[data-record-empty]");
+  if (!typeSelect || !locationSelect) return;
+  const items = Array.from(section.querySelectorAll(".record-card, tbody tr"));
+
+  const apply = () => {
+    const type = typeSelect.value;
+    const location = locationSelect.value;
+    const filterActive = Boolean(type) || Boolean(location);
+    let visibleCount = 0;
+    items.forEach((item) => {
+      if (!filterActive) {
+        item.hidden = item.dataset.defaultHidden === "true";
+        if (!item.hidden) visibleCount += 1;
+        return;
+      }
+      const flags = (item.dataset.flags || "").split("|");
+      const matchesType = !type || flags.includes(type);
+      const matchesLocation = !location || item.dataset.stationId === location;
+      const matches = matchesType && matchesLocation;
+      item.hidden = !matches;
+      if (matches) visibleCount += 1;
+    });
+    if (emptyMessage) emptyMessage.hidden = visibleCount > 0;
+  };
+
+  typeSelect.addEventListener("change", apply);
+  locationSelect.addEventListener("change", apply);
+  apply();
+}
+
 function initMonthlyTooltips() {
   document.querySelectorAll(".monthly-overlay-chart").forEach((figure) => {
     const tooltip = figure.querySelector(".monthly-tooltip");
@@ -1605,6 +1719,7 @@ function initMonthlyTooltips() {
 initSortableTables();
 initViewToggles();
 initUniqueFilter();
+initRecordFilters();
 initMonthlyTooltips();
 """
 
@@ -2493,7 +2608,7 @@ nav a {
 .hero {
   width: min(var(--max), calc(100% - 32px));
   margin: 0 auto;
-  padding: 48px 0 34px;
+  padding: 30px 0 22px;
   display: grid;
   grid-template-columns: minmax(0, 1.05fr) minmax(320px, 0.95fr);
   gap: clamp(24px, 5vw, 72px);
@@ -2561,11 +2676,16 @@ h1 {
 h1, h2 {
   text-wrap: balance;
 }
+.hero-copy h1 {
+  max-width: 620px;
+  font-size: clamp(1.6rem, 3.4vw, 2.6rem);
+  line-height: 1.05;
+}
 .subhead {
   max-width: 660px;
   color: var(--muted);
-  margin: 18px 0 0;
-  font-size: clamp(1rem, 2vw, 1.2rem);
+  margin: 10px 0 0;
+  font-size: clamp(0.92rem, 1.6vw, 1.05rem);
   text-wrap: pretty;
 }
 .hero-metrics {
@@ -3392,56 +3512,52 @@ h2 {
 .insight-grid {
   display: grid;
   grid-template-columns: repeat(12, 1fr);
-  gap: 10px;
+  gap: 8px;
 }
 .insight-card {
-  min-height: 220px;
-  grid-column: span 4;
+  min-height: 128px;
+  grid-column: span 3;
   position: relative;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  padding: 16px;
+  padding: 12px;
   border: 1px solid var(--line);
   border-radius: 6px;
   background: linear-gradient(135deg, rgba(215, 181, 109, 0.08), rgba(255, 255, 255, 0.015) 46%), var(--panel);
-}
-.insight-card:nth-child(1),
-.insight-card:nth-child(2) {
-  grid-column: span 6;
 }
 .insight-card p,
 .insight-card small {
   margin: 0;
   color: var(--amber);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.76rem;
+  font-size: 0.72rem;
 }
 .insight-card h3 {
-  margin: 22px 0 14px;
+  margin: 10px 0 6px;
   font-family: Georgia, "Times New Roman", serif;
-  font-size: clamp(1.2rem, 2vw, 1.75rem);
+  font-size: clamp(1rem, 1.4vw, 1.25rem);
   font-weight: 500;
-  line-height: 1.05;
+  line-height: 1.1;
   text-wrap: balance;
 }
 .insight-card span {
   display: block;
   color: var(--muted);
-  font-size: 0.93rem;
+  font-size: 0.84rem;
   text-wrap: pretty;
 }
 .insight-card small {
   color: var(--faint);
-  padding-top: 20px;
+  padding-top: 8px;
 }
 .insight-index {
   position: absolute;
-  top: 12px;
-  right: 14px;
+  top: 10px;
+  right: 12px;
   color: rgba(243, 234, 215, 0.24);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 1.2rem;
+  font-size: 1rem;
 }
 .station-card {
   min-height: 210px;
@@ -3475,6 +3591,9 @@ h2 {
   color: var(--leaf);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.76rem;
+}
+.station-status-inactive {
+  color: var(--faint);
 }
 .station-numbers {
   display: flex;
@@ -3708,6 +3827,35 @@ h2 {
 }
 .record-archive[open] summary {
   margin-bottom: 8px;
+}
+.record-filter-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+}
+.record-filter-row label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+.record-filter-row select {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 10px 12px;
+  background: #181910;
+  color: var(--ink);
+  font: inherit;
+}
+.record-filter-row select:focus {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
 }
 .unique-filter-row {
   display: grid;
@@ -4212,6 +4360,7 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
     pulses = first_of_season(settings, year)
     all_time_pulses = first_of_season(settings, all_time=True)
     latest_night = latest_session_taxa(settings)
+    recent_week = recent_days_taxa(settings)
     taxa = station_taxa(settings)
     year_taxa = station_taxa(settings, year) if year else []
     latest_night_taxa = latest_night.get("taxa") or []
@@ -4238,9 +4387,10 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
     <div class="topbar">
       <a class="brand" href="#main"><span class="brand-mark" aria-hidden="true"></span><span>Moth stations</span></a>
       <nav aria-label="Dashboard sections">
+        <a href="#last-night">Last night</a>
+        <a href="#past-week">Past week</a>
         <a href="#stations">Stations</a>
         <a href="#feed">Feed</a>
-        <a href="#last-night">Last night</a>
         <a href="#recent">Recent</a>
         <a href="#pulses">Firsts</a>
         <a href="#records">Records</a>
@@ -4262,28 +4412,36 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
     </div>
   </header>
   <main id="main" class="site-shell">
-    <section id="feed">
-      <div class="section-head">
-        <h2>Naturalist feed</h2>
-        <p>Build-generated headlines from the station network, meant to surface discoveries, timing shifts, and shared flight pulses before the tables.</p>
-      </div>
-      <div class="insight-grid">{_insight_cards(insights)}</div>
-    </section>
-
-    <section id="stations">
-      <div class="section-head">
-        <h2>Station signals</h2>
-        <p>Configured stations stay visible even before their first sync, so owners can see what is online and what is waiting for observations.</p>
-      </div>
-      <div class="cards">{_station_cards(summaries, stations)}</div>
-    </section>
-
     <section id="last-night">
       <div class="section-head">
         <h2>Last night</h2>
         <p>A photo-first scan of the latest synced moth session, grouped by unique taxa so shared and station-only sightings are easy to compare.</p>
       </div>
       {_last_night_dashboard(latest_night, stations)}
+    </section>
+
+    <section id="past-week">
+      <div class="section-head">
+        <h2>Past week</h2>
+        <p>The same view as last night, widened to the trailing seven nights so slower-moving activity and multi-night visitors are easier to spot.</p>
+      </div>
+      {_recent_week_dashboard(recent_week, stations)}
+    </section>
+
+    <section id="stations">
+      <div class="section-head">
+        <h2>All-time location info</h2>
+        <p>Configured stations stay visible even before their first sync, so owners can see what is online, what is waiting for observations, and what is no longer active.</p>
+      </div>
+      <div class="cards">{_station_cards(summaries, stations)}</div>
+    </section>
+
+    <section id="feed">
+      <div class="section-head">
+        <h2>Naturalist feed</h2>
+        <p>Build-generated headlines from the station network, meant to surface discoveries, timing shifts, and shared flight pulses before the tables.</p>
+      </div>
+      <div class="insight-grid">{_insight_cards(insights)}</div>
     </section>
 
     <section id="recent">
@@ -4309,8 +4467,9 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
     <section id="records">
       <div class="section-head">
         <h2>Recent firsts</h2>
-        <p>The newest county, state, and tracked-network firsts, ordered by observation date.</p>
+        <p>The newest county, state, and tracked-network firsts, ordered by observation date. Filter by type or location to see everything that matches, not just the newest batch.</p>
       </div>
+      {_record_filters(stations)}
       <div class="record-grid">{_record_cards(records)}</div>
       <details class="record-archive">
         <summary>Browse all flagged firsts ({h(len(records))})</summary>

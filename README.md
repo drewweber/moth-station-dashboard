@@ -74,6 +74,12 @@ timezone = "America/New_York"
 public_location = "Tioga County, NY"
 ```
 
+Set `active = false` on a station to stop pulling new observations for it (for
+example, a station that is no longer running) while keeping its historical
+data in the dashboard. It still shows up in the all-time location list,
+flagged as inactive. This is separate from `enabled`, which fully removes a
+station from every part of the dashboard.
+
 By default, every station query is restricted to moths:
 
 - `taxon_id = 47157` for Lepidoptera
