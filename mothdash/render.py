@@ -1867,6 +1867,8 @@ function renderStationSummaries() {
       "live-station-card",
       "is-active",
     ].filter(Boolean).join(" ");
+    const otherSpeciesCount = Array.from(summary.currentSpecies.keys())
+      .filter((taxonId) => !summary.stationFirstSpecies.has(taxonId)).length;
 
     return `
       <article class="${classes}">
@@ -1889,10 +1891,10 @@ function renderStationSummaries() {
             <h3>New species this event</h3>
             ${renderSpeciesList(summary.stationFirstSpecies, summary.checked ? "No new station species in this event yet." : "Waiting for the first check.", new Set(), 20)}
           </div>
-          <div>
-            <h3>Other species this event</h3>
-            ${renderSpeciesList(summary.currentSpecies, station.live_supported ? "No other species-level moths in this event yet." : station.live_note, summary.stationFirstSpecies, 40, true)}
-          </div>
+          <details class="live-other">
+            <summary>Other species this event <span>${otherSpeciesCount}</span></summary>
+            ${renderSpeciesList(summary.currentSpecies, station.live_supported ? "No other species-level moths in this event yet." : station.live_note, summary.stationFirstSpecies, 10, true)}
+          </details>
         </div>
       </article>
     `;
@@ -2212,6 +2214,35 @@ def _live_page() -> str:
   }}
   .live-firsts h3 {{
     font-size: 1rem;
+  }}
+  .live-other {{
+    min-width: 0;
+    border-top: 1px solid var(--line);
+  }}
+  .live-other summary {{
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 0;
+    color: var(--amber);
+    font-size: 0.9rem;
+    font-weight: 650;
+  }}
+  .live-other summary span {{
+    display: inline-grid;
+    min-width: 28px;
+    height: 28px;
+    place-items: center;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    color: var(--muted);
+    font-size: 0.72rem;
+    font-variant-numeric: tabular-nums;
+  }}
+  .live-other[open] summary {{
+    margin-bottom: 8px;
   }}
   .live-station-lists ul {{
     display: grid;
