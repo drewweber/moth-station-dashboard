@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .config import Settings, Station
+from .config import Settings, Station, active_stations
 from .db import connect, init_db
 from .inat_api import first_observed_date, iter_observations
 
@@ -197,12 +197,10 @@ def refresh_station_stats(settings: Settings, stations: list[Station]) -> None:
     These are iNaturalist firsts, not absolute historical records.
     """
     remaining = settings.stats_refresh_limit
-    for station in stations:
+    for station in active_stations(stations):
         if remaining <= 0:
             print("[stats] refresh budget exhausted")
             return
-        if not station.enabled:
-            continue
         if not station.county_place_id and not station.state_place_id:
             continue
 
@@ -295,4 +293,4 @@ def sync_all(settings: Settings, stations: list[Station], full: bool = False) ->
             continue
         added, seen = sync_station(settings, station, full=full)
         print(f"[{station.id}] seen {seen}, stored {added}")
-    refresh_station_stats(settings, stations)
+    refresh_station_stats(settings, active_stations(stations))

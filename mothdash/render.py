@@ -25,7 +25,7 @@ from .analysis import (
     trend_summary,
     unique_station_taxa,
 )
-from .config import Settings, Station
+from .config import Settings, Station, active_stations
 from .db import connect, init_db
 
 
@@ -1426,9 +1426,7 @@ def _snapshot_payload(settings: Settings, stations: list[Station], taxa: list[di
 
     colors = _station_color_map(stations)
     enabled = []
-    for station in stations:
-        if not station.enabled:
-            continue
+    for station in active_stations(stations):
         query, live_supported = _public_live_query(settings, station)
         enabled.append({
             "id": station.id,

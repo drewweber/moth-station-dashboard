@@ -81,6 +81,16 @@ class Station:
         return params
 
 
+def historical_stations(stations: list[Station]) -> list[Station]:
+    """Stations whose cached history remains part of the dashboard."""
+    return [station for station in stations if station.enabled]
+
+
+def active_stations(stations: list[Station]) -> list[Station]:
+    """Stations allowed to perform current sync and Live API work."""
+    return [station for station in stations if station.enabled and station.active]
+
+
 def _resolve(root: Path, value: str) -> Path:
     path = Path(value)
     return path if path.is_absolute() else root / path
