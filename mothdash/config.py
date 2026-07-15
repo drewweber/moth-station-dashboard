@@ -40,6 +40,7 @@ class Settings:
     public_dir: Path
     database: Path
     session_cutoff_hour: int = 12
+    timezone: str = "America/New_York"
     recent_limit: int = 50
     default_taxon_id: int = 47157
     default_without_taxon_id: int = 47224
@@ -108,6 +109,7 @@ def load_config(path: str | Path = "stations.toml") -> tuple[Settings, list[Stat
         public_dir=_resolve(root, raw_settings.get("public_dir", "public")),
         database=_resolve(root, raw_settings.get("database", "data/mothdash.db")),
         session_cutoff_hour=int(raw_settings.get("session_cutoff_hour", 12)),
+        timezone=str(raw_settings.get("timezone", "America/New_York")),
         recent_limit=int(raw_settings.get("recent_limit", 50)),
         default_taxon_id=int(raw_settings.get("default_taxon_id", 47157)),
         default_without_taxon_id=int(raw_settings.get("default_without_taxon_id", 47224)),

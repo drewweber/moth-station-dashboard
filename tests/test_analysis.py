@@ -1,7 +1,8 @@
-from datetime import date
+from datetime import date, datetime
 import unittest
+from zoneinfo import ZoneInfo
 
-from mothdash.analysis import flight_season_date, session_date
+from mothdash.analysis import current_session_date, flight_season_date, session_date
 
 
 class SessionDateTests(unittest.TestCase):
@@ -29,6 +30,29 @@ class FlightSeasonTests(unittest.TestCase):
         season_year, normalized = flight_season_date(date(2026, 1, 8))
         self.assertEqual(season_year, 2025)
         self.assertEqual(normalized, date(2001, 1, 8))
+
+
+class CurrentSessionDateTests(unittest.TestCase):
+    def test_before_noon_belongs_to_previous_event(self) -> None:
+        now = datetime(2026, 7, 15, 11, 59, tzinfo=ZoneInfo("America/New_York"))
+        self.assertEqual(
+            current_session_date(12, "America/New_York", now),
+            date(2026, 7, 14),
+        )
+
+    def test_noon_starts_current_calendar_date_event(self) -> None:
+        now = datetime(2026, 7, 15, 12, 0, tzinfo=ZoneInfo("America/New_York"))
+        self.assertEqual(
+            current_session_date(12, "America/New_York", now),
+            date(2026, 7, 15),
+        )
+
+    def test_before_noon_crosses_year_boundary(self) -> None:
+        now = datetime(2026, 1, 1, 8, 0, tzinfo=ZoneInfo("America/New_York"))
+        self.assertEqual(
+            current_session_date(12, "America/New_York", now),
+            date(2025, 12, 31),
+        )
 
 
 if __name__ == "__main__":

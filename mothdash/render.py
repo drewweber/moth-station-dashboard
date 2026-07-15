@@ -294,8 +294,24 @@ def _taxa_period_dashboard(
 ) -> str:
     period_label = payload.get("period_label")
     taxa = payload.get("taxa") or []
-    if not period_label or not taxa:
+    if not period_label:
         return f'<p class="empty">{h(empty_message)}</p>'
+    if not taxa:
+        latest = payload.get("latest_session")
+        latest_note = (
+            f" Latest synced session: {h(latest)}."
+            if latest
+            else " No station sessions have been synced yet."
+        )
+        return f"""
+        <div class="night-summary night-summary-empty">
+          <div>
+            <strong>{h(period_label)}</strong>
+            <span>{h(period_caption)}</span>
+          </div>
+        </div>
+        <p class="empty">{h(empty_message)}{latest_note}</p>
+        """
 
     colors = _station_color_map(stations)
     station_lookup = {station.id: station for station in stations if station.enabled}
@@ -387,7 +403,7 @@ def _recent_week_dashboard(payload: dict[str, Any], stations: list[Station]) -> 
         payload,
         stations,
         "past 7 nights",
-        "No moth observations from the past 7 nights are available yet.",
+        "No species-level moth observations were recorded in this seven-night range.",
     )
 
 

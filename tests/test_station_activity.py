@@ -1,8 +1,11 @@
+from datetime import datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
+from zoneinfo import ZoneInfo
 
+from mothdash.analysis import recent_days_taxa
 from mothdash.config import Settings, Station, active_stations, historical_stations
 from mothdash.db import init_db
 from mothdash.render import _snapshot_payload
@@ -54,6 +57,16 @@ class StationActivityTests(unittest.TestCase):
             [item["id"] for item in payload["stations"]],
             ["active"],
         )
+
+    def test_empty_database_still_reports_current_week_range(self) -> None:
+        payload = recent_days_taxa(
+            self.settings,
+            now=datetime(2026, 7, 15, 20, 0, tzinfo=ZoneInfo("America/New_York")),
+        )
+
+        self.assertEqual(payload["period_label"], "2026-07-09 to 2026-07-15")
+        self.assertIsNone(payload["latest_session"])
+        self.assertEqual(payload["taxa"], [])
 
     @patch("mothdash.sync.refresh_station_stats")
     @patch("mothdash.sync.sync_station", return_value=(1, 1))

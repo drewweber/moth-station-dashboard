@@ -3,6 +3,7 @@ data_dir = "data"
 public_dir = "public"
 database = "data/mothdash.db"
 session_cutoff_hour = 12
+timezone = "America/New_York"
 recent_limit = 50
 default_taxon_id = 47157
 default_without_taxon_id = 47224

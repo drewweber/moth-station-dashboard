@@ -1,6 +1,8 @@
+from datetime import datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from zoneinfo import ZoneInfo
 
 from mothdash.analysis import (
     first_of_season,
@@ -15,6 +17,7 @@ from mothdash.analysis import (
 )
 from mothdash.config import Settings
 from mothdash.db import connect, init_db
+from mothdash.render import _recent_week_dashboard
 
 
 class SpeciesSemanticsTests(unittest.TestCase):
@@ -72,13 +75,30 @@ class SpeciesSemanticsTests(unittest.TestCase):
     def test_species_dashboards_exclude_broader_ranks(self) -> None:
         taxa = station_taxa(self.settings)
         latest = latest_session_taxa(self.settings)
-        recent = recent_days_taxa(self.settings)
+        recent = recent_days_taxa(
+            self.settings,
+            now=datetime(2026, 7, 11, 10, 0, tzinfo=ZoneInfo("America/New_York")),
+        )
 
         self.assertEqual({row["taxon_id"] for row in taxa}, {101, 102})
         self.assertEqual({row["taxon_id"] for row in latest["taxa"]}, {101, 102})
         self.assertEqual({row["taxon_id"] for row in recent["taxa"]}, {101, 102})
         self.assertEqual(latest["observations"], 4)
         self.assertEqual(recent["observations"], 4)
+
+    def test_current_week_does_not_slide_back_to_stale_data(self) -> None:
+        recent = recent_days_taxa(
+            self.settings,
+            now=datetime(2026, 7, 20, 10, 0, tzinfo=ZoneInfo("America/New_York")),
+        )
+
+        self.assertEqual(recent["period_label"], "2026-07-13 to 2026-07-19")
+        self.assertEqual(recent["latest_session"].isoformat(), "2026-07-10")
+        self.assertTrue(recent["is_stale"])
+        self.assertEqual(recent["taxa"], [])
+        rendered = _recent_week_dashboard(recent, [])
+        self.assertIn("2026-07-13 to 2026-07-19", rendered)
+        self.assertIn("Latest synced session: 2026-07-10", rendered)
 
     def test_firsts_uniques_and_pulses_exclude_broader_ranks(self) -> None:
         pulses = first_of_season(self.settings, 2026)

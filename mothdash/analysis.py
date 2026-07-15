@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import date, datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from .config import Settings
 from .db import connect
@@ -43,6 +44,25 @@ def session_date(observed_on: str | None, observed_at: str | None, cutoff_hour: 
         if hour is not None and hour < cutoff_hour:
             return base - timedelta(days=1)
     return base
+
+
+def current_session_date(
+    cutoff_hour: int,
+    timezone: str,
+    now: datetime | None = None,
+) -> date:
+    """Return the moth-session date containing the current local time."""
+    zone = ZoneInfo(timezone)
+    if now is None:
+        local_now = datetime.now(zone)
+    elif now.tzinfo is None:
+        local_now = now.replace(tzinfo=zone)
+    else:
+        local_now = now.astimezone(zone)
+    current = local_now.date()
+    if local_now.hour < cutoff_hour:
+        current -= timedelta(days=1)
+    return current
 
 
 def _label(row: dict[str, Any]) -> str:
@@ -441,23 +461,23 @@ def latest_session_taxa(settings: Settings) -> dict[str, Any]:
     }
 
 
-def recent_days_taxa(settings: Settings, days: int = 7) -> dict[str, Any]:
+def recent_days_taxa(
+    settings: Settings,
+    days: int = 7,
+    now: datetime | None = None,
+) -> dict[str, Any]:
     """Same shape as latest_session_taxa, grouped over the trailing N nights."""
+    if days < 1:
+        raise ValueError("days must be at least 1")
     rows = load_rows(settings)
     session_dates = sorted({row["session_date"] for row in rows if row.get("session_date")})
-    if not session_dates:
-        return {
-            "period_label": None,
-            "taxa": [],
-            "station_counts": {},
-            "observations": 0,
-            "nights": 0,
-        }
-
-    latest = session_dates[-1]
-    window_start = latest - timedelta(days=days - 1)
-    included_dates = [d for d in session_dates if window_start <= d <= latest]
-    window = set(included_dates)
+    latest = session_dates[-1] if session_dates else None
+    window_end = current_session_date(
+        settings.session_cutoff_hour,
+        settings.timezone,
+        now,
+    )
+    window_start = window_end - timedelta(days=days - 1)
 
     grouped: dict[tuple[int, str], dict[str, Any]] = {}
     station_taxa_seen: dict[str, set[int]] = defaultdict(set)
@@ -466,7 +486,13 @@ def recent_days_taxa(settings: Settings, days: int = 7) -> dict[str, Any]:
     for row in rows:
         taxon_id = row.get("taxon_id")
         session_date = row.get("session_date")
-        if not taxon_id or not is_species(row) or session_date not in window:
+        if (
+            not taxon_id
+            or not is_species(row)
+            or session_date is None
+            or session_date < window_start
+            or session_date > window_end
+        ):
             continue
         observation_count += 1
         taxon_id = int(taxon_id)
@@ -518,14 +544,14 @@ def recent_days_taxa(settings: Settings, days: int = 7) -> dict[str, Any]:
     for item in by_taxon.values():
         item["station_count"] = len(item["stations"])
         item["total_count"] = sum(station["count"] for station in item["stations"].values())
-        item["first_among_tracked_date"] = latest
+        item["first_among_tracked_date"] = window_end
         item["first_among_tracked_stations"] = []
         taxa.append(dict(item))
 
-    if window_start == latest:
+    if window_start == window_end:
         period_label = window_start.isoformat()
     else:
-        period_label = f"{window_start.isoformat()} to {latest.isoformat()}"
+        period_label = f"{window_start.isoformat()} to {window_end.isoformat()}"
 
     return {
         "period_label": period_label,
@@ -535,7 +561,11 @@ def recent_days_taxa(settings: Settings, days: int = 7) -> dict[str, Any]:
             for station_id, station_taxa in station_taxa_seen.items()
         },
         "observations": observation_count,
-        "nights": len(included_dates),
+        "nights": days,
+        "window_start": window_start,
+        "window_end": window_end,
+        "latest_session": latest,
+        "is_stale": bool(latest and latest < window_start),
     }
 
 
