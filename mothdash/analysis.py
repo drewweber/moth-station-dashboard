@@ -300,6 +300,9 @@ def station_taxa(settings: Settings, year: int | None = None) -> list[dict[str, 
                 "count": 0,
                 "first": None,
                 "latest": None,
+                "photo_url": None,
+                "url": None,
+                "observer_login": None,
             },
         )
         item["count"] += 1
@@ -308,6 +311,13 @@ def station_taxa(settings: Settings, year: int | None = None) -> list[dict[str, 
                 item["first"] = sd
             if item["latest"] is None or sd > item["latest"]:
                 item["latest"] = sd
+        if row.get("photo_url") and not item["photo_url"]:
+            item["photo_url"] = row["photo_url"]
+            item["url"] = row.get("url")
+            item["observer_login"] = row.get("observer_login")
+        elif row.get("url") and not item["url"]:
+            item["url"] = row.get("url")
+            item["observer_login"] = row.get("observer_login")
 
     by_taxon: dict[int, dict[str, Any]] = defaultdict(lambda: {"stations": {}})
     for item in grouped.values():
@@ -1511,6 +1521,9 @@ def record_highlights(settings: Settings) -> list[dict[str, Any]]:
                 "is_state_first": station.get("is_state_first"),
                 "is_county_first": station.get("is_county_first"),
                 "first_among_tracked": station.get("first_among_tracked"),
+                "photo_url": station.get("photo_url"),
+                "url": station.get("url"),
+                "observer_login": station.get("observer_login"),
             })
     return sorted(
         highlights,
