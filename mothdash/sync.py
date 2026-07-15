@@ -183,6 +183,7 @@ def _station_first_taxa(settings: Settings, station: Station) -> list[dict[str, 
             WHERE station_id = ?
               AND taxon_id IS NOT NULL
               AND observed_on IS NOT NULL
+              AND rank = 'species'
             GROUP BY taxon_id
             ORDER BY station_first_date
             """,

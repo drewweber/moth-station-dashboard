@@ -19,6 +19,11 @@ def parse_date(value: str | None) -> date | None:
         return None
 
 
+def is_species(row: dict[str, Any]) -> bool:
+    """Return whether an observation is identified at exactly species rank."""
+    return row.get("rank") == "species"
+
+
 def flight_season_date(day: date) -> tuple[int, date]:
     """Group January with the preceding winter and normalize month/day."""
     season_year = day.year - 1 if day.month == 1 else day.year
@@ -86,7 +91,7 @@ def station_summaries(settings: Settings) -> list[dict[str, Any]]:
             },
         )
         summary["observations"] += 1
-        if row["taxon_id"]:
+        if row["taxon_id"] and is_species(row):
             summary["taxa"].add(row["taxon_id"])
         sd = row["session_date"]
         if sd and (summary["latest_session"] is None or sd > summary["latest_session"]):
@@ -191,7 +196,11 @@ def hero_photos(settings: Settings, limit: int = 8) -> list[dict[str, Any]]:
 def active_year(settings: Settings) -> int | None:
     with connect(settings.database) as conn:
         row = conn.execute(
-            "SELECT MAX(substr(observed_on, 1, 4)) AS year FROM observations"
+            """
+            SELECT MAX(substr(observed_on, 1, 4)) AS year
+            FROM observations
+            WHERE rank = 'species'
+            """
         ).fetchone()
     return int(row["year"]) if row and row["year"] else None
 
@@ -214,7 +223,7 @@ def first_of_season(
     for row in rows:
         taxon_id = row.get("taxon_id")
         sd = row.get("session_date")
-        if not taxon_id or sd is None:
+        if not taxon_id or sd is None or not is_species(row):
             continue
         if not all_time and sd.year != year:
             continue
@@ -284,7 +293,7 @@ def station_taxa(settings: Settings, year: int | None = None) -> list[dict[str, 
     grouped: dict[tuple[int, str], dict[str, Any]] = {}
     for row in rows:
         taxon_id = row.get("taxon_id")
-        if not taxon_id:
+        if not taxon_id or not is_species(row):
             continue
         sd = row.get("session_date")
         if year is not None and (sd is None or sd.year != year):
@@ -366,7 +375,7 @@ def latest_session_taxa(settings: Settings) -> dict[str, Any]:
 
     for row in rows:
         taxon_id = row.get("taxon_id")
-        if not taxon_id or row.get("session_date") != latest:
+        if not taxon_id or not is_species(row) or row.get("session_date") != latest:
             continue
         observation_count += 1
         taxon_id = int(taxon_id)
@@ -457,7 +466,7 @@ def recent_days_taxa(settings: Settings, days: int = 7) -> dict[str, Any]:
     for row in rows:
         taxon_id = row.get("taxon_id")
         session_date = row.get("session_date")
-        if not taxon_id or session_date not in window:
+        if not taxon_id or not is_species(row) or session_date not in window:
             continue
         observation_count += 1
         taxon_id = int(taxon_id)
@@ -536,7 +545,7 @@ def daily_species_counts(settings: Settings, year: int | None = None) -> list[di
     for row in rows:
         taxon_id = row.get("taxon_id")
         sd = row.get("session_date")
-        if not taxon_id or sd is None or row.get("rank") != "species":
+        if not taxon_id or sd is None or not is_species(row):
             continue
         if year is not None:
             if sd.year != year:
@@ -657,7 +666,7 @@ def _select_varied_insights(
 
 def dashboard_insights(settings: Settings, limit: int = 16) -> list[dict[str, Any]]:
     """Build deterministic naturalist-feed stories from the current dataset."""
-    rows = load_rows(settings)
+    rows = [row for row in load_rows(settings) if is_species(row)]
     if not rows:
         return []
 
@@ -928,7 +937,7 @@ def dashboard_insights(settings: Settings, limit: int = 16) -> list[dict[str, An
     for row in rows:
         taxon_id = row.get("taxon_id")
         sd = row.get("session_date")
-        if not taxon_id or not sd or row.get("rank") != "species":
+        if not taxon_id or not sd or not is_species(row):
             continue
         taxon_id = int(taxon_id)
         season_year, normalized_date = flight_season_date(sd)
@@ -1023,7 +1032,7 @@ def station_profile(settings: Settings, station_id: str) -> dict[str, Any]:
     unique_taxa = unique_station_taxa(settings)
     species_rows = [
         row for row in rows
-        if row.get("taxon_id") and row.get("rank") == "species"
+        if row.get("taxon_id") and is_species(row)
     ]
 
     taxa_seen = {int(row["taxon_id"]) for row in species_rows}
@@ -1277,6 +1286,7 @@ def station_profile(settings: Settings, station_id: str) -> dict[str, Any]:
 
 def trend_summary(settings: Settings) -> dict[str, Any]:
     rows = load_rows(settings)
+    species_rows = [row for row in rows if is_species(row)]
     taxa = station_taxa(settings)
     if not rows:
         return {
@@ -1289,7 +1299,7 @@ def trend_summary(settings: Settings) -> dict[str, Any]:
         }
 
     by_taxon: dict[int, dict[str, Any]] = {}
-    for row in rows:
+    for row in species_rows:
         taxon_id = row.get("taxon_id")
         sd = row.get("session_date")
         if not taxon_id or not sd:
@@ -1350,7 +1360,7 @@ def trend_summary(settings: Settings) -> dict[str, Any]:
                     "station_name": row["station_name"],
                     "date": sd,
                 }
-        if taxon_id and sd:
+        if taxon_id and sd and is_species(row):
             taxa_by_date[sd].add(int(taxon_id))
     seen = set()
     network_accumulation = []
@@ -1392,10 +1402,10 @@ def trend_summary(settings: Settings) -> dict[str, Any]:
     by_year_month_station: dict[
         int, dict[int, dict[str, dict[str, Any]]]
     ] = defaultdict(lambda: defaultdict(dict))
-    for row in rows:
+    for row in species_rows:
         taxon_id = row.get("taxon_id")
         sd = row.get("session_date")
-        if not taxon_id or not sd or row.get("rank") != "species":
+        if not taxon_id or not sd:
             continue
         taxon_id = int(taxon_id)
         by_year_month[sd.year][sd.month].add(taxon_id)

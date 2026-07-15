@@ -130,7 +130,7 @@ def _hero_metrics(
         [
             _metric("enabled stations", len([s for s in stations if s.enabled])),
             _metric("moth observations", f"{total_observations:,}"),
-            _metric("unique taxa", f"{len(taxa):,}"),
+            _metric("unique species", f"{len(taxa):,}"),
             _metric("iNat firsts", f"{notable:,}"),
             _metric("latest session", latest, compact=True),
         ]
@@ -357,7 +357,7 @@ def _taxa_period_dashboard(
       </div>
       <div>
         <strong>{h(len(taxa))}</strong>
-        <span>unique moth taxa</span>
+        <span>unique moth species</span>
       </div>
       <div>
         <strong>{h(payload.get("observations", 0))}</strong>
@@ -1409,7 +1409,9 @@ def _snapshot_payload(settings: Settings, stations: list[Station], taxa: list[di
                 SELECT o.taxon_id, COUNT(DISTINCT o.inat_obs_id) AS observation_count
                 FROM observations o
                 JOIN stations s ON s.id = o.station_id
-                WHERE s.enabled = 1 AND o.taxon_id IS NOT NULL
+                WHERE s.enabled = 1
+                  AND o.taxon_id IS NOT NULL
+                  AND o.rank = 'species'
                 GROUP BY o.taxon_id
                 """
             ).fetchall()
@@ -4470,7 +4472,7 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
     <section id="last-night">
       <div class="section-head">
         <h2>Last night</h2>
-        <p>A photo-first scan of the latest synced moth session, grouped by unique taxa so shared and station-only sightings are easy to compare.</p>
+        <p>A photo-first scan of the latest synced moth session, grouped by unique species so shared and station-only sightings are easy to compare.</p>
       </div>
       {_last_night_dashboard(latest_night, stations)}
     </section>
