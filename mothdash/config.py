@@ -26,6 +26,7 @@ STATION_META_KEYS = {
     "live_place_id",
     "live_project_id",
     "live_user_login",
+    "public_live_precise_query",
 }
 
 ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
@@ -63,6 +64,7 @@ class Station:
     light_setup: str = ""
     station_history: str = ""
     live_query: dict[str, Any] | None = None
+    public_live_precise_query: bool = False
 
     def api_params(self, settings: Settings) -> dict[str, Any]:
         params = dict(self.query)
@@ -139,6 +141,7 @@ def load_config(path: str | Path = "stations.toml") -> tuple[Settings, list[Stat
                 light_setup=str(raw_station.get("light_setup", "")),
                 station_history=str(raw_station.get("station_history", "")),
                 live_query=live_query or None,
+                public_live_precise_query=bool(raw_station.get("public_live_precise_query", False)),
             )
         )
 

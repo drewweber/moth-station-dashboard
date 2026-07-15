@@ -1283,7 +1283,10 @@ SENSITIVE_LIVE_QUERY_KEYS = {
 
 def _public_live_query(settings: Settings, station: Station) -> tuple[dict[str, Any], bool]:
     query = station.live_api_params(settings)
-    if any(key in query for key in SENSITIVE_LIVE_QUERY_KEYS):
+    if (
+        any(key in query for key in SENSITIVE_LIVE_QUERY_KEYS)
+        and not station.public_live_precise_query
+    ):
         return {}, False
     return query, True
 
