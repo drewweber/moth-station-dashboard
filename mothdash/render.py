@@ -1317,6 +1317,7 @@ def _snapshot_payload(settings: Settings, stations: list[Station], taxa: list[di
             if first:
                 first_dates.setdefault(station_id, {})[str(taxon_id)] = first.isoformat()
 
+    colors = _station_color_map(stations)
     enabled = []
     for station in stations:
         if not station.enabled:
@@ -1325,6 +1326,8 @@ def _snapshot_payload(settings: Settings, stations: list[Station], taxa: list[di
         enabled.append({
             "id": station.id,
             "name": station.name,
+            "short_name": _station_short_label(station),
+            "color": colors[station.id],
             "public_location": station.public_location,
             "query": query,
             "live_supported": live_supported,
@@ -1809,21 +1812,37 @@ function updateStationSummary(station, observations, now, eventWindow) {
   return { stationFirsts, currentObs };
 }
 
-function renderSpeciesList(species, emptyText, excludedSpecies = new Set(), limit = 24, rarityFirst = false) {
+function sharedStationPills(taxonId, stationId) {
+  if (!stationId) return "";
+  const shared = Array.from(state.stationSummaries.values())
+    .filter((summary) => summary.station.id !== stationId && summary.currentSpecies.has(taxonId))
+    .map((summary) => summary.station)
+    .sort((a, b) => (a.short_name || a.name).localeCompare(b.short_name || b.name));
+  if (!shared.length) return "";
+  const stationNames = shared.map((station) => station.name).join(", ");
+  return `<div class="live-shared-stations" aria-label="Also seen this event at ${escapeHtml(stationNames)}">
+    ${shared.map((station) => `<span class="live-shared-pill" style="--station-color: ${escapeHtml(station.color || "#d7b56d")}" title="Also seen at ${escapeHtml(station.name)}">${escapeHtml(station.short_name || station.name)}</span>`).join("")}
+  </div>`;
+}
+
+function renderSpeciesList(species, emptyText, excludedSpecies = new Set(), limit = 24, rarityFirst = false, stationId = "") {
   const excluded = excludedSpecies instanceof Map
     ? new Set(excludedSpecies.keys())
     : excludedSpecies;
-  const items = Array.from(species.values())
+  const sortedItems = Array.from(species.values())
     .filter((item) => !excluded.has(item.taxonId))
     .sort((a, b) => rarityFirst
       ? a.regionalCount - b.regionalCount || b.count - a.count || a.label.localeCompare(b.label)
-      : b.count - a.count || a.label.localeCompare(b.label))
-    .slice(0, limit);
+      : b.count - a.count || a.label.localeCompare(b.label));
+  const items = Number.isFinite(limit) ? sortedItems.slice(0, limit) : sortedItems;
   if (!items.length) return `<p class="live-muted">${escapeHtml(emptyText)}</p>`;
   return `<ul>${items.map((item) => `
     <li>
-      <a href="${escapeHtml(item.url)}">${escapeHtml(item.label)}</a>
-      <span>${rarityFirst
+      <div class="live-species-name">
+        <a href="${escapeHtml(item.url)}">${escapeHtml(item.label)}</a>
+        ${sharedStationPills(item.taxonId, stationId)}
+      </div>
+      <span class="live-species-meta">${rarityFirst
         ? `${item.count} event · ${item.regionalCount} regional`
         : item.count > 1 ? `${item.count} obs` : "1 obs"}</span>
     </li>
@@ -1889,12 +1908,19 @@ function renderStationSummaries() {
         <div class="live-station-lists">
           <div class="live-firsts">
             <h3>New species this event</h3>
-            ${renderSpeciesList(summary.stationFirstSpecies, summary.checked ? "No new station species in this event yet." : "Waiting for the first check.", new Set(), 20)}
+            ${renderSpeciesList(summary.stationFirstSpecies, summary.checked ? "No new station species in this event yet." : "Waiting for the first check.", new Set(), 20, false, station.id)}
           </div>
-          <details class="live-other">
-            <summary>Other species this event <span>${otherSpeciesCount}</span></summary>
-            ${renderSpeciesList(summary.currentSpecies, station.live_supported ? "No other species-level moths in this event yet." : station.live_note, summary.stationFirstSpecies, 10, true)}
-          </details>
+          <div class="live-other">
+            <details>
+              <summary>Other species this event <span>${otherSpeciesCount}</span></summary>
+              <div class="live-other-full">
+                ${renderSpeciesList(summary.currentSpecies, station.live_supported ? "No other species-level moths in this event yet." : station.live_note, summary.stationFirstSpecies, Number.POSITIVE_INFINITY, true, station.id)}
+              </div>
+            </details>
+            <div class="live-other-preview">
+              ${renderSpeciesList(summary.currentSpecies, station.live_supported ? "No other species-level moths in this event yet." : station.live_note, summary.stationFirstSpecies, 10, true, station.id)}
+            </div>
+          </div>
         </div>
       </article>
     `;
@@ -2230,7 +2256,7 @@ def _live_page() -> str:
     font-size: 0.9rem;
     font-weight: 650;
   }}
-  .live-other summary span {{
+  .live-other summary > span {{
     display: inline-grid;
     min-width: 28px;
     height: 28px;
@@ -2241,8 +2267,14 @@ def _live_page() -> str:
     font-size: 0.72rem;
     font-variant-numeric: tabular-nums;
   }}
-  .live-other[open] summary {{
+  .live-other details[open] summary {{
     margin-bottom: 8px;
+  }}
+  .live-other details[open] + .live-other-preview {{
+    display: none;
+  }}
+  .live-other-full {{
+    padding-bottom: 2px;
   }}
   .live-station-lists ul {{
     display: grid;
@@ -2260,18 +2292,40 @@ def _live_page() -> str:
     border-bottom: 1px solid var(--line);
     padding-bottom: 6px;
   }}
+  .live-species-name {{
+    min-width: 0;
+  }}
   .live-station-lists li a {{
     min-width: 0;
     overflow-wrap: anywhere;
   }}
-  .live-station-lists li span,
+  .live-species-meta,
   .live-muted {{
     color: var(--muted);
     font-size: 0.78rem;
   }}
-  .live-station-lists li span {{
+  .live-species-meta {{
     flex: 0 0 auto;
     text-align: right;
+    white-space: nowrap;
+  }}
+  .live-shared-stations {{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 4px;
+  }}
+  .live-shared-pill {{
+    display: inline-flex;
+    align-items: center;
+    min-height: 19px;
+    padding: 1px 6px;
+    border: 1px solid color-mix(in srgb, var(--station-color) 70%, var(--line));
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--station-color) 15%, transparent);
+    color: var(--ink);
+    font-size: 0.65rem;
+    line-height: 1;
     white-space: nowrap;
   }}
   .live-muted {{
