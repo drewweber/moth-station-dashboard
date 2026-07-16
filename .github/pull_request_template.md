@@ -16,6 +16,7 @@ State explicitly whether this changes:
 - session-date handling
 - iNaturalist API usage or caching
 - public coordinates, privacy, or Live queries
+- homepage HTML size, repeated DOM items, or media loading
 Use "None" where appropriate.
 -->
 
@@ -33,6 +34,8 @@ Commands run and results:
 - [ ] I added or updated tests for changed analysis behavior, or explained why no test is needed.
 - [ ] I checked the relevant generated page manually.
 - [ ] I checked both desktop and mobile layouts for visible changes.
+- [ ] For homepage changes, I reported `public/index.html` size and relevant repeated-item counts before and after.
+- [ ] Long or media-rich collections use a bounded preview plus a clear "Browse all" or "View all" path.
 
 Data used for verification:
 
@@ -52,4 +55,5 @@ Data used for verification:
 - [ ] I did not commit generated HTML, SQLite databases, logs, secrets, or unrelated formatting changes.
 - [ ] Existing station IDs remain stable unless the PR explicitly documents a migration.
 - [ ] Public wording distinguishes iNaturalist firsts from broader historical records.
+- [ ] I did not add a large collection of hidden cards or duplicate media to the homepage.
 - [ ] AI-assisted changes were reviewed by the contributor, not submitted without inspection.

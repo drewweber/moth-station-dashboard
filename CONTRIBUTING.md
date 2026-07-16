@@ -66,6 +66,36 @@ short summary generated from the commit list.
 - Exact coordinates and precise live queries must not be made public without
   the station owner's approval.
 
+## Homepage Performance and Information Depth
+
+The main page should answer what is happening now without becoming the full
+archive for every feature.
+
+- Use short, representative previews for photo grids, cards, feeds, records,
+  and other repeated content. Twelve media cards is the usual upper bound for
+  a homepage section unless the PR explains a strong reason to exceed it.
+- Place complete, complex, or media-rich collections behind an obvious
+  "Browse all" or "View all" control. The destination may be an expanded
+  section, a dedicated generated page, or a progressively rendered archive.
+- Do not ship hundreds of hidden cards or duplicate image elements merely to
+  support filtering. Keep full datasets in compact tables or JSON and reveal
+  only what the visitor requests.
+- Lazy-load nonessential images and avoid loading offscreen archive media on
+  the homepage.
+- Preserve no-JavaScript access to important data where practical, especially
+  compact tables and links to full archives.
+
+For any PR that changes homepage content volume, include these measurements in
+the description:
+
+```sh
+wc -c public/index.html
+rg -o 'class="repeated-item-class"' public/index.html | wc -l
+```
+
+Replace `repeated-item-class` with the relevant card, row, image, or chart
+class. Report the before and after values and explain any increase.
+
 ## Required Local Checks
 
 Before opening a pull request:

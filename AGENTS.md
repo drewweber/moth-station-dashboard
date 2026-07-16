@@ -21,6 +21,15 @@ queries.
   results in the pull request description.
 - For visible changes, include before/after screenshots at relevant desktop
   and mobile widths.
+- Keep the main page fast and simple. Treat homepage sections as bounded
+  previews, not complete archives.
+- Put long, complex, or media-rich collections behind a clear "Browse all" or
+  "View all" control leading to an expanded view or dedicated static page.
+- Do not render large collections of hidden cards or duplicate images into the
+  homepage DOM. Prefer compact tables, paginated rendering, or separate JSON
+  data products for full collections.
+- When a pull request changes the homepage, report generated `index.html` size
+  and repeated-item counts before and after the change.
 
 ## Common Commands
 
