@@ -149,6 +149,69 @@ def recent_observations(settings: Settings) -> list[dict[str, Any]]:
     return out
 
 
+def diversify_by_station(
+    rows: list[dict[str, Any]],
+    limit: int,
+    per_station_cap: int = 2,
+    dedupe_key: str | None = None,
+) -> list[dict[str, Any]]:
+    """Pick up to `limit` rows, preferring one-per-station coverage first.
+
+    Rows are assumed to already be sorted in priority order (e.g. most
+    recent first). Pass 1 takes the top row for each distinct station so a
+    single station's burst of uploads cannot crowd out every other station.
+    Pass 2 tops up to `per_station_cap` per station. Pass 3 fills any
+    remaining slots in original order regardless of station.
+    """
+    selected: list[dict[str, Any]] = []
+    seen_keys = set()
+    seen_stations = set()
+
+    def dedupe_value(row: dict[str, Any]) -> Any:
+        return row.get(dedupe_key) if dedupe_key else id(row)
+
+    for row in rows:
+        if row["station_id"] in seen_stations:
+            continue
+        value = dedupe_value(row)
+        if dedupe_key and value is None:
+            continue
+        if value in seen_keys:
+            continue
+        selected.append(row)
+        seen_stations.add(row["station_id"])
+        seen_keys.add(value)
+        if len(selected) >= limit:
+            return selected
+
+    per_station_counts = defaultdict(int)
+    for row in selected:
+        per_station_counts[row["station_id"]] += 1
+
+    for row in rows:
+        value = dedupe_value(row)
+        if dedupe_key and (value is None or value in seen_keys):
+            continue
+        if per_station_counts[row["station_id"]] >= per_station_cap:
+            continue
+        selected.append(row)
+        per_station_counts[row["station_id"]] += 1
+        seen_keys.add(value)
+        if len(selected) >= limit:
+            return selected
+
+    for row in rows:
+        if len(selected) >= limit:
+            break
+        value = dedupe_value(row)
+        if dedupe_key and (value is None or value in seen_keys):
+            continue
+        selected.append(row)
+        seen_keys.add(value)
+
+    return selected
+
+
 def hero_photos(settings: Settings, limit: int = 8) -> list[dict[str, Any]]:
     """Recent photo observations balanced across stations for the hero rail."""
     with connect(settings.database) as conn:
@@ -172,45 +235,7 @@ def hero_photos(settings: Settings, limit: int = 8) -> list[dict[str, Any]]:
         )
         row["label"] = _label(row)
 
-    selected = []
-    seen_photos = set()
-    seen_stations = set()
-
-    for row in candidates:
-        if row["station_id"] in seen_stations:
-            continue
-        if row["photo_url"] in seen_photos:
-            continue
-        selected.append(row)
-        seen_stations.add(row["station_id"])
-        seen_photos.add(row["photo_url"])
-        if len(selected) >= limit:
-            return selected
-
-    per_station_counts = defaultdict(int)
-    for row in selected:
-        per_station_counts[row["station_id"]] += 1
-
-    for row in candidates:
-        if row["photo_url"] in seen_photos:
-            continue
-        if per_station_counts[row["station_id"]] >= 2:
-            continue
-        selected.append(row)
-        per_station_counts[row["station_id"]] += 1
-        seen_photos.add(row["photo_url"])
-        if len(selected) >= limit:
-            break
-
-    for row in candidates:
-        if len(selected) >= limit:
-            break
-        if row["photo_url"] in seen_photos:
-            continue
-        selected.append(row)
-        seen_photos.add(row["photo_url"])
-
-    return selected
+    return diversify_by_station(candidates, limit, dedupe_key="photo_url")
 
 
 def active_year(settings: Settings) -> int | None:
@@ -694,11 +719,25 @@ def _select_varied_insights(
     return selected
 
 
-def dashboard_insights(settings: Settings, limit: int = 16) -> list[dict[str, Any]]:
+# How many days a date-anchored insight (tied to one specific session, first-of-season
+# arrival, or seasonal peak) stays eligible for the feed before it's considered no
+# longer novel. Insights based on current standing state (e.g. "most widely shared
+# moth in the network") are not date-anchored and are not subject to this window.
+INSIGHT_RECENCY_WINDOW_DAYS = 5
+
+
+def dashboard_insights(
+    settings: Settings, limit: int = 16, today: date | None = None
+) -> list[dict[str, Any]]:
     """Build deterministic naturalist-feed stories from the current dataset."""
     rows = [row for row in load_rows(settings) if is_species(row)]
     if not rows:
         return []
+
+    today = today or date.today()
+
+    def is_recent(anchor: date | None) -> bool:
+        return anchor is not None and (today - anchor).days <= INSIGHT_RECENCY_WINDOW_DAYS
 
     insights: list[dict[str, Any]] = []
     session_dates = [row["session_date"] for row in rows if row.get("session_date")]
@@ -718,7 +757,7 @@ def dashboard_insights(settings: Settings, limit: int = 16) -> list[dict[str, An
             taxon_observations[taxon_id].add(int(row["inat_obs_id"]))
         taxon_labels[taxon_id] = row["label"]
 
-    if latest:
+    if latest and is_recent(latest):
         latest_firsts = []
         latest_by_taxon: dict[int, dict[str, Any]] = {}
         first_by_station_taxon: dict[tuple[str, int], dict[str, Any]] = {}
@@ -884,6 +923,8 @@ def dashboard_insights(settings: Settings, limit: int = 16) -> list[dict[str, An
         for pulse in first_of_season(settings, year)[:4]:
             if pulse["spread_days"] > 2:
                 continue
+            if not is_recent(pulse["latest"]):
+                continue
             names = [
                 station["station_name"]
                 for station in pulse["stations"].values()
@@ -924,6 +965,8 @@ def dashboard_insights(settings: Settings, limit: int = 16) -> list[dict[str, An
             if 7 <= delta <= 60:
                 early.append((delta, labels[taxon_id], current, historical, taxon_id))
         for delta, label, current, historical, taxon_id in sorted(early, reverse=True)[:3]:
+            if not is_recent(current):
+                continue
             insights.append(
                 _insight(
                     "Early emergence",
@@ -938,15 +981,17 @@ def dashboard_insights(settings: Settings, limit: int = 16) -> list[dict[str, An
         calendar = daily_species_counts(settings, year)
         if calendar:
             peak = max(calendar, key=lambda item: item["total"])
-            insights.append(
-                _insight(
-                    "Peak night",
-                    f"{peak['label']} is the richest night of {year} so far",
-                    f"The network recorded {peak['total']} unique moth taxa across {peak['active_stations']} active station{'s' if peak['active_stations'] != 1 else ''}.",
-                    "unique species across stations",
-                    76,
+            peak_date = date.fromisoformat(peak["key"]) if peak.get("key") else None
+            if is_recent(peak_date):
+                insights.append(
+                    _insight(
+                        "Peak night",
+                        f"{peak['label']} is the richest night of {year} so far",
+                        f"The network recorded {peak['total']} unique moth taxa across {peak['active_stations']} active station{'s' if peak['active_stations'] != 1 else ''}.",
+                        "unique species across stations",
+                        76,
+                    )
                 )
-            )
 
     taxa = station_taxa(settings)
     shared = [taxon for taxon in taxa if taxon["station_count"] > 1]
@@ -1020,7 +1065,7 @@ def dashboard_insights(settings: Settings, limit: int = 16) -> list[dict[str, An
             item for item in unique_station_taxa(settings)
             if item.get("latest")
             and item["latest"] < latest
-            and (latest - item["latest"]).days <= 14
+            and (today - item["latest"]).days <= 14
         ]
         for item in recent_unique[:3]:
             insights.append(
@@ -1314,6 +1359,17 @@ def station_profile(settings: Settings, station_id: str) -> dict[str, Any]:
     }
 
 
+def station_overlap_similarity(shared: int, size_a: int, size_b: int) -> float:
+    """Overlap coefficient: shared species over the smaller station's total.
+
+    Unlike Jaccard similarity (shared / union), this does not get diluted when
+    one station has a much larger species list -- a small station whose
+    species are a full subset of a larger station's reads as 100% similar.
+    """
+    smaller = min(size_a, size_b)
+    return shared / smaller if smaller else 0.0
+
+
 def trend_summary(settings: Settings) -> dict[str, Any]:
     rows = load_rows(settings)
     species_rows = [row for row in rows if is_species(row)]
@@ -1508,14 +1564,12 @@ def trend_summary(settings: Settings) -> dict[str, Any]:
         matrix_row = []
         for right in stations:
             shared = len(left["taxa"] & right["taxa"])
-            union = len(left["taxa"] | right["taxa"])
-            similarity = shared / union if union else 0
+            similarity = station_overlap_similarity(shared, len(left["taxa"]), len(right["taxa"]))
             matrix_row.append(
                 {
                     "station_id": right["station_id"],
                     "station_name": right["station_name"],
                     "shared": shared,
-                    "union": union,
                     "similarity": similarity,
                 }
             )
