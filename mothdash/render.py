@@ -434,16 +434,14 @@ def _flag_list(flags: list[str]) -> str:
 
 RECORD_FLAG_TYPES = ("state iNat first", "county iNat first", "first among tracked")
 RECORD_CARD_PREVIEW_LIMIT = 12
-RECORD_TABLE_PREVIEW_LIMIT = 120
+RECORD_TABLE_PAGE_SIZE = 100
 
 
 def _record_cards(rows: list[dict[str, Any]]) -> str:
     if not rows:
         return '<p class="empty">No county, state, or tracked-station firsts are cached yet. Run a sync to refresh record context.</p>'
     cards = []
-    for index, row in enumerate(rows):
-        default_hidden = index >= RECORD_CARD_PREVIEW_LIMIT
-        hidden_attr = " hidden" if default_hidden else ""
+    for row in rows[:RECORD_CARD_PREVIEW_LIMIT]:
         label = h(row["label"])
         photo_url = row.get("photo_url")
         if photo_url:
@@ -455,8 +453,7 @@ def _record_cards(rows: list[dict[str, Any]]) -> str:
             title = f'<a href="{h(row["url"])}">{label}</a>'
         cards.append(
             f"""
-            <article class="record-card" data-flags="{h('|'.join(row["flags"]))}"
-              data-station-id="{h(row["station_id"])}" data-default-hidden="{"true" if default_hidden else "false"}"{hidden_attr}>
+            <article class="record-card">
               <div class="record-image">{image}</div>
               <div class="record-copy">
                 <div class="record-flags">{_flag_list(row["flags"])}</div>
@@ -473,13 +470,11 @@ def _record_table(rows: list[dict[str, Any]]) -> str:
     if not rows:
         return '<p class="empty">No first-record highlights are available yet.</p>'
     body = []
-    for index, row in enumerate(rows):
-        default_hidden = index >= RECORD_TABLE_PREVIEW_LIMIT
-        hidden_attr = " hidden" if default_hidden else ""
+    for row in rows:
         body.append(
             f"""
-            <tr data-flags="{h('|'.join(row["flags"]))}" data-station-id="{h(row["station_id"])}"
-              data-default-hidden="{"true" if default_hidden else "false"}"{hidden_attr}>
+            <tr data-record-row data-flags="{h('|'.join(row["flags"]))}"
+              data-station-id="{h(row["station_id"])}">
               <td>{h(row["label"])}</td>
               <td>{h(row["station_name"])}</td>
               <td data-sort-value="{h(row['first'])}">{h(row["first"])}</td>
@@ -488,7 +483,7 @@ def _record_table(rows: list[dict[str, Any]]) -> str:
             """
         )
     return f"""
-    <table class="sortable-table">
+    <table class="sortable-table" data-record-table>
       <thead>
         <tr>
           <th scope="col">{_sort_button("Species")}</th>
@@ -499,6 +494,12 @@ def _record_table(rows: list[dict[str, Any]]) -> str:
       </thead>
       <tbody>{''.join(body)}</tbody>
     </table>
+    <div class="record-archive-controls">
+      <span data-record-count aria-live="polite">Showing all {h(len(rows))} records</span>
+      <button type="button" data-record-show-more data-page-size="{RECORD_TABLE_PAGE_SIZE}">
+        Show {RECORD_TABLE_PAGE_SIZE} more
+      </button>
+    </div>
     """
 
 
@@ -1618,6 +1619,7 @@ function sortTable(table, columnIndex, direction, type) {
     button.dataset.direction = direction;
     button.closest("th")?.setAttribute("aria-sort", direction === "asc" ? "ascending" : "descending");
   }
+  table.dispatchEvent(new CustomEvent("table-sorted"));
 }
 
 function initSortableTables() {
@@ -1678,32 +1680,65 @@ function initRecordFilters() {
   const typeSelect = section.querySelector('[data-record-filter="type"]');
   const locationSelect = section.querySelector('[data-record-filter="location"]');
   const emptyMessage = section.querySelector("[data-record-empty]");
+  const cardGrid = section.querySelector(".record-grid");
+  const archive = section.querySelector(".record-archive");
+  const table = section.querySelector("[data-record-table]");
+  const showMore = section.querySelector("[data-record-show-more]");
+  const count = section.querySelector("[data-record-count]");
   if (!typeSelect || !locationSelect) return;
-  const items = Array.from(section.querySelectorAll(".record-card, tbody tr"));
+  const pageSize = Number(showMore?.dataset.pageSize || 100);
+  let visibleLimit = pageSize;
 
   const apply = () => {
     const type = typeSelect.value;
     const location = locationSelect.value;
     const filterActive = Boolean(type) || Boolean(location);
-    let visibleCount = 0;
-    items.forEach((item) => {
-      if (!filterActive) {
-        item.hidden = item.dataset.defaultHidden === "true";
-        if (!item.hidden) visibleCount += 1;
-        return;
-      }
-      const flags = (item.dataset.flags || "").split("|");
+    const rows = Array.from(table?.tBodies[0]?.rows || []);
+    const matching = rows.filter((item) => {
+      const flags = (item.dataset.flags || "").split("|").filter(Boolean);
       const matchesType = !type || flags.includes(type);
       const matchesLocation = !location || item.dataset.stationId === location;
-      const matches = matchesType && matchesLocation;
-      item.hidden = !matches;
-      if (matches) visibleCount += 1;
+      return matchesType && matchesLocation;
     });
-    if (emptyMessage) emptyMessage.hidden = visibleCount > 0;
+    const matchingRows = new Set(matching);
+
+    rows.forEach((item) => {
+      if (filterActive) {
+        item.hidden = !matchingRows.has(item);
+      } else {
+        item.hidden = rows.indexOf(item) >= visibleLimit;
+      }
+    });
+
+    if (filterActive && archive) archive.open = true;
+    if (cardGrid) cardGrid.hidden = filterActive;
+    if (emptyMessage) emptyMessage.hidden = matching.length > 0;
+    if (showMore) {
+      showMore.hidden = filterActive || visibleLimit >= rows.length;
+      const remaining = Math.max(0, rows.length - visibleLimit);
+      showMore.textContent = `Show ${Math.min(pageSize, remaining)} more`;
+    }
+    if (count) {
+      count.textContent = filterActive
+        ? `${matching.length} matching record${matching.length === 1 ? "" : "s"}`
+        : `Showing ${Math.min(visibleLimit, rows.length)} of ${rows.length} records`;
+    }
   };
 
-  typeSelect.addEventListener("change", apply);
-  locationSelect.addEventListener("change", apply);
+  const filterChanged = () => {
+    visibleLimit = pageSize;
+    apply();
+  };
+  typeSelect.addEventListener("change", filterChanged);
+  locationSelect.addEventListener("change", filterChanged);
+  showMore?.addEventListener("click", () => {
+    visibleLimit += pageSize;
+    apply();
+  });
+  table?.addEventListener("table-sorted", () => {
+    visibleLimit = pageSize;
+    apply();
+  });
   apply();
 }
 
@@ -3900,6 +3935,31 @@ h2 {
 }
 .record-archive[open] summary {
   margin-bottom: 8px;
+}
+.record-archive-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 2px 2px;
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+.record-archive-controls button {
+  border: 1px solid var(--amber);
+  border-radius: 4px;
+  padding: 8px 12px;
+  background: transparent;
+  color: var(--amber);
+  font: inherit;
+  cursor: pointer;
+}
+.record-archive-controls button:hover {
+  background: color-mix(in srgb, var(--amber) 10%, transparent);
+}
+.record-archive-controls button:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
 }
 .record-filter-row {
   display: grid;
