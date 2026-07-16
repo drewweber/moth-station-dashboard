@@ -17,6 +17,7 @@ State explicitly whether this changes:
 - iNaturalist API usage or caching
 - public coordinates, privacy, or Live queries
 - homepage HTML size, repeated DOM items, or media loading
+- GitHub Actions minutes/frequency or Cloudflare Pages deployments/features
 Use "None" where appropriate.
 -->
 
@@ -36,6 +37,8 @@ Commands run and results:
 - [ ] I checked both desktop and mobile layouts for visible changes.
 - [ ] For homepage changes, I reported `public/index.html` size and relevant repeated-item counts before and after.
 - [ ] Long or media-rich collections use a bounded preview plus a clear "Browse all" or "View all" path.
+- [ ] Query, workflow, or deployment changes include expected and worst-case usage.
+- [ ] All required GitHub Actions and Cloudflare Pages features fit within their current free tiers.
 
 Data used for verification:
 
@@ -56,4 +59,5 @@ Data used for verification:
 - [ ] Existing station IDs remain stable unless the PR explicitly documents a migration.
 - [ ] Public wording distinguishes iNaturalist firsts from broader historical records.
 - [ ] I did not add a large collection of hidden cards or duplicate media to the homepage.
+- [ ] I did not introduce an unbounded query, retry, workflow, or deployment loop.
 - [ ] AI-assisted changes were reviewed by the contributor, not submitted without inspection.

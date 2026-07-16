@@ -30,6 +30,12 @@ queries.
   data products for full collections.
 - When a pull request changes the homepage, report generated `index.html` size
   and repeated-item counts before and after the change.
+- Keep all routine queries, builds, previews, and production deploys within the
+  free tiers of GitHub Actions and Cloudflare Pages. Do not introduce a paid
+  service requirement.
+- Before increasing sync frequency, scheduled workflow frequency, API query
+  volume, build duration, artifact size, or deployment count, estimate and
+  document the worst-case usage in the pull request.
 
 ## Common Commands
 

@@ -96,6 +96,36 @@ rg -o 'class="repeated-item-class"' public/index.html | wc -l
 Replace `repeated-item-class` with the relevant card, row, image, or chart
 class. Report the before and after values and explain any increase.
 
+## Free-Tier Operating Budget
+
+The project must remain operable on the free tiers of GitHub Actions and
+Cloudflare Pages. Provider limits can change, so do not rely on a hard-coded
+allowance without checking the current provider documentation.
+
+- Keep routine builds, scheduled syncs, pull-request checks, previews, and
+  production deployments within free-tier allowances.
+- Prefer one bounded static build over frequent or long-running workflows.
+- Reuse the cached SQLite database and existing build outputs where practical.
+- Bound iNaturalist pagination and first-record refresh work so a new station or
+  feature cannot unexpectedly multiply query volume or workflow duration.
+- Do not add paid Cloudflare features, paid GitHub Actions capacity, persistent
+  servers, or third-party paid infrastructure as a requirement.
+- Avoid triggering production deploys for documentation-only changes unless
+  the deployment workflow genuinely needs to validate them.
+
+If a PR changes workflow schedules, query behavior, caching, generated asset
+size, preview deployments, or production deployment frequency, its description
+must include:
+
+- the previous and proposed run frequency
+- expected and worst-case API requests per run
+- expected build-time and generated-size impact
+- whether every required provider feature is available on the free tier
+- safeguards that prevent unbounded retries, pagination, or deploy loops
+
+When exact provider limits matter, link the current official GitHub or
+Cloudflare documentation in the PR rather than copying limits into the codebase.
+
 ## Required Local Checks
 
 Before opening a pull request:
