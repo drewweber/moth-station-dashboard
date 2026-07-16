@@ -144,6 +144,15 @@ headlines based on what is genuinely interesting in the data, such as:
 This gives people a reason to check the site regularly even when they were not
 out mothing the night before.
 
+### Deferred: Shared Feed Feedback
+
+The current thumbs-up/down controls save ratings in each visitor's browser and
+can copy a concise summary for discussion. A future shared-feedback phase can
+add a small Cloudflare Worker endpoint and lightweight shared store so multiple
+station owners can rate or comment on feed items. Keep the dashboard itself
+static; the Worker should accept only bounded feedback payloads, include basic
+abuse protection, and expose a private aggregate/export for feed tuning.
+
 ## Record Language
 
 Use careful language:

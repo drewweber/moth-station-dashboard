@@ -4,6 +4,8 @@ from mothdash.render import (
     DASHBOARD_JS,
     RECORD_CARD_PREVIEW_LIMIT,
     RECORD_TABLE_PAGE_SIZE,
+    _insight_cards,
+    _insight_feedback_id,
     _record_cards,
     _record_table,
 )
@@ -25,6 +27,24 @@ def records(count: int) -> list[dict]:
 
 
 class RecordRenderingTests(unittest.TestCase):
+    def test_insight_feedback_cards_have_stable_rating_hooks(self) -> None:
+        insight = {
+            "category": "Early emergence",
+            "title": "A moth arrived early",
+            "body": "Earlier than its tracked history.",
+            "meta": "2026",
+        }
+
+        insight_id = _insight_feedback_id(insight)
+        html = _insight_cards([insight])
+
+        self.assertEqual(insight_id, _insight_feedback_id(dict(insight)))
+        self.assertIn(f'data-insight-id="{insight_id}"', html)
+        self.assertIn('data-insight-rating="up"', html)
+        self.assertIn('data-insight-rating="down"', html)
+        self.assertIn('data-insight-feedback-copy', DASHBOARD_JS)
+        self.assertIn('INSIGHT_FEEDBACK_KEY', DASHBOARD_JS)
+
     def test_photo_grid_renders_only_newest_preview(self) -> None:
         html = _record_cards(records(150))
 

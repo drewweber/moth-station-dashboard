@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import date
 from html import escape
@@ -48,6 +49,15 @@ def h(value: Any) -> str:
     if isinstance(value, date):
         return value.isoformat()
     return escape(str(value))
+
+
+def _insight_feedback_id(insight: dict[str, Any]) -> str:
+    """Create a stable browser-storage key for a generated feed item."""
+    source = "\x1f".join(
+        str(insight.get(field, ""))
+        for field in ("category", "title", "body", "meta")
+    )
+    return hashlib.sha256(source.encode("utf-8")).hexdigest()[:16]
 
 
 def _summary_map(summaries: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -209,14 +219,29 @@ def _insight_cards(insights: list[dict[str, Any]]) -> str:
         return '<p class="empty">Insight cards will appear after observations are synced.</p>'
     cards = []
     for index, insight in enumerate(insights[:12], start=1):
+        feedback_id = _insight_feedback_id(insight)
+        category = h(insight["category"])
+        title = h(insight["title"])
+        meta = h(insight.get("meta"))
         cards.append(
             f"""
-            <article class="insight-card">
+            <article class="insight-card" data-insight-feedback
+              data-insight-id="{feedback_id}"
+              data-insight-category="{category}"
+              data-insight-title="{title}"
+              data-insight-meta="{meta}">
               <div class="insight-index">{index:02d}</div>
-              <p>{h(insight["category"])}</p>
-              <h3>{h(insight["title"])}</h3>
+              <p>{category}</p>
+              <h3>{title}</h3>
               <span>{h(insight["body"])}</span>
-              <small>{h(insight.get("meta"))}</small>
+              <small>{meta}</small>
+              <div class="insight-feedback" role="group" aria-label="Rate this insight">
+                <span>Useful?</span>
+                <button type="button" class="insight-rating" data-insight-rating="up"
+                  aria-label="Good insight" aria-pressed="false">&#128077;</button>
+                <button type="button" class="insight-rating" data-insight-rating="down"
+                  aria-label="Needs improvement" aria-pressed="false">&#128078;</button>
+              </div>
             </article>
             """
         )
@@ -1743,6 +1768,118 @@ function initRecordFilters() {
   apply();
 }
 
+const INSIGHT_FEEDBACK_KEY = "mothdash-insight-feedback-v1";
+
+function readInsightFeedback() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(INSIGHT_FEEDBACK_KEY) || "{}");
+    return saved && typeof saved === "object" ? saved : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeInsightFeedback(feedback) {
+  try {
+    localStorage.setItem(INSIGHT_FEEDBACK_KEY, JSON.stringify(feedback));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function copyText(text) {
+  if (navigator.clipboard?.writeText) return navigator.clipboard.writeText(text);
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  document.body.appendChild(textarea);
+  textarea.select();
+  const copied = document.execCommand("copy");
+  textarea.remove();
+  return copied ? Promise.resolve() : Promise.reject(new Error("Copy failed"));
+}
+
+function initInsightFeedback() {
+  const cards = Array.from(document.querySelectorAll("[data-insight-feedback]"));
+  const copyButton = document.querySelector("[data-insight-feedback-copy]");
+  const status = document.querySelector("[data-insight-feedback-status]");
+  if (!cards.length) return;
+  let feedback = readInsightFeedback();
+
+  const setStatus = (message) => {
+    if (status) status.textContent = message;
+  };
+  const syncCard = (card) => {
+    const rating = feedback[card.dataset.insightId]?.rating || "";
+    card.querySelectorAll("[data-insight-rating]").forEach((button) => {
+      const selected = button.dataset.insightRating === rating;
+      button.classList.toggle("is-selected", selected);
+      button.setAttribute("aria-pressed", String(selected));
+    });
+  };
+  const ratedEntries = () => cards.map((card) => {
+    const item = feedback[card.dataset.insightId];
+    if (!item?.rating) return null;
+    return {
+      id: card.dataset.insightId,
+      category: card.dataset.insightCategory,
+      title: card.dataset.insightTitle,
+      meta: card.dataset.insightMeta,
+      rating: item.rating,
+      ratedAt: item.ratedAt,
+    };
+  }).filter(Boolean);
+  const updateStatus = () => {
+    const count = ratedEntries().length;
+    setStatus(count ? `${count} rating${count === 1 ? "" : "s"} saved on this device.` : "");
+  };
+
+  cards.forEach((card) => {
+    syncCard(card);
+    card.querySelectorAll("[data-insight-rating]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const id = card.dataset.insightId;
+        const rating = button.dataset.insightRating;
+        if (feedback[id]?.rating === rating) {
+          delete feedback[id];
+        } else {
+          feedback[id] = { rating, ratedAt: new Date().toISOString() };
+        }
+        if (!writeInsightFeedback(feedback)) {
+          setStatus("Ratings could not be saved in this browser.");
+          return;
+        }
+        syncCard(card);
+        updateStatus();
+      });
+    });
+  });
+
+  copyButton?.addEventListener("click", async () => {
+    const entries = ratedEntries();
+    if (!entries.length) {
+      setStatus("Rate one or more insights before copying feedback.");
+      return;
+    }
+    const lines = ["Naturalist feed feedback", ""];
+    entries.forEach((entry) => {
+      const details = [entry.category, entry.title, entry.meta].filter(Boolean).join(" | ");
+      lines.push(`- ${entry.rating === "up" ? "Good" : "Needs improvement"}: ${details} [${entry.id}]`);
+    });
+    try {
+      await copyText(lines.join("\n"));
+      setStatus(`${entries.length} rating${entries.length === 1 ? "" : "s"} copied.`);
+    } catch {
+      setStatus("Could not copy ratings. Please try again.");
+    }
+  });
+
+  updateStatus();
+}
+
 function initMonthlyTooltips() {
   document.querySelectorAll(".monthly-overlay-chart, .accumulation-line-chart").forEach((figure) => {
     const tooltip = figure.querySelector(".monthly-tooltip");
@@ -1800,6 +1937,7 @@ initSortableTables();
 initViewToggles();
 initUniqueFilter();
 initRecordFilters();
+initInsightFeedback();
 initMonthlyTooltips();
 """
 
@@ -3627,6 +3765,77 @@ h2 {
   color: var(--faint);
   padding-top: 8px;
 }
+.feed-section-copy {
+  display: grid;
+  justify-items: end;
+  gap: 8px;
+}
+.insight-feedback-copy {
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 6px 9px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.76rem;
+  cursor: pointer;
+}
+.insight-feedback-copy:hover {
+  border-color: var(--amber);
+  color: var(--amber);
+}
+.insight-feedback-status {
+  min-height: 1.25em;
+  margin: -8px 0 12px;
+  color: var(--faint);
+  font-size: 0.78rem;
+}
+.insight-feedback {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 12px;
+  padding-top: 9px;
+  border-top: 1px solid rgba(240, 232, 214, 0.09);
+}
+.insight-feedback > span {
+  margin-right: auto;
+  color: var(--faint);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.68rem;
+}
+.insight-rating {
+  display: inline-grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+}
+.insight-rating:hover {
+  border-color: var(--amber);
+  color: var(--ink);
+}
+.insight-rating.is-selected[data-insight-rating="up"] {
+  border-color: var(--leaf);
+  background: color-mix(in srgb, var(--leaf) 18%, transparent);
+  color: var(--ink);
+}
+.insight-rating.is-selected[data-insight-rating="down"] {
+  border-color: var(--rust);
+  background: color-mix(in srgb, var(--rust) 18%, transparent);
+  color: var(--ink);
+}
+.insight-rating:focus-visible,
+.insight-feedback-copy:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
 .insight-index {
   position: absolute;
   top: 10px;
@@ -4352,6 +4561,10 @@ footer div {
   .section-head p {
     margin-top: 8px;
   }
+  .feed-section-copy {
+    justify-items: start;
+    margin-top: 8px;
+  }
   .insight-grid {
     grid-template-columns: repeat(2, 1fr);
   }
@@ -4587,10 +4800,14 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
     </section>
 
     <section id="feed">
-      <div class="section-head">
+      <div class="section-head feed-section-head">
         <h2>Naturalist feed</h2>
-        <p>Build-generated headlines from the station network, meant to surface discoveries, timing shifts, and shared flight pulses before the tables.</p>
+        <div class="feed-section-copy">
+          <p>Build-generated headlines from the station network, meant to surface discoveries, timing shifts, and shared flight pulses before the tables.</p>
+          <button type="button" class="insight-feedback-copy" data-insight-feedback-copy>Copy ratings</button>
+        </div>
       </div>
+      <p class="insight-feedback-status" data-insight-feedback-status aria-live="polite"></p>
       <div class="insight-grid">{_insight_cards(insights)}</div>
     </section>
 
