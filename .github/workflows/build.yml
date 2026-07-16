@@ -3,8 +3,14 @@ name: Build and deploy dashboard
 on:
   workflow_dispatch: {}
   schedule:
-    # 14:15 UTC = 10:15 AM Eastern during daylight time.
-    - cron: "15 14 * * *"
+    # Runs four times daily so newly-uploaded iNaturalist observations get
+    # picked up throughout the day, not just once. Times are UTC and assume
+    # Eastern Daylight Time (UTC-4); during EST (UTC-5, roughly Nov-Mar)
+    # each run will land an hour later than the label below.
+    - cron: "0 4 * * *"   # 12:00 AM Eastern
+    - cron: "0 6 * * *"   # 2:00 AM Eastern
+    - cron: "0 13 * * *"  # 9:00 AM Eastern
+    - cron: "0 16 * * *"  # 12:00 PM Eastern
   push:
     branches: [main]
     paths:
