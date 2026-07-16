@@ -14,6 +14,7 @@ from .analysis import (
     dashboard_insights,
     first_of_season,
     generated_at,
+    diversify_by_station,
     hero_photos,
     latest_session_taxa,
     record_highlights,
@@ -886,8 +887,8 @@ def _accumulation_bars(profile: dict[str, Any]) -> str:
             <g class="monthly-point-group" style="--series-color: var(--amber)" tabindex="0" role="img"
                aria-label="{h(row['date'])}: {h(row['species'])} species"
                data-tooltip-html="{h(tooltip_html)}">
-              <circle class="monthly-hit-target" cx="{x:.1f}" cy="{y:.1f}" r="11"></circle>
-              <circle class="monthly-point" cx="{x:.1f}" cy="{y:.1f}" r="3.2"></circle>
+              <circle class="monthly-hit-target" cx="{x:.1f}" cy="{y:.1f}" r="9"></circle>
+              <circle class="monthly-point" cx="{x:.1f}" cy="{y:.1f}" r="2.6"></circle>
             </g>
             """
         )
@@ -1141,11 +1142,11 @@ def _network_accumulation(
         )
         markers.append(
             f"""
-            <g class="monthly-point-group" style="--series-color: var(--amber)" tabindex="0" role="img"
+            <g class="monthly-point-group" style="--series-color: var(--leaf)" tabindex="0" role="img"
                aria-label="{h(row_date)}: {h(row['species'])} species, {h(row['new_species'])} new"
                data-tooltip-html="{h(tooltip_html)}">
-              <circle class="monthly-hit-target" cx="{x:.1f}" cy="{y:.1f}" r="11"></circle>
-              <circle class="monthly-point" cx="{x:.1f}" cy="{y:.1f}" r="3.1"></circle>
+              <circle class="monthly-hit-target" cx="{x:.1f}" cy="{y:.1f}" r="9"></circle>
+              <circle class="monthly-point" cx="{x:.1f}" cy="{y:.1f}" r="2.6"></circle>
             </g>
             """
         )
@@ -1387,7 +1388,7 @@ def _trend_section(trends: dict[str, Any], stations: list[Station]) -> str:
       </article>
       <article class="trend-panel trend-panel-wide">
         <h3>Station similarity</h3>
-        <p>Jaccard similarity based on shared moth taxa. Darker cells mean more overlap.</p>
+        <p>Overlap coefficient based on shared moth taxa: shared species divided by the smaller station's total, so a small station whose species are a subset of a larger one's shows as fully similar. Darker cells mean more overlap.</p>
         <div class="similarity-wrap">{_station_similarity_matrix(trends["station_similarity"], stations)}</div>
       </article>
     </div>
@@ -3004,12 +3005,6 @@ h2 {
   stroke-linejoin: round;
   vector-effect: non-scaling-stroke;
 }
-.accumulation-line-chart circle {
-  fill: var(--panel);
-  stroke: var(--amber);
-  stroke-width: 2;
-  vector-effect: non-scaling-stroke;
-}
 .chart-label,
 .chart-callout {
   fill: var(--muted);
@@ -3368,9 +3363,6 @@ h2 {
   fill: rgba(138, 167, 122, 0.14);
 }
 .network-line-chart .accumulation-line {
-  stroke: var(--leaf);
-}
-.network-line-chart circle {
   stroke: var(--leaf);
 }
 .station-launch-marker line {
@@ -4488,6 +4480,7 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
 
     summaries = station_summaries(settings)
     recent = recent_observations(settings)
+    recent_spotlight = diversify_by_station(recent, limit=12, dedupe_key="url")
     hero_photo_rows = hero_photos(settings)
     year = active_year(settings)
     pulses = first_of_season(settings, year)
@@ -4497,6 +4490,7 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
     taxa = station_taxa(settings)
     year_taxa = station_taxa(settings, year) if year else []
     latest_night_taxa = latest_night.get("taxa") or []
+    recent_week_taxa = recent_week.get("taxa") or []
     year_calendar = daily_species_counts(settings, year) if year else []
     all_time_calendar = daily_species_counts(settings)
     records = record_highlights(settings)
@@ -4582,7 +4576,7 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
         <h2>Recent sightings</h2>
         <p>Fresh uploads are shown as a field log first, with the full table kept below for scanning dates, observers, and links.</p>
       </div>
-      <div class="sighting-grid">{_recent_cards(recent)}</div>
+      <div class="sighting-grid">{_recent_cards(recent_spotlight)}</div>
       <div class="table-wrap">{_recent_table(recent)}</div>
     </section>
 
@@ -4641,9 +4635,10 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
         <h2>Station species comparison</h2>
         <p>Each cell shows the observation count, first session date, and any county, state, or tracked-station first flags. Default sort favors species found across the most stations.</p>
       </div>
-      {_view_toggle("Species comparison view", ("species-all-time", "All time"), ("species-year", f"{year} only" if year else "Current year"), ("species-last-night", "Last night"))}
+      {_view_toggle("Species comparison view", ("species-all-time", "All time"), ("species-year", f"{year} only" if year else "Current year"), ("species-past-week", "Past week"), ("species-last-night", "Last night"))}
       <div class="view-panel" id="species-all-time"><div class="table-wrap">{_comparison_table(taxa, stations)}</div></div>
       <div class="view-panel" id="species-year" hidden><div class="table-wrap">{_comparison_table(year_taxa, stations)}</div></div>
+      <div class="view-panel" id="species-past-week" hidden><div class="table-wrap">{_comparison_table(recent_week_taxa, stations)}</div></div>
       <div class="view-panel" id="species-last-night" hidden><div class="table-wrap">{_comparison_table(latest_night_taxa, stations)}</div></div>
     </section>
   </main>
