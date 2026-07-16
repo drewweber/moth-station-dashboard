@@ -4363,16 +4363,39 @@ footer div {
 }
 @media (max-width: 620px) {
   :root {
-    --topbar-height: 128px;
+    --topbar-height: 108px;
   }
   .topbar {
-    align-items: flex-start;
+    align-items: stretch;
     flex-direction: column;
-    justify-content: center;
-    padding: 14px 16px;
+    justify-content: flex-start;
+    gap: 0;
+    min-height: var(--topbar-height);
+    padding: 10px 16px 0;
+  }
+  .brand {
+    min-height: 38px;
   }
   nav {
+    width: 100%;
+    min-width: 0;
+    min-height: 44px;
+    flex-wrap: nowrap;
     justify-content: flex-start;
+    align-items: center;
+    gap: 18px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  nav::-webkit-scrollbar {
+    display: none;
+  }
+  nav a {
+    flex: 0 0 auto;
+    white-space: nowrap;
   }
   h1 {
     font-size: clamp(3rem, 17vw, 5rem);
