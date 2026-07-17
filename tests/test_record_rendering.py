@@ -51,6 +51,8 @@ class RecordRenderingTests(unittest.TestCase):
         self.assertIn("async function startLiveUpdates", LIVE_JS)
         self.assertIn("summary.currentSpecies.size > 0", LIVE_JS)
         self.assertIn("els.newSpeciesCounter", LIVE_JS)
+        self.assertIn("networkEventSpecies", LIVE_JS)
+        self.assertIn("All stations", LIVE_JS)
         self.assertIn('href="#live-station-${escapeHtml(summary.station.id)}"', LIVE_JS)
         self.assertIn('id="live-station-${escapeHtml(station.id)}"', LIVE_JS)
         self.assertIn("obs.time_observed_at", LIVE_JS)

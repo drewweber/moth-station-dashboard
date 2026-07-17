@@ -23,6 +23,10 @@ queries.
   and mobile widths.
 - Keep the main page fast and simple. Treat homepage sections as bounded
   previews, not complete archives.
+- Default to a collaborative network metric alongside any station-specific
+  metric when the data supports it. Network totals must de-duplicate shared
+  species across stations, and labels must make clear whether a value is a
+  station count, a sum of observations, or a network-wide species union.
 - Put long, complex, or media-rich collections behind a clear "Browse all" or
   "View all" control leading to an expanded view or dedicated static page.
 - Do not render large collections of hidden cards or duplicate images into the

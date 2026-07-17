@@ -2355,9 +2355,18 @@ function renderStationSummaries() {
     .filter((summary) => summary.currentSpecies.size > 0)
     .sort((a, b) => b.currentSpecies.size - a.currentSpecies.size
       || a.station.name.localeCompare(b.station.name));
+  const networkEventSpecies = new Set(
+    activeEventStations.flatMap((summary) => Array.from(summary.currentSpecies.keys())),
+  );
   if (els.newSpeciesCounter) {
     els.newSpeciesCounter.hidden = !activeEventStations.length;
-    els.newSpeciesCounter.innerHTML = activeEventStations.map((summary) => `
+    els.newSpeciesCounter.innerHTML = `
+      <span class="night-station-chip network-total-chip" style="--station-color: var(--amber)"
+        title="Unique moth species across all active stations in this event">
+        All stations
+        <strong>${networkEventSpecies.size}</strong>
+      </span>
+    ` + activeEventStations.map((summary) => `
       <a href="#live-station-${escapeHtml(summary.station.id)}" class="night-station-chip" style="--station-color: ${escapeHtml(summary.station.color || "#d7b56d")}">
         ${escapeHtml(summary.station.short_name || summary.station.name)}
         <strong>${summary.currentSpecies.size}</strong>
@@ -4223,6 +4232,10 @@ h2 {
 .night-station-chip strong {
   color: var(--ink);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.network-total-chip {
+  background: color-mix(in srgb, var(--amber) 12%, var(--panel));
+  color: var(--ink);
 }
 .night-grid {
   display: grid;
