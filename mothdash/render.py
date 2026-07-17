@@ -2358,6 +2358,12 @@ function renderStationSummaries() {
   const networkEventSpecies = new Set(
     activeEventStations.flatMap((summary) => Array.from(summary.currentSpecies.keys())),
   );
+  const stationsPerEventSpecies = new Map();
+  for (const summary of activeEventStations) {
+    for (const taxonId of summary.currentSpecies.keys()) {
+      stationsPerEventSpecies.set(taxonId, (stationsPerEventSpecies.get(taxonId) || 0) + 1);
+    }
+  }
   if (els.newSpeciesCounter) {
     els.newSpeciesCounter.hidden = !activeEventStations.length;
     els.newSpeciesCounter.innerHTML = `
@@ -2366,12 +2372,18 @@ function renderStationSummaries() {
         All stations
         <strong>${networkEventSpecies.size}</strong>
       </span>
-    ` + activeEventStations.map((summary) => `
-      <a href="#live-station-${escapeHtml(summary.station.id)}" class="night-station-chip" style="--station-color: ${escapeHtml(summary.station.color || "#d7b56d")}">
-        ${escapeHtml(summary.station.short_name || summary.station.name)}
+    ` + activeEventStations.map((summary) => {
+      const eventUniqueCount = Array.from(summary.currentSpecies.keys())
+        .filter((taxonId) => stationsPerEventSpecies.get(taxonId) === 1).length;
+      const name = escapeHtml(summary.station.short_name || summary.station.name);
+      return `
+      <a href="#live-station-${escapeHtml(summary.station.id)}" class="night-station-chip" style="--station-color: ${escapeHtml(summary.station.color || "#d7b56d")}" aria-label="${name}: ${summary.currentSpecies.size} event species, ${eventUniqueCount} unique to this station tonight, ${summary.stationFirstCount} new to this station">
+        <span class="live-station-chip-name">${name}</span>
         <strong>${summary.currentSpecies.size}</strong>
+        <small><b>${eventUniqueCount}</b> unique · <b>${summary.stationFirstCount}</b> new</small>
       </a>
-    `).join("");
+    `;
+    }).join("");
   }
 
   if (!summaries.length) {
@@ -4236,6 +4248,26 @@ h2 {
 .network-total-chip {
   background: color-mix(in srgb, var(--amber) 12%, var(--panel));
   color: var(--ink);
+}
+.live-new-station-counter .night-station-chip:not(.network-total-chip) {
+  display: grid;
+  grid-template-columns: auto auto;
+  column-gap: 8px;
+  row-gap: 1px;
+}
+.live-station-chip-name {
+  min-width: 0;
+}
+.live-new-station-counter .night-station-chip small {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.15;
+}
+.live-new-station-counter .night-station-chip small b {
+  color: var(--ink);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-weight: 700;
 }
 .night-grid {
   display: grid;
