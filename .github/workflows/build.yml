@@ -3,20 +3,16 @@ name: Build and deploy dashboard
 on:
   workflow_dispatch: {}
   schedule:
-    # Runs four times daily so newly-uploaded iNaturalist observations get
-    # picked up throughout the day, not just once. Times are UTC and assume
-    # Eastern Daylight Time (UTC-4); during EST (UTC-5, roughly Nov-Mar)
-    # each run will land an hour later than the label below.
-    - cron: "0 4 * * *"   # 12:00 AM Eastern
-    - cron: "0 6 * * *"   # 2:00 AM Eastern
-    - cron: "0 13 * * *"  # 9:00 AM Eastern
-    - cron: "0 16 * * *"  # 12:00 PM Eastern
+    # Daily correctness backstop. The lightweight check-new workflow triggers
+    # additional builds only when iNaturalist has new matching observations.
+    - cron: "30 17 * * *" # 1:30 PM Eastern during daylight time
   push:
     branches: [main]
     paths:
       - "mothdash/**"
       - "stations.toml"
       - ".github/workflows/build.yml"
+      - ".github/workflows/check-new.yml"
 
 permissions:
   contents: read

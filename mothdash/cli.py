@@ -7,7 +7,7 @@ import argparse
 from .config import load_config
 from .db import init_db
 from .render import render
-from .sync import sync_all
+from .sync import pending_station_updates, sync_all
 
 
 def main() -> None:
@@ -19,6 +19,8 @@ def main() -> None:
 
     sync_parser = subparsers.add_parser("sync")
     sync_parser.add_argument("--full", action="store_true")
+
+    subparsers.add_parser("check")
 
     subparsers.add_parser("render")
 
@@ -33,6 +35,10 @@ def main() -> None:
         print(f"Initialized {settings.database}")
     elif args.command == "sync":
         sync_all(settings, stations, full=args.full)
+    elif args.command == "check":
+        pending = pending_station_updates(settings, stations)
+        print("pending_stations=" + ",".join(station.id for station in pending))
+        print(f"updates={'true' if pending else 'false'}")
     elif args.command == "render":
         path = render(settings, stations)
         print(f"Wrote {path}")
@@ -42,4 +48,3 @@ def main() -> None:
         print(f"Wrote {path}")
     else:
         parser.print_help()
-

@@ -6,7 +6,7 @@ from typing import Any
 
 from .config import Settings, Station, active_stations
 from .db import connect, init_db
-from .inat_api import first_observed_date, iter_observations
+from .inat_api import first_observed_date, iter_observations, latest_observation_id
 
 
 SPECIES_RANKS = {
@@ -145,13 +145,16 @@ def sync_station(settings: Settings, station: Station, full: bool = False) -> tu
     max_id = cursor
     params = station.api_params(settings)
 
-    for obs in iter_observations(params, user_agent=settings.user_agent, id_above=cursor):
-        seen += 1
-        max_id = max(max_id, int(obs["id"]))
-        row = _observation_row(station.id, obs)
-        if row is None:
-            continue
-        with connect(settings.database) as conn:
+    # Keep the whole station write in one SQLite transaction. Opening and
+    # committing a connection for every iNaturalist observation was the
+    # dominant cost of a first sync and adds no recovery benefit here.
+    with connect(settings.database) as conn:
+        for obs in iter_observations(params, user_agent=settings.user_agent, id_above=cursor):
+            seen += 1
+            max_id = max(max_id, int(obs["id"]))
+            row = _observation_row(station.id, obs)
+            if row is None:
+                continue
             before = conn.total_changes
             conn.execute(OBS_INSERT, row)
             if conn.total_changes > before:
@@ -169,6 +172,34 @@ def sync_station(settings: Settings, station: Station, full: bool = False) -> tu
         )
 
     return added, seen
+
+
+def pending_station_updates(settings: Settings, stations: list[Station]) -> list[Station]:
+    """Return active stations with iNat records newer than the cached cursor.
+
+    The cursor comes from ``sync_log`` rather than the stored species rows so
+    an intervening genus-level record does not repeatedly trigger full builds.
+    """
+    init_db(settings.database)
+    pending: list[Station] = []
+    for station in active_stations(stations):
+        with connect(settings.database) as conn:
+            row = conn.execute(
+                """
+                SELECT COALESCE(MAX(max_inat_obs_id), 0) AS max_id
+                FROM sync_log
+                WHERE station_id = ?
+                """,
+                (station.id,),
+            ).fetchone()
+        cached_id = int(row["max_id"])
+        newest_id = latest_observation_id(
+            settings.user_agent,
+            **station.api_params(settings),
+        )
+        if newest_id > cached_id:
+            pending.append(station)
+    return pending
 
 
 def _station_first_taxa(settings: Settings, station: Station) -> list[dict[str, Any]]:

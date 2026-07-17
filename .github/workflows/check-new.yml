@@ -1,0 +1,57 @@
+name: Check for new moth observations
+
+# This job is deliberately small: it restores the SQLite cursor and asks
+# iNaturalist for one newest observation per active station. A sync, render,
+# and Pages deploy only run when at least one station has new data. The daily
+# schedule in build.yml remains the backstop for changes not detectable by ID.
+on:
+  schedule:
+    # Offset from the top of the hour to avoid GitHub's busiest cron window.
+    # Four checks match the previous four daily full-build opportunities.
+    - cron: "15 4,6,13,16 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: moth-station-check-new
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Restore only: this checker must never race the build job while saving
+      # its cache. A cache miss safely triggers one full dashboard build.
+      - name: Restore database cache
+        uses: actions/cache/restore@v4
+        with:
+          path: data/mothdash.db
+          key: mothdash-db-check-${{ github.run_id }}
+          restore-keys: |
+            mothdash-db-
+
+      - name: Check iNaturalist cursors
+        id: check
+        run: |
+          set -euo pipefail
+          python -m mothdash check | tee check.log
+          if grep -qx 'updates=true' check.log; then
+            echo "new=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "new=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Trigger build for new observations
+        if: steps.check.outputs.new == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run build.yml --ref main

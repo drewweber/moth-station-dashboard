@@ -69,6 +69,20 @@ def first_observed_date(user_agent: str, **params: Any) -> str | None:
     return results[0].get("observed_on") if results else None
 
 
+def latest_observation_id(user_agent: str, **params: Any) -> int:
+    """Return the newest iNaturalist observation id for a query, or zero."""
+    data = get_json(
+        "observations",
+        user_agent,
+        per_page=1,
+        order_by="id",
+        order="desc",
+        **params,
+    )
+    results = data.get("results") or []
+    return int(results[0]["id"]) if results else 0
+
+
 def iter_observations(
     params: dict[str, Any],
     user_agent: str,

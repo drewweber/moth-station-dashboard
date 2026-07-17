@@ -32,6 +32,7 @@ python3 -m mothdash sync       # update SQLite only
 python3 -m mothdash render     # rebuild HTML from existing SQLite
 python3 -m mothdash build      # sync, then render
 python3 -m mothdash sync --full # clear and resync station observations
+python3 -m mothdash check      # report stations with data newer than the cache
 ```
 
 ## Hosting
@@ -42,6 +43,11 @@ The dashboard is configured for Cloudflare Pages at:
 
 The GitHub Actions workflow builds the dashboard and deploys `public/` to the
 Cloudflare Pages project named `moth-stations`.
+
+Scheduled builds use a two-stage workflow to stay within the free tiers: a
+small cursor check asks iNaturalist whether an active station has new records,
+then dispatches the sync/render/deploy workflow only when data changed. A daily
+build remains as a backstop for older records newly added to a station query.
 
 After pushing this repo to GitHub:
 

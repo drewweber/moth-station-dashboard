@@ -7,9 +7,9 @@ from zoneinfo import ZoneInfo
 
 from mothdash.analysis import recent_days_taxa
 from mothdash.config import Settings, Station, active_stations, historical_stations
-from mothdash.db import init_db
+from mothdash.db import connect, init_db
 from mothdash.render import _snapshot_payload
-from mothdash.sync import sync_all
+from mothdash.sync import pending_station_updates, sync_all
 
 
 def station(station_id: str, *, enabled: bool = True, active: bool = True) -> Station:
@@ -85,6 +85,31 @@ class StationActivityTests(unittest.TestCase):
         refresh_station_stats_mock.assert_called_once_with(
             self.settings,
             [self.active],
+        )
+
+    @patch("mothdash.sync.latest_observation_id")
+    def test_pending_updates_compare_remote_id_with_sync_cursor(self, latest_mock) -> None:
+        with connect(self.settings.database) as conn:
+            conn.execute(
+                """
+                INSERT INTO sync_log (
+                    station_id, full_sync, observations_added, observations_seen,
+                    max_inat_obs_id
+                ) VALUES ('active', 0, 1, 1, 100)
+                """
+            )
+
+        latest_mock.return_value = 100
+        self.assertEqual(pending_station_updates(self.settings, self.stations), [])
+
+        latest_mock.return_value = 101
+        self.assertEqual(
+            [station.id for station in pending_station_updates(self.settings, self.stations)],
+            ["active"],
+        )
+        latest_mock.assert_called_with(
+            self.settings.user_agent,
+            **self.active.api_params(self.settings),
         )
 
 
