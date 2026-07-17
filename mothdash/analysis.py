@@ -724,6 +724,8 @@ def _select_varied_insights(
 # longer novel. Insights based on current standing state (e.g. "most widely shared
 # moth in the network") are not date-anchored and are not subject to this window.
 INSIGHT_RECENCY_WINDOW_DAYS = 5
+RARE_NETWORK_RECORDS = 3
+UNUSUAL_NETWORK_RECORDS = 10
 
 
 def dashboard_insights(
@@ -789,6 +791,11 @@ def dashboard_insights(
             for taxon_id, dates in taxon_sessions.items()
             if dates
         }
+        season_firsts = {
+            taxon_id: min(day for day in dates if day.year == year)
+            for taxon_id, dates in taxon_sessions.items()
+            if any(day.year == year for day in dates)
+        }
         for item in first_by_station_taxon.values():
             if item["date"] == latest:
                 latest_firsts.append(item)
@@ -823,12 +830,41 @@ def dashboard_insights(
 
         for taxon_id, item in latest_by_taxon.items():
             station_names = sorted(item["stations"])
-            if len(station_names) > 1 and len(item["observations"]) > 1:
+            regional_records = len(taxon_observations[taxon_id])
+            is_season_first = season_firsts.get(taxon_id) == latest
+            is_rare = regional_records <= RARE_NETWORK_RECORDS
+            is_unusual = regional_records <= UNUSUAL_NETWORK_RECORDS
+            meaningful_connection = (
+                is_season_first
+                or (len(station_names) >= 3 and is_unusual)
+                or (len(station_names) >= 2 and is_rare)
+            )
+            if (
+                len(station_names) > 1
+                and len(item["observations"]) > 1
+                and meaningful_connection
+            ):
+                if is_season_first:
+                    connection_detail = (
+                        f"It made its first shared network appearance of {year} across "
+                        f"{', '.join(station_names)}."
+                    )
+                elif is_rare:
+                    connection_detail = (
+                        f"With only {regional_records} tracked network record"
+                        f"{'s' if regional_records != 1 else ''}, it was recorded across "
+                        f"{', '.join(station_names)}."
+                    )
+                else:
+                    connection_detail = (
+                        f"This unusually sparse species has only {regional_records} tracked "
+                        f"network records and was recorded across {', '.join(station_names)}."
+                    )
                 insights.append(
                     _insight(
                         "Same-night connection",
                         f"{item['label']} connected {len(station_names)} stations in one moth night",
-                        f"It was recorded across {', '.join(station_names)} during the latest session.",
+                        connection_detail,
                         latest.isoformat(),
                         94,
                         subject=f"taxon:{taxon_id}",
@@ -850,13 +886,15 @@ def dashboard_insights(
                         )
                     )
 
-            regional_records = len(taxon_observations[taxon_id])
-            if regional_records <= 3 and network_firsts.get(taxon_id) != latest:
+            if regional_records <= RARE_NETWORK_RECORDS and network_firsts.get(taxon_id) != latest:
+                known_dates = ", ".join(
+                    day.isoformat() for day in sorted(taxon_sessions[taxon_id])
+                )
                 insights.append(
                     _insight(
                         "Under-documented find",
                         f"{item['label']} has only {regional_records} tracked network record{'s' if regional_records != 1 else ''}",
-                        f"The latest came from {', '.join(station_names)} and adds useful evidence for its regional flight timing.",
+                        f"Known tracked dates so far: {known_dates}. The latest came from {', '.join(station_names)}.",
                         latest.isoformat(),
                         83 - regional_records,
                         subject=f"taxon:{taxon_id}",

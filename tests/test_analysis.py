@@ -176,7 +176,7 @@ class DashboardInsightsRecencyTests(unittest.TestCase):
         # under test). Both stations recorded the same species on the same
         # night, which produces a "Same-night connection" story anchored to
         # that date.
-        earlier_date = date(2026, 1, 1)
+        earlier_date = date(2025, 6, 1)
         event_date = date(2026, 6, 1)
         self._insert_observation(
             station_id="alpha", obs_id=1, taxon_id=100,
@@ -209,6 +209,48 @@ class DashboardInsightsRecencyTests(unittest.TestCase):
         self.assertFalse(
             any(item["category"] == "Same-night connection" for item in stale),
             "same-night connection story should not persist once it's old news",
+        )
+
+    def test_under_documented_find_lists_existing_flight_dates(self) -> None:
+        from mothdash.analysis import dashboard_insights
+
+        earlier_date = date(2026, 5, 1)
+        event_date = date(2026, 6, 1)
+        self._insert_observation(
+            station_id="alpha", obs_id=11, taxon_id=110,
+            taxon_name="Sparse moth", common_name="Sparse Moth",
+            observed_on=earlier_date.isoformat(),
+        )
+        self._insert_observation(
+            station_id="alpha", obs_id=12, taxon_id=110,
+            taxon_name="Sparse moth", common_name="Sparse Moth",
+            observed_on=event_date.isoformat(),
+        )
+
+        insights = dashboard_insights(self.settings, today=event_date + timedelta(days=1))
+        insight = next(item for item in insights if item["category"] == "Under-documented find")
+        self.assertIn("Known tracked dates so far: 2026-05-01, 2026-06-01.", insight["body"])
+
+    def test_common_two_station_connection_is_not_a_feed_story(self) -> None:
+        from mothdash.analysis import dashboard_insights
+
+        earlier_date = date(2026, 5, 1)
+        event_date = date(2026, 6, 1)
+        for station_id, obs_id, observed_on in [
+            ("alpha", 21, earlier_date),
+            ("beta", 22, earlier_date),
+            ("alpha", 23, event_date),
+            ("beta", 24, event_date),
+        ]:
+            self._insert_observation(
+                station_id=station_id, obs_id=obs_id, taxon_id=120,
+                taxon_name="Common moth", common_name="Common Moth",
+                observed_on=observed_on.isoformat(),
+            )
+
+        insights = dashboard_insights(self.settings, today=event_date + timedelta(days=1))
+        self.assertFalse(
+            any(item["category"] == "Same-night connection" for item in insights),
         )
 
     def test_shared_fauna_ranking_is_not_date_gated(self) -> None:
