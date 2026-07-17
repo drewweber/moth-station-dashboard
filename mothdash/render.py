@@ -2351,17 +2351,17 @@ function renderStationSummaries() {
   );
   if (els.latestObservation) els.latestObservation.textContent = fmtTimestamp(latestObservation);
   if (els.latestUpload) els.latestUpload.textContent = fmtTimestamp(latestUpload);
-  const newSpeciesStations = allSummaries
-    .filter((summary) => summary.stationFirstSpecies.size > 0)
-    .sort((a, b) => b.stationFirstSpecies.size - a.stationFirstSpecies.size
+  const activeEventStations = allSummaries
+    .filter((summary) => summary.currentSpecies.size > 0)
+    .sort((a, b) => b.currentSpecies.size - a.currentSpecies.size
       || a.station.name.localeCompare(b.station.name));
   if (els.newSpeciesCounter) {
-    els.newSpeciesCounter.hidden = !newSpeciesStations.length;
-    els.newSpeciesCounter.innerHTML = newSpeciesStations.map((summary) => `
-      <span class="night-station-chip" style="--station-color: ${escapeHtml(summary.station.color || "#d7b56d")}">
+    els.newSpeciesCounter.hidden = !activeEventStations.length;
+    els.newSpeciesCounter.innerHTML = activeEventStations.map((summary) => `
+      <a href="#live-station-${escapeHtml(summary.station.id)}" class="night-station-chip" style="--station-color: ${escapeHtml(summary.station.color || "#d7b56d")}">
         ${escapeHtml(summary.station.short_name || summary.station.name)}
-        <strong>${summary.stationFirstSpecies.size}</strong>
-      </span>
+        <strong>${summary.currentSpecies.size}</strong>
+      </a>
     `).join("");
   }
 
@@ -2393,7 +2393,7 @@ function renderStationSummaries() {
       .filter((taxonId) => !summary.stationFirstSpecies.has(taxonId)).length;
 
     return `
-      <article class="${classes}">
+      <article id="live-station-${escapeHtml(station.id)}" class="${classes}">
         <div class="live-station-head">
           <div>
             <p>${escapeHtml(station.public_location || "tracked station")}</p>
@@ -2872,7 +2872,7 @@ def _live_page() -> str:
     <h1>Live station summary.</h1>
     <p class="subhead">Opening Live checks iNaturalist once for the current 12pm-to-12pm moth event. Turn on updates to refresh every 10 minutes for 2 hours.</p>
     <div id="live-new-species-counter" class="night-stations live-new-station-counter"
-      aria-label="Stations with new species in this event" hidden></div>
+      aria-label="Unique moth species by active station in this event" hidden></div>
 
     <section class="live-panel" aria-labelledby="live-controls">
       <div class="toggle-row">
@@ -4210,6 +4210,15 @@ h2 {
   padding: 5px 10px;
   background: rgba(255, 255, 255, 0.025);
   color: var(--muted);
+  text-decoration: none;
+}
+.night-station-chip:hover {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--station-color) 12%, var(--panel));
+}
+.night-station-chip:focus-visible {
+  outline: 2px solid var(--station-color);
+  outline-offset: 2px;
 }
 .night-station-chip strong {
   color: var(--ink);

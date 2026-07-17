@@ -48,8 +48,10 @@ class RecordRenderingTests(unittest.TestCase):
         self.assertIn('id="latest-upload"', page)
         self.assertNotIn("snapshot generated", page)
         self.assertIn("async function startLiveUpdates", LIVE_JS)
-        self.assertIn("summary.stationFirstSpecies.size > 0", LIVE_JS)
+        self.assertIn("summary.currentSpecies.size > 0", LIVE_JS)
         self.assertIn("els.newSpeciesCounter", LIVE_JS)
+        self.assertIn('href="#live-station-${escapeHtml(summary.station.id)}"', LIVE_JS)
+        self.assertIn('id="live-station-${escapeHtml(station.id)}"', LIVE_JS)
         self.assertIn("obs.time_observed_at", LIVE_JS)
         self.assertIn("obs.created_at", LIVE_JS)
         self.assertIn(
