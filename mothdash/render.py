@@ -2473,7 +2473,7 @@ async function runCheck() {
     found += result.stationFirsts;
     activeUploads += result.currentObs;
   }
-  els.lastCheck.textContent = now.toLocaleString();
+  els.lastCheck.textContent = fmtMinuteStamp(now);
   renderStationSummaries();
   const activeStations = Array.from(state.stationSummaries.values()).filter((summary) => summary.active).length;
   setStatus(found

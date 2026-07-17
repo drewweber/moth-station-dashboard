@@ -47,6 +47,7 @@ class RecordRenderingTests(unittest.TestCase):
         self.assertIn('id="latest-observation"', page)
         self.assertIn('id="latest-upload"', page)
         self.assertNotIn("snapshot generated", page)
+        self.assertIn("els.lastCheck.textContent = fmtMinuteStamp(now)", LIVE_JS)
         self.assertIn("async function startLiveUpdates", LIVE_JS)
         self.assertIn("summary.currentSpecies.size > 0", LIVE_JS)
         self.assertIn("els.newSpeciesCounter", LIVE_JS)
