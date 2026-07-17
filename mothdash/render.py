@@ -51,6 +51,18 @@ def h(value: Any) -> str:
     return escape(str(value))
 
 
+def _mode_toggle(history_href: str, live_href: str, active: str) -> str:
+    """Render the primary History/Live navigation used across generated pages."""
+    history_current = ' aria-current="page"' if active == "history" else ""
+    live_current = ' aria-current="page"' if active == "live" else ""
+    return f"""
+    <nav class="mode-toggle" aria-label="Dashboard mode">
+      <a class="{'is-active' if active == 'history' else ''}" href="{h(history_href)}"{history_current}>History</a>
+      <a class="{'is-active' if active == 'live' else ''}" href="{h(live_href)}"{live_current}>Live</a>
+    </nav>
+    """
+
+
 def _insight_feedback_id(insight: dict[str, Any]) -> str:
     """Create a stable browser-storage key for a generated feed item."""
     source = "\x1f".join(
@@ -839,6 +851,136 @@ def _calendar_table(rows: list[dict[str, Any]], stations: list[Station], mode: s
     """
 
 
+def _daily_species_line_chart(rows: list[dict[str, Any]], stations: list[Station], mode: str) -> str:
+    """Render daily station richness as a compact SVG line chart."""
+    if not rows:
+        return '<p class="empty">No daily species counts are available yet.</p>'
+
+    enabled = [station for station in stations if station.enabled]
+    colors = _station_color_map(stations)
+    dates = []
+    for row in rows:
+        if mode == "year":
+            row_date = date.fromisoformat(row["key"])
+        else:
+            month, day = (int(part) for part in row["key"].split("-"))
+            row_date = date(2000, month, day)
+        dates.append(row_date)
+
+    width = 900
+    height = 300
+    left = 52
+    right = 22
+    top = 22
+    bottom = 42
+    plot_width = width - left - right
+    plot_height = height - top - bottom
+    min_date = min(dates)
+    max_date = max(dates)
+    date_span = max(1, max_date.toordinal() - min_date.toordinal())
+    max_species = max(
+        [row["total"] for row in rows]
+        + [count for row in rows for count in row["stations"].values()]
+        + [1]
+    )
+
+    def point(row: dict[str, Any], row_date: date, count: int) -> tuple[float, float]:
+        if len(rows) == 1:
+            x = left + plot_width / 2
+        else:
+            x = left + ((row_date.toordinal() - min_date.toordinal()) / date_span * plot_width)
+        y = top + plot_height - (count / max_species * plot_height)
+        return x, y
+
+    station_lines = []
+    legend = [
+        '<li class="daily-richness-network-key"><i></i><span>Network union</span></li>'
+    ]
+    for station in enabled:
+        values = [row["stations"].get(station.id, 0) for row in rows]
+        if not any(values):
+            continue
+        points = " ".join(
+            f"{x:.1f},{y:.1f}"
+            for row, row_date, count in zip(rows, dates, values)
+            for x, y in [point(row, row_date, count)]
+        )
+        color = colors[station.id]
+        station_lines.append(
+            f'<polyline class="daily-richness-station-line" style="--series-color: {h(color)}" points="{points}"></polyline>'
+        )
+        legend.append(
+            f'<li style="--series-color: {h(color)}"><i></i><span>{h(_station_short_label(station))}</span></li>'
+        )
+
+    network_points = []
+    markers = []
+    for row, row_date in zip(rows, dates):
+        x, y = point(row, row_date, row["total"])
+        network_points.append(f"{x:.1f},{y:.1f}")
+        station_rows = "".join(
+            f'<li><i style="--station-color: {h(colors[station.id])}"></i>'
+            f'<span>{h(_station_short_label(station))}</span>'
+            f'<strong>{h(row["stations"].get(station.id, 0))}</strong></li>'
+            for station in enabled
+        )
+        tooltip_html = (
+            f'<div class="monthly-tooltip-head"><strong>{h(row["label"])}</strong>'
+            f'<span>{h(row["total"])} network species</span></div>'
+            f'<ul>{station_rows}</ul>'
+        )
+        aria_values = "; ".join(
+            f"{station.name}: {row['stations'].get(station.id, 0)}"
+            for station in enabled
+        )
+        markers.append(
+            f"""
+            <g class="monthly-point-group" style="--series-color: var(--ink)" tabindex="0" role="img"
+               aria-label="{h(row['label'])}: {h(row['total'])} network species; {h(aria_values)}"
+               data-tooltip-html="{h(tooltip_html)}">
+              <circle class="monthly-hit-target" cx="{x:.1f}" cy="{y:.1f}" r="9"></circle>
+              <circle class="monthly-point" cx="{x:.1f}" cy="{y:.1f}" r="2.6"></circle>
+            </g>
+            """
+        )
+
+    date_labels = []
+    for fraction in (0, 0.25, 0.5, 0.75, 1):
+        ordinal = round(min_date.toordinal() + date_span * fraction)
+        tick_date = date.fromordinal(ordinal)
+        x = left + plot_width * fraction
+        date_labels.append(
+            f'<text class="chart-label" x="{x:.1f}" y="{height - 12}" text-anchor="middle">{h(tick_date.strftime("%b"))} {h(tick_date.day)}</text>'
+        )
+
+    mode_description = (
+        "Each point is one moth session date in the selected year."
+        if mode == "year"
+        else "Each point combines the same calendar day across all synced years."
+    )
+    return f"""
+    <figure class="daily-richness-line-chart">
+      <ul class="daily-richness-legend" aria-label="Daily richness legend">{''.join(legend)}</ul>
+      <svg viewBox="0 0 {width} {height}" role="img" aria-labelledby="daily-richness-title-{h(mode)} daily-richness-desc-{h(mode)}">
+        <title id="daily-richness-title-{h(mode)}">Daily species richness by station</title>
+        <desc id="daily-richness-desc-{h(mode)}">Network-union and station-specific unique moth species for each date. {h(mode_description)} Focus or point at a network marker to see station values.</desc>
+        <line class="chart-axis" x1="{left}" y1="{top + plot_height}" x2="{left + plot_width}" y2="{top + plot_height}"></line>
+        <line class="chart-axis" x1="{left}" y1="{top}" x2="{left}" y2="{top + plot_height}"></line>
+        <line class="chart-grid" x1="{left}" y1="{top}" x2="{left + plot_width}" y2="{top}"></line>
+        <line class="chart-grid" x1="{left}" y1="{top + plot_height / 2:.1f}" x2="{left + plot_width}" y2="{top + plot_height / 2:.1f}"></line>
+        <text class="chart-label" x="{left - 8}" y="{top + 4}" text-anchor="end">{h(max_species)}</text>
+        <text class="chart-label" x="{left - 8}" y="{top + plot_height / 2 + 4:.1f}" text-anchor="end">{h(round(max_species / 2))}</text>
+        <text class="chart-label" x="{left - 8}" y="{top + plot_height + 4}" text-anchor="end">0</text>
+        {''.join(date_labels)}
+        {''.join(station_lines)}
+        <polyline class="daily-richness-network-line" points="{' '.join(network_points)}"></polyline>
+        {''.join(markers)}
+      </svg>
+      <div class="monthly-tooltip" role="tooltip" hidden></div>
+    </figure>
+    """
+
+
 def _view_toggle(name: str, *views: tuple[str, str]) -> str:
     buttons = []
     for index, (view_id, label) in enumerate(views):
@@ -1490,8 +1632,7 @@ def _snapshot_payload(settings: Settings, stations: list[Station], taxa: list[di
         "generated_at": generated_at(),
         "api_base": "https://api.inaturalist.org/v1",
         "live_mode_hours": 2,
-        "scan_minutes": 10,
-        "poll_seconds": 60,
+        "poll_seconds": 10 * 60,
         "regional_counts": regional_counts,
         "stations": enabled,
     }
@@ -1526,12 +1667,14 @@ def _station_profile_page(station: Station, profile: dict[str, Any], color: str)
   <a class="skip-link" href="#main">Skip to station profile</a>
   <header>
     <div class="topbar">
-      <a class="brand" href="../index.html"><span class="brand-mark" aria-hidden="true"></span><span>Moth stations</span></a>
-      <nav aria-label="Station navigation">
+      <div class="topbar-primary">
+        <a class="brand" href="../index.html"><span class="brand-mark" aria-hidden="true"></span><span>Moth stations</span></a>
+        {_mode_toggle("../index.html", "../live.html", "history")}
+      </div>
+      <nav class="section-nav" aria-label="Station navigation">
         <a href="../index.html#feed">Feed</a>
         <a href="../index.html#stations">Stations</a>
         <a href="../index.html#calendar">Calendar</a>
-        <a href="../live.html">Live</a>
       </nav>
     </div>
     <div class="profile-hero" style="--station-color: {h(color)}">
@@ -1881,7 +2024,7 @@ function initInsightFeedback() {
 }
 
 function initMonthlyTooltips() {
-  document.querySelectorAll(".monthly-overlay-chart, .accumulation-line-chart").forEach((figure) => {
+  document.querySelectorAll(".monthly-overlay-chart, .accumulation-line-chart, .daily-richness-line-chart").forEach((figure) => {
     const tooltip = figure.querySelector(".monthly-tooltip");
     if (!tooltip) return;
 
@@ -1956,14 +2099,6 @@ const state = {
 const LIVE_KEY = "mothdash-live-until";
 const els = {};
 
-function fmtTime(ms) {
-  if (ms <= 0) return "off";
-  const total = Math.ceil(ms / 1000);
-  const hours = Math.floor(total / 3600);
-  const minutes = Math.floor((total % 3600) / 60);
-  return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
-}
-
 function setStatus(message) {
   els.status.textContent = message;
 }
@@ -1987,9 +2122,7 @@ function liveIsOn() {
 }
 
 function updateToggleState() {
-  const remaining = liveUntil() - Date.now();
-  els.toggle.checked = remaining > 0;
-  els.remaining.textContent = remaining > 0 ? fmtTime(remaining) : "off";
+  els.toggle.checked = liveIsOn();
 }
 
 function stationKnownSet(station) {
@@ -2024,6 +2157,23 @@ function fmtMinuteStamp(date) {
     hour: "numeric",
     minute: "2-digit",
   });
+}
+
+function fmtTimestamp(timestamp) {
+  if (!timestamp) return "not yet";
+  const date = new Date(timestamp);
+  return Number.isNaN(date.getTime()) ? "not yet" : fmtMinuteStamp(date);
+}
+
+function latestTimestamp(current, candidate) {
+  if (!candidate) return current;
+  const candidateDate = new Date(candidate);
+  if (Number.isNaN(candidateDate.getTime())) return current;
+  if (!current) return candidate;
+  const currentDate = new Date(current);
+  return Number.isNaN(currentDate.getTime()) || candidateDate > currentDate
+    ? candidate
+    : current;
 }
 
 function sessionDate(date) {
@@ -2070,8 +2220,8 @@ function initStationSummaries() {
       checked: false,
       observationCount: 0,
       stationFirstCount: 0,
-      latestDetectedAt: "",
-      latestObservedOn: "",
+      latestObservedAt: "",
+      latestUploadedAt: "",
       photos: [],
       currentSpecies: new Map(),
       stationFirstSpecies: new Map(),
@@ -2113,8 +2263,8 @@ function updateStationSummary(station, observations, now, eventWindow) {
     currentObs += 1;
     summary.active = true;
     summary.observationCount += 1;
-    summary.latestDetectedAt = fmtMinuteStamp(now);
-    summary.latestObservedOn = obs.observed_on || summary.latestObservedOn;
+    summary.latestObservedAt = latestTimestamp(summary.latestObservedAt, obs.time_observed_at);
+    summary.latestUploadedAt = latestTimestamp(summary.latestUploadedAt, obs.created_at);
 
     const item = {
       taxonId,
@@ -2191,16 +2341,36 @@ function renderStationSummaries() {
     if (a.observationCount !== b.observationCount) return b.observationCount - a.observationCount;
     return a.station.name.localeCompare(b.station.name);
   });
-  const activeCount = summaries.length;
-  const supportedCount = allSummaries.filter((summary) => summary.station.live_supported).length;
-  els.stationCount.textContent = `${activeCount} / ${supportedCount}`;
+  const latestObservation = allSummaries.reduce(
+    (latest, summary) => latestTimestamp(latest, summary.latestObservedAt),
+    "",
+  );
+  const latestUpload = allSummaries.reduce(
+    (latest, summary) => latestTimestamp(latest, summary.latestUploadedAt),
+    "",
+  );
+  if (els.latestObservation) els.latestObservation.textContent = fmtTimestamp(latestObservation);
+  if (els.latestUpload) els.latestUpload.textContent = fmtTimestamp(latestUpload);
+  const newSpeciesStations = allSummaries
+    .filter((summary) => summary.stationFirstSpecies.size > 0)
+    .sort((a, b) => b.stationFirstSpecies.size - a.stationFirstSpecies.size
+      || a.station.name.localeCompare(b.station.name));
+  if (els.newSpeciesCounter) {
+    els.newSpeciesCounter.hidden = !newSpeciesStations.length;
+    els.newSpeciesCounter.innerHTML = newSpeciesStations.map((summary) => `
+      <span class="night-station-chip" style="--station-color: ${escapeHtml(summary.station.color || "#d7b56d")}">
+        ${escapeHtml(summary.station.short_name || summary.station.name)}
+        <strong>${summary.stationFirstSpecies.size}</strong>
+      </span>
+    `).join("");
+  }
 
   if (!summaries.length) {
     const hasChecked = allSummaries.some((summary) => summary.checked);
     els.log.innerHTML = `
       <p class="empty">${hasChecked
         ? "No stations have species-level uploads in the current 12pm-to-12pm moth event yet. The next live check will add station cards as activity appears."
-        : "No active stations yet. Toggle live mode to start a 10-minute scan."}</p>
+        : "No active stations yet. Opening Live will check the current moth event."}</p>
     `;
     return;
   }
@@ -2235,7 +2405,7 @@ function renderStationSummaries() {
           <div><strong>${summary.observationCount}</strong><span>moth-night uploads</span></div>
           <div><strong>${summary.currentSpecies.size}</strong><span>event species</span></div>
           <div><strong>${summary.stationFirstCount}</strong><span>new to station</span></div>
-          <div><strong>${escapeHtml(summary.latestDetectedAt || "not yet")}</strong><span>latest added</span></div>
+          <div><strong>${escapeHtml(fmtTimestamp(summary.latestUploadedAt))}</strong><span>latest upload</span></div>
         </div>
         <div class="live-photo-strip">${photos}</div>
         <div class="live-station-lists">
@@ -2290,10 +2460,6 @@ async function fetchStation(station, createdAfter) {
 }
 
 async function runCheck() {
-  if (!liveIsOn()) {
-    stopScan("Live mode expired.");
-    return;
-  }
   const now = new Date();
   const eventWindow = currentEventWindow(now);
   const createdAfter = eventWindow.start.toISOString();
@@ -2326,19 +2492,25 @@ function stopScan(message) {
   if (message) setStatus(message);
 }
 
-async function startScan() {
+async function startLiveUpdates(checkImmediately = true) {
   if (!state.snapshot) return;
   stopScan();
-  state.stopAt = Date.now() + state.snapshot.scan_minutes * 60 * 1000;
-  setStatus("Live scan started.");
-  try {
-    await runCheck();
-  } catch (error) {
-    setStatus(error.message || "Live check failed.");
+  state.stopAt = liveUntil();
+  if (state.stopAt <= Date.now()) {
+    stopScan("Live updates expired.");
+    return;
+  }
+  if (checkImmediately) {
+    try {
+      await runCheck();
+    } catch (error) {
+      setStatus(error.message || "Live check failed.");
+    }
   }
   state.timer = window.setInterval(async () => {
-    if (Date.now() >= state.stopAt) {
-      stopScan("10-minute scan complete. Toggle live mode again to start another scan.");
+    if (!liveIsOn()) {
+      updateToggleState();
+      stopScan("Live updates expired. Toggle them on to continue.");
       return;
     }
     try {
@@ -2353,7 +2525,6 @@ async function loadSnapshot() {
   const response = await fetch("live-snapshot.json", { cache: "no-store" });
   if (!response.ok) throw new Error("Could not load live snapshot.");
   state.snapshot = await response.json();
-  els.snapshotTime.textContent = state.snapshot.generated_at;
   initStationSummaries();
   renderStationSummaries();
 }
@@ -2361,22 +2532,28 @@ async function loadSnapshot() {
 async function init() {
   els.toggle = document.querySelector("#live-toggle");
   els.status = document.querySelector("#live-status");
-  els.remaining = document.querySelector("#live-remaining");
   els.lastCheck = document.querySelector("#last-check");
-  els.snapshotTime = document.querySelector("#snapshot-time");
-  els.stationCount = document.querySelector("#station-count");
+  els.latestObservation = document.querySelector("#latest-observation");
+  els.latestUpload = document.querySelector("#latest-upload");
+  els.newSpeciesCounter = document.querySelector("#live-new-species-counter");
   els.log = document.querySelector("#live-log");
 
   await loadSnapshot();
   updateToggleState();
   window.setInterval(updateToggleState, 30000);
 
+  try {
+    await runCheck();
+  } catch (error) {
+    setStatus(error.message || "Live check failed.");
+  }
+
   els.toggle.addEventListener("change", async () => {
     if (els.toggle.checked) {
       const until = Date.now() + state.snapshot.live_mode_hours * 60 * 60 * 1000;
       localStorage.setItem(LIVE_KEY, String(until));
       updateToggleState();
-      await startScan();
+      await startLiveUpdates(true);
     } else {
       localStorage.removeItem(LIVE_KEY);
       updateToggleState();
@@ -2385,9 +2562,7 @@ async function init() {
   });
 
   if (liveIsOn()) {
-    await startScan();
-  } else {
-    setStatus("Live mode is off.");
+    await startLiveUpdates(false);
   }
 }
 
@@ -2418,6 +2593,9 @@ def _live_page() -> str:
     background: var(--panel);
     border: 1px solid var(--line);
     border-radius: 6px;
+  }}
+  .live-new-station-counter {{
+    margin: 22px 0 0;
   }}
   .toggle-row {{
     display: flex;
@@ -2679,39 +2857,38 @@ def _live_page() -> str:
   }}
   </style>
 </head>
-<body>
+<body class="live-page">
   <a class="skip-link" href="#live-main">Skip to live log</a>
   <header>
-    <div class="topbar">
-      <a class="brand" href="index.html"><span class="brand-mark" aria-hidden="true"></span><span>Moth stations</span></a>
-      <nav aria-label="Live page navigation">
-        <a href="index.html">Dashboard</a>
-        <a href="#live-log">Log</a>
-      </nav>
+    <div class="topbar topbar-mode-only">
+      <div class="topbar-primary">
+        <a class="brand" href="index.html"><span class="brand-mark" aria-hidden="true"></span><span>Moth stations</span></a>
+        {_mode_toggle("index.html", "live.html", "live")}
+      </div>
     </div>
   </header>
   <main id="live-main" class="live-shell">
     <p class="eyebrow">10-minute iNaturalist check</p>
     <h1>Live station summary.</h1>
-    <p class="subhead">Turn on live mode to check iNaturalist uploads from the current 12pm-to-12pm moth event. Live mode stays available in this browser for 2 hours.</p>
+    <p class="subhead">Opening Live checks iNaturalist once for the current 12pm-to-12pm moth event. Turn on updates to refresh every 10 minutes for 2 hours.</p>
+    <div id="live-new-species-counter" class="night-stations live-new-station-counter"
+      aria-label="Stations with new species in this event" hidden></div>
 
     <section class="live-panel" aria-labelledby="live-controls">
       <div class="toggle-row">
         <div>
-          <h2 id="live-controls">Live mode</h2>
+          <h2 id="live-controls">Live updates</h2>
           <p id="live-status">Preparing live check.</p>
         </div>
         <label class="switch">
           <input id="live-toggle" type="checkbox">
-          <span>Run live checks</span>
+          <span>Keep checking</span>
         </label>
       </div>
       <div class="live-meta">
-        <div><strong id="live-remaining">off</strong><span>live mode remaining</span></div>
-        <div><strong>10 min</strong><span>scan duration</span></div>
-        <div><strong id="station-count">0 / 0</strong><span>active / checkable stations</span></div>
         <div><strong id="last-check">not yet</strong><span>last check</span></div>
-        <div><strong id="snapshot-time">loading</strong><span>snapshot generated</span></div>
+        <div><strong id="latest-observation">not yet</strong><span>most recent observation</span></div>
+        <div><strong id="latest-upload">not yet</strong><span>most recent upload</span></div>
       </div>
     </section>
 
@@ -2797,6 +2974,19 @@ header {
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
 }
+.topbar-primary {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex: 0 0 auto;
+}
+.topbar-mode-only {
+  justify-content: center;
+}
+.topbar-mode-only .topbar-primary {
+  width: min(var(--max), calc(100% - 32px));
+  justify-content: space-between;
+}
 .brand {
   display: flex;
   align-items: center;
@@ -2812,13 +3002,45 @@ header {
   transform: rotate(45deg);
   box-shadow: 0 0 0 5px rgba(215, 181, 109, 0.12);
 }
-nav {
+.mode-toggle {
+  display: inline-flex;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: #181910;
+}
+.mode-toggle a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 4px 9px;
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 0.74rem;
+  font-weight: 650;
+}
+.mode-toggle a:hover {
+  color: var(--ink);
+}
+.mode-toggle a.is-active {
+  background: var(--amber);
+  color: #1b170f;
+}
+.mode-toggle a:focus-visible {
+  position: relative;
+  z-index: 1;
+  outline: 3px solid var(--focus);
+  outline-offset: -3px;
+}
+.section-nav {
+  flex: 1 1 auto;
+  min-width: 0;
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 14px;
 }
-nav a {
+.section-nav a {
   color: var(--muted);
   text-decoration: none;
   font-size: 0.9rem;
@@ -4487,6 +4709,83 @@ a:hover { color: #f2d78e; }
 .calendar-table th:first-child .sort-button {
   justify-content: flex-start;
 }
+.calendar-line-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  align-items: baseline;
+  margin: 0 0 12px;
+}
+.calendar-line-head h3 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 1.08rem;
+}
+.calendar-line-head p {
+  max-width: 520px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+.daily-richness-line-chart {
+  position: relative;
+  margin: 0 0 16px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+}
+.daily-richness-line-chart svg {
+  width: 100%;
+  aspect-ratio: 900 / 300;
+  height: auto;
+  display: block;
+}
+.daily-richness-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px 14px;
+  margin: 0 0 10px;
+  padding: 0;
+  list-style: none;
+}
+.daily-richness-legend li {
+  display: inline-grid;
+  grid-template-columns: 18px auto;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+.daily-richness-legend i {
+  width: 18px;
+  height: 3px;
+  background: var(--series-color);
+}
+.daily-richness-legend .daily-richness-network-key {
+  --series-color: var(--ink);
+  color: var(--ink);
+}
+.daily-richness-network-key i {
+  background: repeating-linear-gradient(90deg, var(--ink) 0 6px, transparent 6px 10px);
+}
+.daily-richness-station-line,
+.daily-richness-network-line {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+.daily-richness-station-line {
+  stroke: var(--series-color);
+  stroke-width: 2.25;
+  opacity: 0.9;
+}
+.daily-richness-network-line {
+  stroke: var(--ink);
+  stroke-width: 2.5;
+  stroke-dasharray: 6 5;
+}
 .calendar-cell {
   width: 82px;
 }
@@ -4561,6 +4860,12 @@ footer div {
   .section-head p {
     margin-top: 8px;
   }
+  .calendar-line-head {
+    display: block;
+  }
+  .calendar-line-head p {
+    margin-top: 5px;
+  }
   .feed-section-copy {
     justify-items: start;
     margin-top: 8px;
@@ -4578,6 +4883,9 @@ footer div {
   :root {
     --topbar-height: 108px;
   }
+  .live-page {
+    --topbar-height: 64px;
+  }
   .topbar {
     align-items: stretch;
     flex-direction: column;
@@ -4586,10 +4894,19 @@ footer div {
     min-height: var(--topbar-height);
     padding: 10px 16px 0;
   }
-  .brand {
+  .topbar-primary {
+    width: 100%;
     min-height: 38px;
+    justify-content: space-between;
   }
-  nav {
+  .topbar-mode-only {
+    min-height: var(--topbar-height);
+    padding: 10px 16px;
+  }
+  .topbar-mode-only .topbar-primary {
+    width: 100%;
+  }
+  .section-nav {
     width: 100%;
     min-width: 0;
     min-height: 44px;
@@ -4603,10 +4920,10 @@ footer div {
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
   }
-  nav::-webkit-scrollbar {
+  .section-nav::-webkit-scrollbar {
     display: none;
   }
-  nav a {
+  .section-nav a {
     flex: 0 0 auto;
     white-space: nowrap;
   }
@@ -4748,8 +5065,11 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
   <a class="skip-link" href="#main">Skip to dashboard</a>
   <header>
     <div class="topbar">
-      <a class="brand" href="#main"><span class="brand-mark" aria-hidden="true"></span><span>Moth stations</span></a>
-      <nav aria-label="Dashboard sections">
+      <div class="topbar-primary">
+        <a class="brand" href="#main"><span class="brand-mark" aria-hidden="true"></span><span>Moth stations</span></a>
+        {_mode_toggle("#main", "live.html", "history")}
+      </div>
+      <nav class="section-nav" aria-label="Dashboard sections">
         <a href="#last-night">Last night</a>
         <a href="#past-week">Past week</a>
         <a href="#stations">Stations</a>
@@ -4761,7 +5081,6 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
         <a href="#calendar">Calendar</a>
         <a href="#trends">Trends</a>
         <a href="#species">Species</a>
-        <a href="live.html">Live</a>
       </nav>
     </div>
     <div class="hero">
@@ -4858,8 +5177,16 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
         <p>Station cells show unique moth species per station per night. The total column is the unique species union across stations, not a sum of site counts.</p>
       </div>
       {_view_toggle("Calendar view", ("calendar-year", f"{year} dates" if year else "Current dates"), ("calendar-all-years", "All years"))}
-      <div class="view-panel" id="calendar-year"><div class="table-wrap">{_calendar_table(year_calendar, stations, "year")}</div></div>
-      <div class="view-panel" id="calendar-all-years" hidden><div class="table-wrap">{_calendar_table(all_time_calendar, stations, "all")}</div></div>
+      <div class="view-panel" id="calendar-year">
+        <div class="calendar-line-head"><h3>Daily richness by station</h3><p>Station lines show unique species per moth night; the dashed line is the network-wide unique-species union.</p></div>
+        {_daily_species_line_chart(year_calendar, stations, "year")}
+        <div class="table-wrap">{_calendar_table(year_calendar, stations, "year")}</div>
+      </div>
+      <div class="view-panel" id="calendar-all-years" hidden>
+        <div class="calendar-line-head"><h3>Daily richness by station</h3><p>Same calendar dates are combined across synced years. The dashed line is the network-wide unique-species union.</p></div>
+        {_daily_species_line_chart(all_time_calendar, stations, "all")}
+        <div class="table-wrap">{_calendar_table(all_time_calendar, stations, "all")}</div>
+      </div>
     </section>
 
     <section id="trends">
