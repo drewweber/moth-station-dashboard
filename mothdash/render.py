@@ -852,7 +852,7 @@ def _calendar_table(rows: list[dict[str, Any]], stations: list[Station], mode: s
 
 
 def _daily_species_line_chart(rows: list[dict[str, Any]], stations: list[Station], mode: str) -> str:
-    """Render daily station richness as a compact SVG line chart."""
+    """Render daily station richness as a compact SVG bar/line hybrid chart."""
     if not rows:
         return '<p class="empty">No daily species counts are available yet.</p>'
 
@@ -878,6 +878,7 @@ def _daily_species_line_chart(rows: list[dict[str, Any]], stations: list[Station
     min_date = min(dates)
     max_date = max(dates)
     date_span = max(1, max_date.toordinal() - min_date.toordinal())
+    date_count = len(rows)
     max_species = max(
         [row["total"] for row in rows]
         + [count for row in rows for count in row["stations"].values()]
@@ -892,7 +893,7 @@ def _daily_species_line_chart(rows: list[dict[str, Any]], stations: list[Station
         y = top + plot_height - (count / max_species * plot_height)
         return x, y
 
-    station_lines = []
+    station_bars = []
     legend = [
         '<li class="daily-richness-network-key"><i></i><span>Network union</span></li>'
     ]
@@ -900,18 +901,39 @@ def _daily_species_line_chart(rows: list[dict[str, Any]], stations: list[Station
         values = [row["stations"].get(station.id, 0) for row in rows]
         if not any(values):
             continue
-        points = " ".join(
-            f"{x:.1f},{y:.1f}"
-            for row, row_date, count in zip(rows, dates, values)
-            for x, y in [point(row, row_date, count)]
-        )
         color = colors[station.id]
-        station_lines.append(
-            f'<polyline class="daily-richness-station-line" style="--series-color: {h(color)}" points="{points}"></polyline>'
-        )
+        station_bars.append((station, values, color))
         legend.append(
             f'<li style="--series-color: {h(color)}"><i></i><span>{h(_station_short_label(station))}</span></li>'
         )
+
+    station_count = len(station_bars)
+    if date_count <= 1:
+        group_width = plot_width
+    else:
+        group_width = plot_width / (date_count - 1)
+    cluster_width = max(6, group_width * 0.9)
+    bar_width = max(2, min(8, cluster_width / max(1, station_count + 1)))
+    bar_gap = 1
+
+    station_polys = []
+    for station_index, station_data in enumerate(station_bars):
+        station, values, color = station_data
+        total_width = station_count * bar_width + max(0, station_count - 1) * bar_gap
+        first_offset = -total_width / 2 + station_index * (bar_width + bar_gap)
+        bars = []
+        for row, row_date, count in zip(rows, dates, values):
+            x, _ = point(row, row_date, count)
+            bar_x = x + first_offset
+            bar_height = count / max_species * plot_height
+            if count:
+                bars.append(
+                    f'<rect class="daily-richness-station-bar" style="--series-color: {h(color)}" '
+                    f'x="{bar_x:.1f}" y="{top + plot_height - bar_height:.1f}" '
+                    f'width="{bar_width:.1f}" height="{bar_height:.1f}" '
+                    f'fill="{h(color)}"></rect>'
+                )
+        station_polys.append("".join(bars))
 
     network_points = []
     markers = []
@@ -972,7 +994,7 @@ def _daily_species_line_chart(rows: list[dict[str, Any]], stations: list[Station
         <text class="chart-label" x="{left - 8}" y="{top + plot_height / 2 + 4:.1f}" text-anchor="end">{h(round(max_species / 2))}</text>
         <text class="chart-label" x="{left - 8}" y="{top + plot_height + 4}" text-anchor="end">0</text>
         {''.join(date_labels)}
-        {''.join(station_lines)}
+        {''.join(station_polys)}
         <polyline class="daily-richness-network-line" points="{' '.join(network_points)}"></polyline>
         {''.join(markers)}
       </svg>
@@ -2543,6 +2565,21 @@ async function startLiveUpdates(checkImmediately = true) {
 }
 
 async function loadSnapshot() {
+  const embeddedSnapshot = (() => {
+    const el = document.getElementById("live-snapshot-data");
+    if (!el) return null;
+    try {
+      return JSON.parse(el.textContent || "{}");
+    } catch {
+      return null;
+    }
+  })();
+  if (embeddedSnapshot && embeddedSnapshot.stations && embeddedSnapshot.stations.length) {
+    state.snapshot = embeddedSnapshot;
+    initStationSummaries();
+    renderStationSummaries();
+    return;
+  }
   const response = await fetch("live-snapshot.json", { cache: "no-store" });
   if (!response.ok) throw new Error("Could not load live snapshot.");
   state.snapshot = await response.json();
@@ -2593,7 +2630,7 @@ init().catch((error) => {
 """
 
 
-def _live_page() -> str:
+def _live_page(live_snapshot: dict) -> str:
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -2888,6 +2925,7 @@ def _live_page() -> str:
       </div>
     </div>
   </header>
+  <script id="live-snapshot-data" type="application/json">{json.dumps(live_snapshot, sort_keys=True)}</script>
   <main id="live-main" class="live-shell">
     <p class="eyebrow">10-minute iNaturalist check</p>
     <h1>Live station summary.</h1>
@@ -4812,8 +4850,10 @@ a:hover { color: #f2d78e; }
   font-size: 0.72rem;
 }
 .daily-richness-legend i {
-  width: 18px;
-  height: 3px;
+  width: 16px;
+  height: 9px;
+  border-radius: 2px;
+  opacity: 0.85;
   background: var(--series-color);
 }
 .daily-richness-legend .daily-richness-network-key {
@@ -4823,17 +4863,15 @@ a:hover { color: #f2d78e; }
 .daily-richness-network-key i {
   background: repeating-linear-gradient(90deg, var(--ink) 0 6px, transparent 6px 10px);
 }
-.daily-richness-station-line,
+.daily-richness-station-bar {
+  fill: var(--series-color);
+  opacity: 0.9;
+}
 .daily-richness-network-line {
   fill: none;
   stroke-linecap: round;
   stroke-linejoin: round;
   vector-effect: non-scaling-stroke;
-}
-.daily-richness-station-line {
-  stroke: var(--series-color);
-  stroke-width: 2.25;
-  opacity: 0.9;
 }
 .daily-richness-network-line {
   stroke: var(--ink);
@@ -5232,12 +5270,12 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
       </div>
       {_view_toggle("Calendar view", ("calendar-year", f"{year} dates" if year else "Current dates"), ("calendar-all-years", "All years"))}
       <div class="view-panel" id="calendar-year">
-        <div class="calendar-line-head"><h3>Daily richness by station</h3><p>Station lines show unique species per moth night; the dashed line is the network-wide unique-species union.</p></div>
+        <div class="calendar-line-head"><h3>Daily richness by station</h3><p>Station bars show unique species per moth night; the dashed line is the network-wide unique-species union.</p></div>
         {_daily_species_line_chart(year_calendar, stations, "year")}
         <div class="table-wrap">{_calendar_table(year_calendar, stations, "year")}</div>
       </div>
       <div class="view-panel" id="calendar-all-years" hidden>
-        <div class="calendar-line-head"><h3>Daily richness by station</h3><p>Same calendar dates are combined across synced years. The dashed line is the network-wide unique-species union.</p></div>
+        <div class="calendar-line-head"><h3>Daily richness by station</h3><p>Same calendar dates are combined across synced years. Station bars show unique species per date; the dashed line is the network-wide unique-species union.</p></div>
         {_daily_species_line_chart(all_time_calendar, stations, "all")}
         <div class="table-wrap">{_calendar_table(all_time_calendar, stations, "all")}</div>
       </div>
@@ -5283,7 +5321,7 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
         encoding="utf-8",
     )
     (settings.public_dir / "live.html").write_text(
-        _live_page(),
+        _live_page(snapshot),
         encoding="utf-8",
     )
     stations_dir = settings.public_dir / "stations"

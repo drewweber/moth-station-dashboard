@@ -34,7 +34,14 @@ def records(count: int) -> list[dict]:
 class RecordRenderingTests(unittest.TestCase):
     def test_history_live_mode_control_and_immediate_live_check_are_rendered(self) -> None:
         toggle = _mode_toggle("index.html", "live.html", "live")
-        page = _live_page()
+        page = _live_page(
+            {
+                "stations": [],
+                "api_base": "https://api.inaturalist.org/v1",
+                "poll_seconds": 600,
+                "live_mode_hours": 2,
+            }
+        )
 
         self.assertIn("History", toggle)
         self.assertIn("Live", toggle)
@@ -84,7 +91,7 @@ class RecordRenderingTests(unittest.TestCase):
 
         self.assertIn("Daily species richness by station", html)
         self.assertIn("daily-richness-network-line", html)
-        self.assertEqual(html.count("daily-richness-station-line"), 2)
+        self.assertEqual(html.count("daily-richness-station-bar"), 2)
         self.assertIn("9 network species", html)
         self.assertIn("Alpha: 7", html)
         self.assertIn("Beta: 4", html)
