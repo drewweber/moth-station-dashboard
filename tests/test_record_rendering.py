@@ -82,6 +82,8 @@ class RecordRenderingTests(unittest.TestCase):
                 "key": "2026-07-15",
                 "label": "Jul 15",
                 "stations": {"alpha": 7, "beta": 4},
+                "station_unique": {"alpha": 5, "beta": 0},
+                "shared": 4,
                 "total": 9,
                 "active_stations": 2,
             }
@@ -89,12 +91,14 @@ class RecordRenderingTests(unittest.TestCase):
 
         html = _daily_species_line_chart(rows, stations, "year")
 
-        self.assertIn("Daily species richness by station", html)
+        self.assertIn("Daily species richness by contribution and overlap", html)
         self.assertIn("daily-richness-network-line", html)
-        self.assertEqual(html.count("daily-richness-station-bar"), 2)
+        self.assertEqual(html.count("daily-richness-station-bar"), 1)
+        self.assertEqual(html.count("daily-richness-shared-bar"), 1)
         self.assertIn("9 network species", html)
-        self.assertIn("Alpha: 7", html)
-        self.assertIn("Beta: 4", html)
+        self.assertIn("Alpha: 7 total, 5 only", html)
+        self.assertIn("Beta: 4 total, 0 only", html)
+        self.assertIn("Shared by 2+ stations", html)
         self.assertIn(".daily-richness-line-chart", DASHBOARD_JS)
 
     def test_insight_feedback_cards_have_stable_rating_hooks(self) -> None:

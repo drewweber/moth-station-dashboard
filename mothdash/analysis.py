@@ -632,6 +632,18 @@ def daily_species_counts(settings: Settings, year: int | None = None) -> list[di
             station_id: len(taxa)
             for station_id, taxa in day["stations"].items()
         }
+        station_unique = defaultdict(int)
+        shared_species = 0
+        for taxon_id in day["taxa"]:
+            present_at = [
+                station_id
+                for station_id, station_taxa in day["stations"].items()
+                if taxon_id in station_taxa
+            ]
+            if len(present_at) == 1:
+                station_unique[present_at[0]] += 1
+            elif len(present_at) > 1:
+                shared_species += 1
         total = len(day["taxa"])
         active_stations = sum(1 for count in stations.values() if count)
         results.append(
@@ -640,6 +652,8 @@ def daily_species_counts(settings: Settings, year: int | None = None) -> list[di
                 "label": day["label"],
                 "sort_key": day["sort_key"],
                 "stations": stations,
+                "station_unique": dict(station_unique),
+                "shared": shared_species,
                 "total": total,
                 "active_stations": active_stations,
             }

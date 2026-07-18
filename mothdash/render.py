@@ -852,7 +852,7 @@ def _calendar_table(rows: list[dict[str, Any]], stations: list[Station], mode: s
 
 
 def _daily_species_line_chart(rows: list[dict[str, Any]], stations: list[Station], mode: str) -> str:
-    """Render daily station richness as a compact SVG bar/line hybrid chart."""
+    """Render daily network richness as stacked union bars with overlap shown once."""
     if not rows:
         return '<p class="empty">No daily species counts are available yet.</p>'
 
@@ -893,66 +893,81 @@ def _daily_species_line_chart(rows: list[dict[str, Any]], stations: list[Station
         y = top + plot_height - (count / max_species * plot_height)
         return x, y
 
-    station_bars = []
+    station_series = []
     legend = [
-        '<li class="daily-richness-network-key"><i></i><span>Network union</span></li>'
+        '<li class="daily-richness-network-key"><i></i><span>Network union</span></li>',
+        '<li class="daily-richness-shared-key"><i></i><span>Shared by 2+ stations</span></li>',
     ]
     for station in enabled:
-        values = [row["stations"].get(station.id, 0) for row in rows]
+        values = [
+            row.get("station_unique", {}).get(station.id, row["stations"].get(station.id, 0))
+            for row in rows
+        ]
         if not any(values):
             continue
         color = colors[station.id]
-        station_bars.append((station, values, color))
+        station_series.append((station, values, color))
         legend.append(
-            f'<li style="--series-color: {h(color)}"><i></i><span>{h(_station_short_label(station))}</span></li>'
+            f'<li style="--series-color: {h(color)}"><i></i><span>{h(_station_short_label(station))} only</span></li>'
         )
 
-    station_count = len(station_bars)
     if date_count <= 1:
         group_width = plot_width
     else:
         group_width = plot_width / (date_count - 1)
-    cluster_width = max(6, group_width * 0.9)
-    bar_width = max(2, min(8, cluster_width / max(1, station_count + 1)))
-    bar_gap = 1
+    bar_width = max(4, min(12, group_width * 0.74))
 
-    station_polys = []
-    for station_index, station_data in enumerate(station_bars):
-        station, values, color = station_data
-        total_width = station_count * bar_width + max(0, station_count - 1) * bar_gap
-        first_offset = -total_width / 2 + station_index * (bar_width + bar_gap)
-        bars = []
-        for row, row_date, count in zip(rows, dates, values):
-            x, _ = point(row, row_date, count)
-            bar_x = x + first_offset
+    stacked_bars = []
+    for row, row_date in zip(rows, dates):
+        x, _ = point(row, row_date, row["total"])
+        bar_x = x - bar_width / 2
+        y_cursor = top + plot_height
+        for station, _values, color in station_series:
+            count = row.get("station_unique", {}).get(station.id, row["stations"].get(station.id, 0))
+            if not count:
+                continue
             bar_height = count / max_species * plot_height
-            if count:
-                bars.append(
-                    f'<rect class="daily-richness-station-bar" style="--series-color: {h(color)}" '
-                    f'x="{bar_x:.1f}" y="{top + plot_height - bar_height:.1f}" '
-                    f'width="{bar_width:.1f}" height="{bar_height:.1f}" '
-                    f'fill="{h(color)}"></rect>'
-                )
-        station_polys.append("".join(bars))
+            y_cursor -= bar_height
+            stacked_bars.append(
+                f'<rect class="daily-richness-station-bar" style="--series-color: {h(color)}" '
+                f'x="{bar_x:.1f}" y="{y_cursor:.1f}" '
+                f'width="{bar_width:.1f}" height="{bar_height:.1f}" '
+                f'fill="{h(color)}"></rect>'
+            )
+        shared_count = row.get("shared")
+        if shared_count is None:
+            shared_count = max(
+                0,
+                row["total"] - sum(row.get("station_unique", {}).values()),
+            )
+        if shared_count:
+            bar_height = shared_count / max_species * plot_height
+            y_cursor -= bar_height
+            stacked_bars.append(
+                f'<rect class="daily-richness-shared-bar" '
+                f'x="{bar_x:.1f}" y="{y_cursor:.1f}" '
+                f'width="{bar_width:.1f}" height="{bar_height:.1f}"></rect>'
+            )
 
     network_points = []
     markers = []
     for row, row_date in zip(rows, dates):
         x, y = point(row, row_date, row["total"])
         network_points.append(f"{x:.1f},{y:.1f}")
+        shared_count = row.get("shared", 0)
         station_rows = "".join(
             f'<li><i style="--station-color: {h(colors[station.id])}"></i>'
             f'<span>{h(_station_short_label(station))}</span>'
-            f'<strong>{h(row["stations"].get(station.id, 0))}</strong></li>'
+            f'<strong>{h(row["stations"].get(station.id, 0))} total · {h(row.get("station_unique", {}).get(station.id, 0))} only</strong></li>'
             for station in enabled
         )
         tooltip_html = (
             f'<div class="monthly-tooltip-head"><strong>{h(row["label"])}</strong>'
             f'<span>{h(row["total"])} network species</span></div>'
-            f'<ul>{station_rows}</ul>'
+            f'<ul>{station_rows}<li><i class="shared-dot"></i><span>Shared by 2+ stations</span><strong>{h(shared_count)}</strong></li></ul>'
         )
         aria_values = "; ".join(
-            f"{station.name}: {row['stations'].get(station.id, 0)}"
+            f"{station.name}: {row['stations'].get(station.id, 0)} total, {row.get('station_unique', {}).get(station.id, 0)} only"
             for station in enabled
         )
         markers.append(
@@ -984,8 +999,8 @@ def _daily_species_line_chart(rows: list[dict[str, Any]], stations: list[Station
     <figure class="daily-richness-line-chart">
       <ul class="daily-richness-legend" aria-label="Daily richness legend">{''.join(legend)}</ul>
       <svg viewBox="0 0 {width} {height}" role="img" aria-labelledby="daily-richness-title-{h(mode)} daily-richness-desc-{h(mode)}">
-        <title id="daily-richness-title-{h(mode)}">Daily species richness by station</title>
-        <desc id="daily-richness-desc-{h(mode)}">Network-union and station-specific unique moth species for each date. {h(mode_description)} Focus or point at a network marker to see station values.</desc>
+        <title id="daily-richness-title-{h(mode)}">Daily species richness by contribution and overlap</title>
+        <desc id="daily-richness-desc-{h(mode)}">Each stacked bar totals the network unique-species union. Station-colored segments show species found only at that station on that date; the neutral segment shows species shared by two or more stations. {h(mode_description)} Focus or point at a network marker to see station values.</desc>
         <line class="chart-axis" x1="{left}" y1="{top + plot_height}" x2="{left + plot_width}" y2="{top + plot_height}"></line>
         <line class="chart-axis" x1="{left}" y1="{top}" x2="{left}" y2="{top + plot_height}"></line>
         <line class="chart-grid" x1="{left}" y1="{top}" x2="{left + plot_width}" y2="{top}"></line>
@@ -994,7 +1009,7 @@ def _daily_species_line_chart(rows: list[dict[str, Any]], stations: list[Station
         <text class="chart-label" x="{left - 8}" y="{top + plot_height / 2 + 4:.1f}" text-anchor="end">{h(round(max_species / 2))}</text>
         <text class="chart-label" x="{left - 8}" y="{top + plot_height + 4}" text-anchor="end">0</text>
         {''.join(date_labels)}
-        {''.join(station_polys)}
+        {''.join(stacked_bars)}
         <polyline class="daily-richness-network-line" points="{' '.join(network_points)}"></polyline>
         {''.join(markers)}
       </svg>
@@ -3954,6 +3969,9 @@ h2 {
   height: 7px;
   background: var(--station-color);
 }
+.monthly-tooltip li i.shared-dot {
+  background: color-mix(in srgb, var(--muted) 58%, var(--panel));
+}
 .monthly-tooltip li strong {
   color: var(--paper);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -4863,9 +4881,16 @@ a:hover { color: #f2d78e; }
 .daily-richness-network-key i {
   background: repeating-linear-gradient(90deg, var(--ink) 0 6px, transparent 6px 10px);
 }
+.daily-richness-shared-key {
+  --series-color: color-mix(in srgb, var(--muted) 58%, var(--panel));
+}
 .daily-richness-station-bar {
   fill: var(--series-color);
   opacity: 0.9;
+}
+.daily-richness-shared-bar {
+  fill: color-mix(in srgb, var(--muted) 58%, var(--panel));
+  opacity: 0.88;
 }
 .daily-richness-network-line {
   fill: none;
@@ -5270,12 +5295,12 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
       </div>
       {_view_toggle("Calendar view", ("calendar-year", f"{year} dates" if year else "Current dates"), ("calendar-all-years", "All years"))}
       <div class="view-panel" id="calendar-year">
-        <div class="calendar-line-head"><h3>Daily richness by station</h3><p>Station bars show unique species per moth night; the dashed line is the network-wide unique-species union.</p></div>
+        <div class="calendar-line-head"><h3>Daily richness by contribution</h3><p>Each bar totals the network species union. Color shows species only found at one station; gray shows species shared by multiple stations.</p></div>
         {_daily_species_line_chart(year_calendar, stations, "year")}
         <div class="table-wrap">{_calendar_table(year_calendar, stations, "year")}</div>
       </div>
       <div class="view-panel" id="calendar-all-years" hidden>
-        <div class="calendar-line-head"><h3>Daily richness by station</h3><p>Same calendar dates are combined across synced years. Station bars show unique species per date; the dashed line is the network-wide unique-species union.</p></div>
+        <div class="calendar-line-head"><h3>Daily richness by contribution</h3><p>Same calendar dates are combined across synced years. Each bar totals the network species union, split into station-only and shared species.</p></div>
         {_daily_species_line_chart(all_time_calendar, stations, "all")}
         <div class="table-wrap">{_calendar_table(all_time_calendar, stations, "all")}</div>
       </div>
