@@ -31,6 +31,14 @@ STATION_META_KEYS = {
 }
 
 ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+TAXON_SCOPES: dict[str, dict[str, int]] = {
+    "moths": {
+        # iNaturalist does not expose moths as a single taxon, so the moth
+        # scope is implemented as Lepidoptera minus butterflies.
+        "taxon_id": 47157,
+        "without_taxon_id": 47224,
+    },
+}
 
 
 @dataclass(frozen=True)
@@ -42,11 +50,19 @@ class Settings:
     session_cutoff_hour: int = 12
     timezone: str = "America/New_York"
     recent_limit: int = 50
-    default_taxon_id: int = 47157
-    default_without_taxon_id: int = 47224
+    taxon_scope: str = "moths"
     user_agent: str = "moth-station-dashboard/0.1"
     custom_domain: str = ""
     stats_refresh_limit: int = 80
+
+    def taxon_params(self) -> dict[str, int]:
+        try:
+            return dict(TAXON_SCOPES[self.taxon_scope])
+        except KeyError as exc:
+            available = ", ".join(sorted(TAXON_SCOPES))
+            raise ValueError(
+                f"Unknown taxon_scope {self.taxon_scope!r}; expected one of: {available}"
+            ) from exc
 
 
 @dataclass(frozen=True)
@@ -71,14 +87,14 @@ class Station:
 
     def api_params(self, settings: Settings) -> dict[str, Any]:
         params = dict(self.query)
-        params.setdefault("taxon_id", settings.default_taxon_id)
-        params.setdefault("without_taxon_id", settings.default_without_taxon_id)
+        for key, value in settings.taxon_params().items():
+            params.setdefault(key, value)
         return params
 
     def live_api_params(self, settings: Settings) -> dict[str, Any]:
         params = dict(self.live_query or self.query)
-        params.setdefault("taxon_id", settings.default_taxon_id)
-        params.setdefault("without_taxon_id", settings.default_without_taxon_id)
+        for key, value in settings.taxon_params().items():
+            params.setdefault(key, value)
         return params
 
 
@@ -111,12 +127,12 @@ def load_config(path: str | Path = "stations.toml") -> tuple[Settings, list[Stat
         session_cutoff_hour=int(raw_settings.get("session_cutoff_hour", 12)),
         timezone=str(raw_settings.get("timezone", "America/New_York")),
         recent_limit=int(raw_settings.get("recent_limit", 50)),
-        default_taxon_id=int(raw_settings.get("default_taxon_id", 47157)),
-        default_without_taxon_id=int(raw_settings.get("default_without_taxon_id", 47224)),
+        taxon_scope=str(raw_settings.get("taxon_scope", "moths")),
         user_agent=str(raw_settings.get("user_agent", "moth-station-dashboard/0.1")),
         custom_domain=str(raw_settings.get("custom_domain", "")),
         stats_refresh_limit=int(raw_settings.get("stats_refresh_limit", 80)),
     )
+    settings.taxon_params()
 
     stations = []
     seen = set()

@@ -86,12 +86,12 @@ data in the dashboard. It still shows up in the all-time location list,
 flagged as inactive. This is separate from `enabled`, which fully removes a
 station from every part of the dashboard.
 
-By default, every station query is restricted to moths:
-
-- `taxon_id = 47157` for Lepidoptera
-- `without_taxon_id = 47224` for butterflies
-
-You can override those values per station if needed.
+The full site is moth-focused for now. The `[settings]` block uses
+`taxon_scope = "moths"`, and the loader translates that semantic scope into the
+iNaturalist query needed to retrieve moth observations. Keep station entries
+focused on the source query, location, and public metadata rather than raw taxon
+exclusion parameters. Future scopes, such as host plants, should be added as
+named site-level scopes before they are used by stations.
 
 ## Current MVP Limits
 

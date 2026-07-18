@@ -6,6 +6,9 @@ queries.
 ## Rules
 
 - Keep `stations.toml` readable for non-programmers.
+- Keep taxon filtering semantic. The site is currently moth-focused via
+  `taxon_scope = "moths"` in `[settings]`; do not make contributors define raw
+  taxon exclusions such as butterfly filters in station entries.
 - Do not commit SQLite databases, logs, or generated HTML.
 - Preserve the distinction between observed date, upload date, and ID update
   date.

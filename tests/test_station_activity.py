@@ -51,6 +51,17 @@ class StationActivityTests(unittest.TestCase):
             ["active"],
         )
 
+    def test_station_queries_get_site_moth_scope(self) -> None:
+        self.assertEqual(self.settings.taxon_scope, "moths")
+        self.assertEqual(
+            self.active.api_params(self.settings),
+            {
+                "project_id": "active",
+                "taxon_id": 47157,
+                "without_taxon_id": 47224,
+            },
+        )
+
     def test_live_snapshot_contains_only_active_stations(self) -> None:
         payload = _snapshot_payload(self.settings, self.stations, [])
         self.assertEqual(
