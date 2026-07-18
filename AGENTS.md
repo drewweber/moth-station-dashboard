@@ -15,6 +15,15 @@ queries.
 - Prefer standard-library Python unless a dependency clearly earns its cost.
 - Keep pull requests narrowly scoped and do not mix behavior changes with
   unrelated cleanup.
+- For any non-trivial or long-running pull request, fetch and rebase on current
+  `origin/main` at the start of each work session, before pushing new commits,
+  and before marking the PR ready for review. Use `git push --force-with-lease`
+  after rebasing; do not use a plain force push.
+- If a rebase has conflicts, resolve them against current `main` and record the
+  conflicted files, behavior decisions, and rerun checks in the PR description.
+- Open large or uncertain work as a draft PR early. Split foundation refactors,
+  station/query changes, UI changes, and behavior changes into separate PRs
+  unless the PR explains why they must ship together.
 - Add or update tests when changing date handling, station selection, species
   counts, first-record logic, or other analysis behavior.
 - Never claim a check passed unless you ran it. Record the exact commands and
@@ -49,6 +58,17 @@ python3 -m compileall -q mothdash
 python3 -m mothdash sync
 python3 -m mothdash render
 python3 -m mothdash build
+```
+
+For active PR branches:
+
+```sh
+git fetch origin
+git rebase origin/main
+python3 -m unittest discover -s tests -v
+python3 -m compileall -q mothdash
+python3 -m mothdash render
+git push --force-with-lease
 ```
 
 Before opening a pull request, read `CONTRIBUTING.md` and complete the pull

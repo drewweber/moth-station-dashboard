@@ -52,6 +52,20 @@ Data used for verification:
 
 <!-- Note edge cases, untested paths, migration/cache concerns, and anything the reviewer should verify. -->
 
+## Rebase and integration notes
+
+<!--
+For active or long-running PRs, state whether this branch was rebased on current
+main before review. If there were conflicts, list the files and how the behavior
+was resolved. For small one-session PRs with no conflicts, "Rebased on current
+main; no conflicts" is enough.
+-->
+
+- [ ] I fetched and rebased on current `origin/main` before requesting review.
+- [ ] I used `git push --force-with-lease`, not a plain force push, after rebasing.
+- [ ] I listed any rebase conflicts and how they were resolved, or there were no conflicts.
+- [ ] This PR is split as small as practical; if large, the description explains why.
+
 ## Change hygiene
 
 - [ ] This PR contains one coherent change.

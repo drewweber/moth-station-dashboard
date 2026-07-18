@@ -33,6 +33,39 @@ changes reviewable:
 The repository includes `AGENTS.md` and `CLAUDE.md` so different tools can read
 the same project guidance.
 
+## Keeping Long-Running Pull Requests Current
+
+Open large or uncertain work as a draft pull request early. Draft PRs make it
+easier to see direction, catch conflicts, and split work before a branch grows
+too large to review.
+
+For any PR that stays open while other work is landing on `main`, keep the
+branch current. At the start of each work session, before pushing new commits,
+and before marking a PR ready for review:
+
+```sh
+git fetch origin
+git rebase origin/main
+python3 -m unittest discover -s tests -v
+python3 -m compileall -q mothdash
+python3 -m mothdash render
+git push --force-with-lease
+```
+
+If the branch has conflicts, resolve them against current `main`. Do not merge
+`main` into the feature branch unless the maintainer asks for a merge commit.
+After a conflict resolution, update the PR description with:
+
+- which files or areas conflicted
+- what behavior changed because of the rebase, if anything
+- which checks were rerun
+- any pages, calculations, or station data the reviewer should inspect closely
+
+Large PRs are acceptable when they are the smallest practical unit, but the PR
+description must explain why the work was not split. Prefer separate PRs for
+foundation refactors, data/query changes, UI changes, generated-content volume,
+and behavior changes.
+
 ## Keep Pull Requests Reviewable
 
 Each pull request should make one coherent change. Avoid combining a feature,
