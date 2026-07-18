@@ -76,6 +76,15 @@ request template. Explain the user-visible behavior, data implications, risks,
 and verification clearly enough that a reviewer does not need to reconstruct
 the intent from the diff.
 
+## Maintainer PR Review Requests
+
+When the maintainer asks to "review pending PRs" or similar, read
+`MAINTAINER.md` and follow the quick PR review workflow there. Inspect open PRs,
+classify each as `Merge`, `Comment`, `Request rebase`, `Needs review`, or
+`Close/split`, and suggest exact next actions. Do not merge, approve, close,
+request changes, or post public comments until the maintainer explicitly
+confirms the target PR number and action.
+
 ## Main Files
 
 - `stations.toml`: station definitions
