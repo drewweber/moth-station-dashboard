@@ -92,7 +92,7 @@ class RecordRenderingTests(unittest.TestCase):
         html = _daily_species_line_chart(rows, stations, "year")
 
         self.assertIn("Daily species richness by contribution and overlap", html)
-        self.assertIn("daily-richness-network-line", html)
+        self.assertNotIn("daily-richness-network-line", html)
         self.assertEqual(html.count("daily-richness-station-bar"), 1)
         self.assertEqual(html.count("daily-richness-shared-bar"), 1)
         self.assertIn("9 network species", html)

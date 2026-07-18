@@ -894,10 +894,7 @@ def _daily_species_line_chart(rows: list[dict[str, Any]], stations: list[Station
         return x, y
 
     station_series = []
-    legend = [
-        '<li class="daily-richness-network-key"><i></i><span>Network union</span></li>',
-        '<li class="daily-richness-shared-key"><i></i><span>Shared by 2+ stations</span></li>',
-    ]
+    legend = ['<li class="daily-richness-shared-key"><i></i><span>Shared by 2+ stations</span></li>']
     for station in enabled:
         values = [
             row.get("station_unique", {}).get(station.id, row["stations"].get(station.id, 0))
@@ -949,11 +946,9 @@ def _daily_species_line_chart(rows: list[dict[str, Any]], stations: list[Station
                 f'width="{bar_width:.1f}" height="{bar_height:.1f}"></rect>'
             )
 
-    network_points = []
     markers = []
     for row, row_date in zip(rows, dates):
         x, y = point(row, row_date, row["total"])
-        network_points.append(f"{x:.1f},{y:.1f}")
         shared_count = row.get("shared", 0)
         station_rows = "".join(
             f'<li><i style="--station-color: {h(colors[station.id])}"></i>'
@@ -972,11 +967,10 @@ def _daily_species_line_chart(rows: list[dict[str, Any]], stations: list[Station
         )
         markers.append(
             f"""
-            <g class="monthly-point-group" style="--series-color: var(--ink)" tabindex="0" role="img"
+            <g class="monthly-point-group daily-richness-hit-group" style="--series-color: var(--ink)" tabindex="0" role="img"
                aria-label="{h(row['label'])}: {h(row['total'])} network species; {h(aria_values)}"
                data-tooltip-html="{h(tooltip_html)}">
               <circle class="monthly-hit-target" cx="{x:.1f}" cy="{y:.1f}" r="9"></circle>
-              <circle class="monthly-point" cx="{x:.1f}" cy="{y:.1f}" r="2.6"></circle>
             </g>
             """
         )
@@ -1000,7 +994,7 @@ def _daily_species_line_chart(rows: list[dict[str, Any]], stations: list[Station
       <ul class="daily-richness-legend" aria-label="Daily richness legend">{''.join(legend)}</ul>
       <svg viewBox="0 0 {width} {height}" role="img" aria-labelledby="daily-richness-title-{h(mode)} daily-richness-desc-{h(mode)}">
         <title id="daily-richness-title-{h(mode)}">Daily species richness by contribution and overlap</title>
-        <desc id="daily-richness-desc-{h(mode)}">Each stacked bar totals the network unique-species union. Station-colored segments show species found only at that station on that date; the neutral segment shows species shared by two or more stations. {h(mode_description)} Focus or point at a network marker to see station values.</desc>
+        <desc id="daily-richness-desc-{h(mode)}">Each stacked bar totals the network unique-species union. Station-colored segments show species found only at that station on that date; the neutral segment shows species shared by two or more stations. {h(mode_description)} Focus or point at a bar to see station values.</desc>
         <line class="chart-axis" x1="{left}" y1="{top + plot_height}" x2="{left + plot_width}" y2="{top + plot_height}"></line>
         <line class="chart-axis" x1="{left}" y1="{top}" x2="{left}" y2="{top + plot_height}"></line>
         <line class="chart-grid" x1="{left}" y1="{top}" x2="{left + plot_width}" y2="{top}"></line>
@@ -1010,7 +1004,6 @@ def _daily_species_line_chart(rows: list[dict[str, Any]], stations: list[Station
         <text class="chart-label" x="{left - 8}" y="{top + plot_height + 4}" text-anchor="end">0</text>
         {''.join(date_labels)}
         {''.join(stacked_bars)}
-        <polyline class="daily-richness-network-line" points="{' '.join(network_points)}"></polyline>
         {''.join(markers)}
       </svg>
       <div class="monthly-tooltip" role="tooltip" hidden></div>
@@ -4874,13 +4867,6 @@ a:hover { color: #f2d78e; }
   opacity: 0.85;
   background: var(--series-color);
 }
-.daily-richness-legend .daily-richness-network-key {
-  --series-color: var(--ink);
-  color: var(--ink);
-}
-.daily-richness-network-key i {
-  background: repeating-linear-gradient(90deg, var(--ink) 0 6px, transparent 6px 10px);
-}
 .daily-richness-shared-key {
   --series-color: color-mix(in srgb, var(--muted) 58%, var(--panel));
 }
@@ -4891,17 +4877,6 @@ a:hover { color: #f2d78e; }
 .daily-richness-shared-bar {
   fill: color-mix(in srgb, var(--muted) 58%, var(--panel));
   opacity: 0.88;
-}
-.daily-richness-network-line {
-  fill: none;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  vector-effect: non-scaling-stroke;
-}
-.daily-richness-network-line {
-  stroke: var(--ink);
-  stroke-width: 2.5;
-  stroke-dasharray: 6 5;
 }
 .calendar-cell {
   width: 82px;
