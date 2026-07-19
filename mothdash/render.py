@@ -360,14 +360,31 @@ def _taxa_period_dashboard(
     ]
     shared_taxa = sum(1 for row in taxa if row.get("station_count", 0) > 1)
     station_chips = []
+    if shared_taxa:
+        station_chips.append(
+            f"""
+            <button type="button" class="night-station-chip night-filter-chip night-shared-chip"
+                    style="--station-color: var(--amber)"
+                    data-night-shared-filter
+                    aria-pressed="false"
+                    aria-label="Show species shared by multiple stations in this period">
+              Shared
+            </button>
+            """
+        )
     for station_id in active_station_ids:
         station = station_lookup[station_id]
         station_chips.append(
             f"""
-            <span class="night-station-chip" style="--station-color: {h(colors[station_id])}">
+            <button type="button" class="night-station-chip night-filter-chip"
+                    style="--station-color: {h(colors[station_id])}"
+                    data-night-station-filter="{h(station_id)}"
+                    data-station-name="{h(station.name)}"
+                    aria-pressed="false"
+                    aria-label="Show species only seen at {h(station.name)} in this period">
               {h(_station_short_label(station))}
               <strong>{h(station_counts.get(station_id, 0))}</strong>
-            </span>
+            </button>
             """
         )
 
@@ -390,9 +407,15 @@ def _taxa_period_dashboard(
                 f'<span style="--station-color: {h(colors.get(station_id, "#d7b56d"))}">{h(name)}</span>'
             )
         status = "shared" if row.get("station_count", 0) > 1 else "single station"
+        card_station_ids = "|".join(sorted(row["stations"]))
+        single_station_id = next(iter(row["stations"])) if row.get("station_count", 0) == 1 else ""
         cards.append(
             f"""
-            <article class="night-card">
+            <article class="night-card"
+                     data-night-card
+                     data-station-ids="{h(card_station_ids)}"
+                     data-single-station-id="{h(single_station_id)}"
+                     data-station-count="{h(row.get("station_count", 0))}">
               <div class="night-image">{image}</div>
               <div class="night-copy">
                 <p>{h(status)} · {h(row.get("total_count", 0))} obs</p>
@@ -422,8 +445,12 @@ def _taxa_period_dashboard(
         <span>shared by stations</span>
       </div>
     </div>
-    <div class="night-stations" aria-label="Species count by station">{''.join(station_chips)}</div>
+    <div class="night-period-filter" data-night-period-filter>
+      <div class="night-stations" aria-label="Species count by station">{''.join(station_chips)}</div>
+      <p class="night-filter-status" data-night-filter-status aria-live="polite" hidden></p>
+    </div>
     <div class="night-grid">{''.join(cards)}</div>
+    <p class="empty night-filter-empty" data-night-filter-empty hidden></p>
     """
 
 
@@ -1853,6 +1880,92 @@ function initViewToggles() {
   });
 }
 
+function initNightStationFilters() {
+  document.querySelectorAll("[data-night-period-filter]").forEach((filter) => {
+    const section = filter.closest("section");
+    if (!section) return;
+    const buttons = Array.from(filter.querySelectorAll("[data-night-station-filter], [data-night-shared-filter]"));
+    const grid = section.querySelector(".night-grid");
+    const cards = Array.from(section.querySelectorAll("[data-night-card]"));
+    const status = filter.querySelector("[data-night-filter-status]");
+    const empty = section.querySelector("[data-night-filter-empty]");
+    if (!buttons.length || !cards.length || !grid) return;
+    cards.forEach((card, index) => {
+      card.dataset.originalIndex = String(index);
+    });
+
+    const restoreCardOrder = () => {
+      cards
+        .slice()
+        .sort((a, b) => Number(a.dataset.originalIndex || 0) - Number(b.dataset.originalIndex || 0))
+        .forEach((card) => grid.appendChild(card));
+    };
+
+    const sortSharedCards = () => {
+      cards
+        .slice()
+        .sort((a, b) => {
+          const countDiff = Number(b.dataset.stationCount || 0) - Number(a.dataset.stationCount || 0);
+          if (countDiff) return countDiff;
+          return Number(a.dataset.originalIndex || 0) - Number(b.dataset.originalIndex || 0);
+        })
+        .forEach((card) => grid.appendChild(card));
+    };
+
+    const applyFilter = (mode, stationId, stationName) => {
+      let visible = 0;
+      cards.forEach((card) => {
+        const stationCount = Number(card.dataset.stationCount || 0);
+        const show =
+          mode === "shared"
+            ? stationCount > 1
+            : !stationId || card.dataset.singleStationId === stationId;
+        card.hidden = !show;
+        if (show) visible += 1;
+      });
+      if (mode === "shared") {
+        sortSharedCards();
+      } else {
+        restoreCardOrder();
+      }
+      buttons.forEach((button) => {
+        const pressed =
+          mode === "shared"
+            ? button.hasAttribute("data-night-shared-filter")
+            : Boolean(stationId && button.dataset.nightStationFilter === stationId);
+        button.setAttribute("aria-pressed", String(pressed));
+      });
+      if (status) {
+        status.hidden = !mode;
+        status.textContent =
+          mode === "shared"
+            ? `Shared species: ${visible}, sorted by station coverage`
+            : stationId
+              ? `${stationName}-only species: ${visible}`
+              : "";
+      }
+      if (empty) {
+        empty.hidden = !mode || visible > 0;
+        empty.textContent =
+          mode === "shared"
+            ? "No preview species were shared by multiple stations in this period."
+            : stationId
+              ? `No preview species are unique to ${stationName} in this period.`
+              : "";
+      }
+    };
+
+    buttons.forEach((button) => {
+      button.addEventListener("click", () => {
+        const mode = button.hasAttribute("data-night-shared-filter") ? "shared" : "station";
+        const stationId = button.dataset.nightStationFilter || "";
+        const isActive = button.getAttribute("aria-pressed") === "true";
+        applyFilter(isActive ? "" : mode, isActive ? "" : stationId, button.dataset.stationName || button.textContent.trim());
+      });
+    });
+  });
+}
+
 function initUniqueFilter() {
   const input = document.querySelector("[data-unique-filter]");
   if (!input) return;
@@ -2108,6 +2221,7 @@ function initMonthlyTooltips() {
 
 initSortableTables();
 initViewToggles();
+initNightStationFilters();
 initUniqueFilter();
 initRecordFilters();
 initInsightFeedback();
@@ -4281,10 +4395,21 @@ h2 {
   background: rgba(255, 255, 255, 0.025);
   color: var(--muted);
   text-decoration: none;
+  font: inherit;
+}
+.night-filter-chip {
+  cursor: pointer;
 }
 .night-station-chip:hover {
   color: var(--ink);
   background: color-mix(in srgb, var(--station-color) 12%, var(--panel));
+}
+.night-filter-chip[aria-pressed="true"] {
+  color: var(--ink);
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--station-color) 22%, transparent), transparent),
+    var(--panel-2);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--station-color) 52%, transparent);
 }
 .night-station-chip:focus-visible {
   outline: 2px solid var(--station-color);
@@ -4293,6 +4418,14 @@ h2 {
 .night-station-chip strong {
   color: var(--ink);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.night-filter-status {
+  margin: -8px 0 12px;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+.night-filter-empty {
+  margin-top: 14px;
 }
 .network-total-chip {
   background: color-mix(in srgb, var(--amber) 12%, var(--panel));

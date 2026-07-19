@@ -12,6 +12,7 @@ from mothdash.render import (
     _mode_toggle,
     _record_cards,
     _record_table,
+    _taxa_period_dashboard,
 )
 from mothdash.config import Station
 
@@ -125,6 +126,51 @@ class RecordRenderingTests(unittest.TestCase):
         self.assertEqual(html.count('class="record-card"'), RECORD_CARD_PREVIEW_LIMIT)
         self.assertNotIn("data-default-hidden", html)
         self.assertNotIn("Species 0012", html)
+
+    def test_period_station_chips_filter_station_only_species(self) -> None:
+        stations = [
+            Station(id="alpha", name="Alpha Station", enabled=True, active=True, query={}, color="#123456"),
+            Station(id="beta", name="Beta Station", enabled=True, active=True, query={}, color="#abcdef"),
+        ]
+        payload = {
+            "period_label": "2026-07-12 to 2026-07-18",
+            "observations": 5,
+            "station_counts": {"alpha": 2, "beta": 2},
+            "taxa": [
+                {
+                    "label": "Alpha-only Moth",
+                    "station_count": 1,
+                    "total_count": 1,
+                    "stations": {"alpha": {"station_name": "Alpha Station"}},
+                },
+                {
+                    "label": "Shared Moth",
+                    "station_count": 2,
+                    "total_count": 4,
+                    "stations": {
+                        "alpha": {"station_name": "Alpha Station"},
+                        "beta": {"station_name": "Beta Station"},
+                    },
+                },
+            ],
+        }
+
+        html = _taxa_period_dashboard(payload, stations, "past 7 nights", "No moths.")
+
+        self.assertIn('data-night-station-filter="alpha"', html)
+        self.assertIn("data-night-shared-filter", html)
+        self.assertIn('aria-pressed="false"', html)
+        self.assertIn('data-night-card', html)
+        self.assertIn('data-single-station-id="alpha"', html)
+        self.assertIn('data-single-station-id=""', html)
+        self.assertIn('data-station-count="2"', html)
+        self.assertIn('data-night-filter-status', html)
+        self.assertIn('data-night-filter-empty', html)
+        self.assertIn("initNightStationFilters();", DASHBOARD_JS)
+        self.assertIn("card.dataset.singleStationId === stationId", DASHBOARD_JS)
+        self.assertIn('mode === "shared"', DASHBOARD_JS)
+        self.assertIn("sortSharedCards();", DASHBOARD_JS)
+        self.assertIn("Number(b.dataset.stationCount || 0)", DASHBOARD_JS)
 
     def test_archive_contains_every_record_without_server_hidden_rows(self) -> None:
         html = _record_table(records(150))
