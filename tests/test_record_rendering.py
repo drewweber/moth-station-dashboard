@@ -12,6 +12,7 @@ from mothdash.render import (
     _mode_toggle,
     _record_cards,
     _record_table,
+    _sampling_context,
     _taxa_period_dashboard,
 )
 from mothdash.config import Station
@@ -126,6 +127,31 @@ class RecordRenderingTests(unittest.TestCase):
         self.assertEqual(html.count('class="record-card"'), RECORD_CARD_PREVIEW_LIMIT)
         self.assertNotIn("data-default-hidden", html)
         self.assertNotIn("Species 0012", html)
+
+    def test_sampling_context_renders_only_derived_coverage_and_timing(self) -> None:
+        html = _sampling_context(
+            {
+                "active_sessions": 12,
+                "first_session": "2025-07-02",
+                "latest_session": "2026-07-18",
+                "yearly_coverage": [
+                    {"year": 2025, "nights": 4, "species": 83},
+                    {"year": 2026, "nights": 8, "species": 147},
+                ],
+                "upload_timing": {
+                    "median_lag_minutes": 210,
+                    "timestamped_records": 26,
+                    "total_records": 28,
+                },
+            }
+        )
+
+        self.assertIn("species-recorded nights", html)
+        self.assertIn("Moth-night coverage by year", html)
+        self.assertIn("4 nights", html)
+        self.assertIn("147 species", html)
+        self.assertIn("median upload lag", html)
+        self.assertIn("3h 30m", html)
 
     def test_period_station_chips_filter_station_only_species(self) -> None:
         stations = [

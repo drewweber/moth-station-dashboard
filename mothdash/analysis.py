@@ -20,6 +20,16 @@ def parse_date(value: str | None) -> date | None:
         return None
 
 
+def parse_timestamp(value: str | None) -> datetime | None:
+    """Parse an iNaturalist timestamp without treating a date-only value as a time."""
+    if not value or "T" not in value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
 def is_species(row: dict[str, Any]) -> bool:
     """Return whether an observation is identified at exactly species rank."""
     return row.get("rank") == "species"
@@ -1163,27 +1173,36 @@ def station_profile(settings: Settings, station_id: str) -> dict[str, Any]:
     ]
 
     taxa_seen = {int(row["taxon_id"]) for row in species_rows}
-    dates = [row["session_date"] for row in rows if row.get("session_date")]
+    dates = [row["session_date"] for row in species_rows if row.get("session_date")]
     latest = max(dates) if dates else None
     first = min(dates) if dates else None
 
-    by_month: dict[int, set[int]] = defaultdict(set)
+    by_month: dict[int, dict[str, set[Any]]] = defaultdict(
+        lambda: {"taxa": set(), "sessions": set()}
+    )
     by_week: dict[int, dict[str, Any]] = defaultdict(
-        lambda: {"taxa": set(), "observations": 0}
+        lambda: {"taxa": set(), "sessions": set()}
+    )
+    yearly_coverage: dict[int, dict[str, set[int] | set[date]]] = defaultdict(
+        lambda: {"taxa": set(), "sessions": set()}
     )
     for row in species_rows:
         taxon_id = row.get("taxon_id")
         sd = row.get("session_date")
         if taxon_id and sd:
-            by_month[sd.month].add(int(taxon_id))
+            by_month[sd.month]["taxa"].add(int(taxon_id))
+            by_month[sd.month]["sessions"].add(sd)
             week = min(52, max(1, ((sd.timetuple().tm_yday - 1) // 7) + 1))
             by_week[week]["taxa"].add(int(taxon_id))
-            by_week[week]["observations"] += 1
+            by_week[week]["sessions"].add(sd)
+            yearly_coverage[sd.year]["taxa"].add(int(taxon_id))
+            yearly_coverage[sd.year]["sessions"].add(sd)
     seasonal_richness = [
         {
             "month": month,
             "label": date(2000, month, 1).strftime("%b"),
-            "species": len(by_month.get(month, set())),
+            "species": len(by_month[month]["taxa"]),
+            "nights": len(by_month[month]["sessions"]),
         }
         for month in range(1, 13)
     ]
@@ -1195,7 +1214,7 @@ def station_profile(settings: Settings, station_id: str) -> dict[str, Any]:
                 "week": week,
                 "label": f"{start:%b} {start.day}",
                 "species": len(by_week[week]["taxa"]),
-                "observations": by_week[week]["observations"],
+                "nights": len(by_week[week]["sessions"]),
             }
         )
 
@@ -1206,17 +1225,40 @@ def station_profile(settings: Settings, station_id: str) -> dict[str, Any]:
         if taxon_id and sd:
             taxa_by_date[sd].add(int(taxon_id))
     seen = set()
+    sessions_seen = 0
     accumulation = []
     for sd in sorted(taxa_by_date):
+        sessions_seen += 1
         before = len(seen)
         seen.update(taxa_by_date[sd])
         if len(seen) != before:
-            accumulation.append({"date": sd, "species": len(seen)})
+            accumulation.append({"date": sd, "species": len(seen), "nights": sessions_seen})
     if len(accumulation) > 40:
         step = max(1, (len(accumulation) + 39) // 40)
         accumulation = accumulation[::step]
         if accumulation[-1]["species"] != len(seen):
-            accumulation.append({"date": max(dates), "species": len(seen)})
+            accumulation.append(
+                {"date": max(dates), "species": len(seen), "nights": sessions_seen}
+            )
+
+    upload_lags_minutes = []
+    for row in species_rows:
+        observed_at = parse_timestamp(row.get("observed_at"))
+        created_at = parse_timestamp(row.get("created_at"))
+        if observed_at is None or created_at is None:
+            continue
+        lag_minutes = (created_at - observed_at).total_seconds() / 60
+        if lag_minutes >= 0:
+            upload_lags_minutes.append(lag_minutes)
+    upload_lags_minutes.sort()
+    median_upload_lag_minutes = None
+    if upload_lags_minutes:
+        midpoint = len(upload_lags_minutes) // 2
+        median_upload_lag_minutes = upload_lags_minutes[midpoint]
+        if len(upload_lags_minutes) % 2 == 0:
+            median_upload_lag_minutes = (
+                median_upload_lag_minutes + upload_lags_minutes[midpoint - 1]
+            ) / 2
 
     taxon_evidence: dict[int, dict[str, Any]] = {}
     for row in species_rows:
@@ -1357,7 +1399,7 @@ def station_profile(settings: Settings, station_id: str) -> dict[str, Any]:
             key=lambda item: (item["seen_this_year"], -item["records"], item["label"]),
         )[:12]
 
-    active_sessions = len({row["session_date"] for row in rows if row.get("session_date")})
+    active_sessions = len({row["session_date"] for row in species_rows if row.get("session_date")})
     observations = len(rows)
     species = len(taxa_seen)
     unique_count = len([
@@ -1390,6 +1432,19 @@ def station_profile(settings: Settings, station_id: str) -> dict[str, Any]:
         "first_session": first,
         "latest_session": latest,
         "unique_count": unique_count,
+        "yearly_coverage": [
+            {
+                "year": year,
+                "nights": len(values["sessions"]),
+                "species": len(values["taxa"]),
+            }
+            for year, values in sorted(yearly_coverage.items())
+        ],
+        "upload_timing": {
+            "median_lag_minutes": median_upload_lag_minutes,
+            "timestamped_records": len(upload_lags_minutes),
+            "total_records": len(species_rows),
+        },
         "seasonal_richness": seasonal_richness,
         "phenology_weeks": phenology_weeks,
         "accumulation": accumulation,

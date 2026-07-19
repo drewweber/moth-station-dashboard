@@ -1068,11 +1068,72 @@ def _seasonal_bars(profile: dict[str, Any]) -> str:
             <div class="month-bar">
               <span>{h(row["label"])}</span>
               <div><i style="width: {width:.1f}%"></i></div>
-              <strong>{h(row["species"])}</strong>
+              <strong>{h(row["species"])} <small>{h(row["nights"])} nights</small></strong>
             </div>
             """
         )
     return "".join(bars)
+
+
+def _format_upload_lag(minutes: float | None) -> str:
+    if minutes is None:
+        return "not available"
+    rounded = max(0, round(minutes))
+    if rounded < 60:
+        return f"{rounded} min"
+    hours, remaining_minutes = divmod(rounded, 60)
+    if hours < 24:
+        return f"{hours}h" if remaining_minutes < 30 else f"{hours}h {remaining_minutes}m"
+    days, remaining_hours = divmod(hours, 24)
+    return f"{days}d" if remaining_hours < 12 else f"{days}d {remaining_hours}h"
+
+
+def _sampling_context(profile: dict[str, Any]) -> str:
+    yearly = profile["yearly_coverage"]
+    upload_timing = profile["upload_timing"]
+    max_nights = max([row["nights"] for row in yearly] + [1])
+    annual_rows = []
+    for row in yearly:
+        width = 100 * row["nights"] / max_nights
+        annual_rows.append(
+            f"""
+            <div class="sampling-year-row">
+              <span>{h(row["year"])}</span>
+              <div aria-hidden="true"><i style="width: {width:.1f}%"></i></div>
+              <strong>{h(row["nights"])} nights <small>{h(row["species"])} species</small></strong>
+            </div>
+            """
+        )
+    upload_metric = ""
+    if upload_timing["timestamped_records"]:
+        upload_metric = f"""
+        <div>
+          <dt>median upload lag</dt>
+          <dd>{h(_format_upload_lag(upload_timing["median_lag_minutes"]))}</dd>
+          <small>{h(upload_timing["timestamped_records"])} timestamped records</small>
+        </div>
+        """
+    return f"""
+    <div class="sampling-context">
+      <dl class="sampling-context-metrics">
+        <div>
+          <dt>species-recorded nights</dt>
+          <dd>{h(profile["active_sessions"])}</dd>
+          <small>{h(profile["first_session"] or "waiting")} to {h(profile["latest_session"] or "waiting")}</small>
+        </div>
+        <div>
+          <dt>calendar years covered</dt>
+          <dd>{h(len(yearly))}</dd>
+          <small>{h(" · ".join(str(row["year"]) for row in yearly) or "waiting")}</small>
+        </div>
+        {upload_metric}
+      </dl>
+      <figure class="sampling-year-chart">
+        <figcaption>Moth-night coverage by year</figcaption>
+        <div class="sampling-year-list">{"".join(annual_rows) or '<p class="empty">Moth-night coverage will appear after synced observations.</p>'}</div>
+      </figure>
+    </div>
+    """
 
 
 def _accumulation_bars(profile: dict[str, Any]) -> str:
@@ -1104,12 +1165,12 @@ def _accumulation_bars(profile: dict[str, Any]) -> str:
     for x, y, row in points:
         tooltip_html = (
             f'<div class="monthly-tooltip-head"><strong>{h(row["date"])}</strong>'
-            f'<span>{h(row["species"])} species</span></div>'
+            f'<span>{h(row["species"])} species · {h(row["nights"])} nights</span></div>'
         )
         markers.append(
             f"""
             <g class="monthly-point-group" style="--series-color: var(--amber)" tabindex="0" role="img"
-               aria-label="{h(row['date'])}: {h(row['species'])} species"
+               aria-label="{h(row['date'])}: {h(row['species'])} species after {h(row['nights'])} active moth nights"
                data-tooltip-html="{h(tooltip_html)}">
               <circle class="monthly-hit-target" cx="{x:.1f}" cy="{y:.1f}" r="9"></circle>
               <circle class="monthly-point" cx="{x:.1f}" cy="{y:.1f}" r="2.6"></circle>
@@ -1121,7 +1182,7 @@ def _accumulation_bars(profile: dict[str, Any]) -> str:
     <figure class="accumulation-line-chart">
       <svg viewBox="0 0 {width} {height}" role="img" aria-labelledby="accumulation-title accumulation-desc">
         <title id="accumulation-title">Station species accumulation curve</title>
-        <desc id="accumulation-desc">Running moth species count from {h(min_date)} to {h(max_date)}, ending at {h(latest["species"])} species. Focus or point at a node to see its date and count.</desc>
+        <desc id="accumulation-desc">Running moth species count from {h(min_date)} to {h(max_date)}, ending at {h(latest["species"])} species after {h(latest["nights"])} active moth nights. Focus or point at a node to see its date, count, and moth-night coverage.</desc>
         <line class="chart-axis" x1="{left}" y1="{top + plot_height}" x2="{left + plot_width}" y2="{top + plot_height}"></line>
         <line class="chart-axis" x1="{left}" y1="{top}" x2="{left}" y2="{top + plot_height}"></line>
         <line class="chart-grid" x1="{left}" y1="{top}" x2="{left + plot_width}" y2="{top}"></line>
@@ -1152,7 +1213,7 @@ def _profile_phenology_calendar(profile: dict[str, Any]) -> str:
             <div class="profile-week" style="--cell-bg: {_hex_to_rgba("#d7b56d", intensity)}">
               <strong>{h(row["species"]) if row["species"] else ""}</strong>
               <span>{h(row["label"])}</span>
-              <small>{h(row["observations"])} obs</small>
+              <small>{h(row["nights"])} nights</small>
             </div>
             """
         )
@@ -1752,8 +1813,16 @@ def _station_profile_page(station: Station, profile: dict[str, Any], color: str)
 
     <section>
       <div class="section-head">
+        <h2>Sampling context</h2>
+        <p>Automatically derived from species-level iNaturalist timestamps. These records show active moth nights and upload timing, not trap duration or light setup.</p>
+      </div>
+      {_sampling_context(profile)}
+    </section>
+
+    <section>
+      <div class="section-head">
         <h2>Seasonal richness</h2>
-        <p>Unique moth species by month, using all synced observations for this station.</p>
+        <p>Unique moth species by month across all synced years. Each row also shows how many active moth nights contributed to that month.</p>
       </div>
       <div class="profile-chart">{_seasonal_bars(profile)}</div>
     </section>
@@ -1761,7 +1830,7 @@ def _station_profile_page(station: Station, profile: dict[str, Any], color: str)
     <section>
       <div class="section-head">
         <h2>Phenology calendar</h2>
-        <p>Weekly unique moth species for this station across all synced years. Darker weeks have richer station activity.</p>
+        <p>Weekly unique moth species across all synced years. Each cell includes active moth-night coverage for that week.</p>
       </div>
       <div class="profile-chart">{_profile_phenology_calendar(profile)}</div>
     </section>
@@ -1769,7 +1838,7 @@ def _station_profile_page(station: Station, profile: dict[str, Any], color: str)
     <section>
       <div class="section-head">
         <h2>Species accumulation</h2>
-        <p>Recent milestones in the running species list for this station.</p>
+        <p>Running species list, with active moth-night coverage in each chart point.</p>
       </div>
       <div class="profile-chart">{_accumulation_bars(profile)}</div>
     </section>
@@ -3505,12 +3574,99 @@ h2 {
   font-size: 0.8rem;
   font-weight: 500;
 }
+.month-bar strong {
+  color: var(--ink);
+  text-align: right;
+}
+.month-bar small,
+.sampling-year-row small {
+  color: var(--muted);
+  font-size: 0.66rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
 .month-bar div {
   height: 12px;
   background: #191a12;
   border: 1px solid var(--line);
 }
 .month-bar i {
+  display: block;
+  height: 100%;
+  background: var(--amber);
+}
+.sampling-context {
+  display: grid;
+  gap: 22px;
+  padding: 2px 0;
+}
+.sampling-context-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
+  margin: 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+.sampling-context-metrics > div {
+  min-width: 0;
+  padding: 14px 16px;
+  border-right: 1px solid var(--line);
+}
+.sampling-context-metrics > div:last-child {
+  border-right: 0;
+}
+.sampling-context-metrics dt,
+.sampling-context-metrics small,
+.sampling-year-chart figcaption {
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.7rem;
+  line-height: 1.2;
+}
+.sampling-context-metrics dd {
+  margin: 5px 0 3px;
+  color: var(--ink);
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 1.35rem;
+  font-weight: 720;
+  font-variant-numeric: tabular-nums;
+}
+.sampling-year-chart {
+  max-width: 620px;
+  margin: 0;
+}
+.sampling-year-chart figcaption {
+  margin-bottom: 9px;
+}
+.sampling-year-list {
+  display: grid;
+  gap: 7px;
+}
+.sampling-year-row {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) minmax(110px, auto);
+  gap: 10px;
+  align-items: center;
+}
+.sampling-year-row > span,
+.sampling-year-row strong {
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.76rem;
+  font-weight: 500;
+}
+.sampling-year-row strong {
+  color: var(--ink);
+  text-align: right;
+  white-space: nowrap;
+}
+.sampling-year-row > div {
+  height: 10px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  background: #191a12;
+}
+.sampling-year-row i {
   display: block;
   height: 100%;
   background: var(--amber);
@@ -5246,6 +5402,10 @@ footer div {
   }
   .night-card {
     grid-template-rows: 132px minmax(126px, auto);
+  }
+  .sampling-context-metrics > div:last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+    border-right: 0;
   }
 }
 """

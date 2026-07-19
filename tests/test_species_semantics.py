@@ -118,6 +118,41 @@ class SpeciesSemanticsTests(unittest.TestCase):
         self.assertEqual(trends["network_accumulation"][-1]["species"], 2)
         self.assertNotIn(201, {row["taxon_id"] for row in trends["phenology"]})
 
+    def test_station_profile_exposes_night_coverage_and_upload_lag(self) -> None:
+        with connect(self.settings.database) as conn:
+            conn.executemany(
+                """
+                INSERT INTO observations (
+                    station_id, inat_obs_id, observed_on, observed_at, created_at,
+                    taxon_id, taxon_name, common_name, rank, url
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        "station-a", 8, "2026-07-11", "2026-07-11T20:00:00-04:00",
+                        "2026-07-12T02:00:00Z", 103, "Species gamma", "Gamma", "species",
+                        "https://example.test/8",
+                    ),
+                    (
+                        "station-a", 9, "2026-07-12", "2026-07-12T20:00:00-04:00",
+                        "2026-07-13T04:00:00Z", 104, "Species delta", "Delta", "species",
+                        "https://example.test/9",
+                    ),
+                ],
+            )
+
+        profile = station_profile(self.settings, "station-a")
+
+        self.assertEqual(profile["active_sessions"], 3)
+        self.assertEqual(profile["seasonal_richness"][6]["nights"], 3)
+        self.assertEqual(
+            profile["yearly_coverage"],
+            [{"year": 2026, "nights": 3, "species": 4}],
+        )
+        self.assertEqual(profile["upload_timing"]["timestamped_records"], 2)
+        self.assertEqual(profile["upload_timing"]["median_lag_minutes"], 180)
+        self.assertEqual(profile["accumulation"][-1]["nights"], 3)
+
 
 if __name__ == "__main__":
     unittest.main()
