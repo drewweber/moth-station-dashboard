@@ -1316,27 +1316,46 @@ def station_profile(settings: Settings, station_id: str) -> dict[str, Any]:
         ),
     )[:4]
 
-    station_uniques = []
-    for unique in unique_taxa:
-        if unique["station_id"] != station_id or unique["taxon_id"] not in taxa_seen:
+    DISTINCTIVE_NETWORK_CEILING = 10
+
+    distinctive_candidates = []
+    for taxon in taxa:
+        if taxon["taxon_id"] not in taxa_seen:
             continue
-        evidence = taxon_evidence.get(unique["taxon_id"], {})
+        entry = taxon["stations"].get(station_id)
+        if not entry:
+            continue
+        network_count = taxon["total_count"]
+        flags = []
+        if entry.get("is_state_first"):
+            flags.append("state iNat first")
+        if entry.get("is_county_first"):
+            flags.append("county iNat first")
+        if entry.get("first_among_tracked"):
+            flags.append("first among tracked")
+        if not flags and network_count >= DISTINCTIVE_NETWORK_CEILING:
+            continue
+        evidence = taxon_evidence.get(taxon["taxon_id"], {})
         seen_dates = sorted(evidence.get("dates", set()))
-        station_uniques.append({
-            **unique,
-            "session_count": len(seen_dates),
-            "first": seen_dates[0] if seen_dates else unique.get("first"),
-            "latest": seen_dates[-1] if seen_dates else unique.get("latest"),
+        distinctive_candidates.append({
+            "taxon_id": taxon["taxon_id"],
+            "label": taxon["label"],
+            "count": entry["count"],
+            "network_count": network_count,
+            "flags": flags,
+            "first": seen_dates[0] if seen_dates else entry.get("first"),
+            "latest": seen_dates[-1] if seen_dates else entry.get("latest"),
             "url": evidence.get("url"),
         })
-    repeated_exclusives = sorted(
-        [item for item in station_uniques if item["session_count"] >= 2],
-        key=lambda item: (-item["session_count"], -item["count"], item["label"]),
-    )[:8]
-    one_night_leads = sorted(
-        [item for item in station_uniques if item["session_count"] == 1],
+
+    distinctive_uniques = sorted(
+        [item for item in distinctive_candidates if item["network_count"] <= 1],
         key=lambda item: (item["latest"] or date.min, item["label"]),
         reverse=True,
+    )[:8]
+    distinctive_rare = sorted(
+        [item for item in distinctive_candidates if item["network_count"] > 1],
+        key=lambda item: (item["network_count"], item["label"]),
     )[:8]
 
     recent = sorted(
@@ -1450,19 +1469,160 @@ def station_profile(settings: Settings, station_id: str) -> dict[str, Any]:
         "accumulation": accumulation,
         "signature_species": signature,
         "distinctive_records": {
-            "total": len(station_uniques),
-            "repeated_count": sum(
-                1 for item in station_uniques if item["session_count"] >= 2
+            "total": len(distinctive_candidates),
+            "unique_count": len(distinctive_uniques),
+            "rare_count": len(
+                [item for item in distinctive_candidates if item["network_count"] > 1]
             ),
-            "one_night_count": sum(
-                1 for item in station_uniques if item["session_count"] == 1
-            ),
-            "repeated": repeated_exclusives,
-            "one_night": one_night_leads,
+            "uniques": distinctive_uniques,
+            "rare": distinctive_rare,
         },
         "expected_next": expected_next,
         "recent": recent,
         "narrative": " ".join(narrative_bits) if narrative_bits else "This station is configured and waiting for synced moth observations.",
+    }
+
+
+def weekly_recap(settings: Settings, station_id: str, today: date | None = None) -> dict[str, Any]:
+    """"Your Week at the Sheet": a recap of the most recently completed
+    Monday-through-Sunday week for one station.
+
+    Weeks are defined by session date (already night-cutoff-adjusted by
+    session_date()), so a "week" is exactly the 7 moth nights from Monday
+    through Sunday. The recap always describes the most recently
+    *completed* week as of `today`, never a week still in progress.
+    """
+    today = today or date.today()
+    current_week_monday = today - timedelta(days=today.weekday())
+    week_start = current_week_monday - timedelta(days=7)
+    week_end = week_start + timedelta(days=6)
+    previous_week_start = week_start - timedelta(days=7)
+    previous_week_end = week_start - timedelta(days=1)
+
+    rows = load_rows(settings)
+    species_rows = [row for row in rows if row.get("taxon_id") and is_species(row)]
+
+    def taxa_counts_for(sid: str, start: date, end: date) -> dict[int, int]:
+        counts: dict[int, int] = {}
+        for row in species_rows:
+            if row["station_id"] != sid:
+                continue
+            sd = row.get("session_date")
+            if not sd or not (start <= sd <= end):
+                continue
+            taxon_id = int(row["taxon_id"])
+            counts[taxon_id] = counts.get(taxon_id, 0) + 1
+        return counts
+
+    this_week = taxa_counts_for(station_id, week_start, week_end)
+    if not this_week:
+        return {
+            "station_id": station_id,
+            "week_start": week_start,
+            "week_end": week_end,
+            "has_data": False,
+        }
+
+    previous_week = taxa_counts_for(station_id, previous_week_start, previous_week_end)
+
+    taxa = station_taxa(settings)
+    network_counts = {taxon["taxon_id"]: taxon["total_count"] for taxon in taxa}
+    labels = {taxon["taxon_id"]: taxon["label"] for taxon in taxa}
+    first_dates: dict[int, date] = {}
+    for taxon in taxa:
+        entry = taxon["stations"].get(station_id)
+        if entry and entry.get("first"):
+            first_dates[taxon["taxon_id"]] = entry["first"]
+
+    evidence: dict[int, dict[str, Any]] = {}
+    for row in species_rows:
+        if row["station_id"] != station_id:
+            continue
+        taxon_id = int(row["taxon_id"])
+        if taxon_id not in this_week:
+            continue
+        sd = row.get("session_date")
+        item = evidence.setdefault(taxon_id, {"photo_url": None, "photo_date": None, "url": None})
+        if row.get("photo_url") and (item["photo_date"] is None or (sd and sd >= item["photo_date"])):
+            item["photo_url"] = row["photo_url"]
+            item["photo_date"] = sd
+            item["url"] = row.get("url")
+        elif row.get("url") and not item["url"]:
+            item["url"] = row["url"]
+
+    def species_summary(taxon_id: int) -> dict[str, Any]:
+        return {
+            "taxon_id": taxon_id,
+            "label": labels.get(taxon_id, "Unknown species"),
+            "count": this_week[taxon_id],
+            "network_count": network_counts.get(taxon_id, this_week[taxon_id]),
+            "url": evidence.get(taxon_id, {}).get("url"),
+            "photo_url": evidence.get(taxon_id, {}).get("photo_url"),
+        }
+
+    new_in_town = sorted(
+        (
+            {**species_summary(taxon_id), "first": first_dates[taxon_id]}
+            for taxon_id in this_week
+            if first_dates.get(taxon_id) and week_start <= first_dates[taxon_id] <= week_end
+        ),
+        key=lambda item: (item["first"], item["label"]),
+    )
+
+    frequent_flyer_id = min(
+        this_week,
+        key=lambda taxon_id: (-this_week[taxon_id], labels.get(taxon_id, "")),
+    )
+    moth_of_the_week_id = min(
+        this_week,
+        key=lambda taxon_id: (
+            network_counts.get(taxon_id, 10**9),
+            0 if evidence.get(taxon_id, {}).get("photo_url") else 1,
+            labels.get(taxon_id, ""),
+        ),
+    )
+
+    nights_active = len({
+        row["session_date"] for row in species_rows
+        if row["station_id"] == station_id
+        and row.get("session_date")
+        and week_start <= row["session_date"] <= week_end
+    })
+
+    this_week_species = set(this_week)
+    other_station_ids = {
+        row["station_id"] for row in species_rows if row["station_id"] != station_id
+    }
+    station_names = {row["station_id"]: row["station_name"] for row in rows}
+    shared_species: set[int] = set()
+    top_shared_station_id = None
+    top_shared_count = 0
+    for other_id in other_station_ids:
+        other_week = taxa_counts_for(other_id, week_start, week_end)
+        overlap = this_week_species & set(other_week)
+        if not overlap:
+            continue
+        shared_species |= overlap
+        if len(overlap) > top_shared_count:
+            top_shared_count = len(overlap)
+            top_shared_station_id = other_id
+
+    return {
+        "station_id": station_id,
+        "week_start": week_start,
+        "week_end": week_end,
+        "has_data": True,
+        "total_species": len(this_week_species),
+        "previous_total_species": len(previous_week),
+        "trend": len(this_week_species) - len(previous_week),
+        "new_in_town": new_in_town[:8],
+        "frequent_flyer": species_summary(frequent_flyer_id),
+        "moth_of_the_week": species_summary(moth_of_the_week_id),
+        "nights_active": nights_active,
+        "nights_total": 7,
+        "total_shared_species": len(shared_species),
+        "top_shared_station_name": station_names.get(top_shared_station_id),
+        "top_shared_count": top_shared_count,
     }
 
 

@@ -230,6 +230,12 @@ class RecordRenderingTests(unittest.TestCase):
         self.assertIn('data-photo-url="https://example.test/0.jpg"', html)
         self.assertIn('data-href="https://example.test/observations/0"', html)
 
+    def test_archive_species_names_link_to_the_inaturalist_observation(self) -> None:
+        html = _record_table(records(3))
+
+        self.assertIn('<td><a href="https://example.test/observations/0">Species 0000</a></td>', html)
+        self.assertIn('<td><a href="https://example.test/observations/1">Species 0001</a></td>', html)
+
     def test_archive_rows_tolerate_missing_photo_or_link(self) -> None:
         rows = [
             {
