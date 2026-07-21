@@ -26,6 +26,7 @@ from .analysis import (
     station_taxa,
     trend_summary,
     unique_station_taxa,
+    weekly_recap,
 )
 from .config import Settings, Station, active_stations
 from .db import connect, init_db
@@ -545,7 +546,7 @@ def _record_table(rows: list[dict[str, Any]]) -> str:
               data-first="{h(row["first"])}"
               data-photo-url="{h(row.get("photo_url") or "")}"
               data-href="{h(row.get("url") or "")}">
-              <td>{h(row["label"])}</td>
+              <td>{f'<a href="{h(row["url"])}">{h(row["label"])}</a>' if row.get("url") else h(row["label"])}</td>
               <td>{h(row["station_name"])}</td>
               <td data-sort-value="{h(row['first'])}">{h(row["first"])}</td>
               <td>{_flag_list(row["flags"])}</td>
@@ -1285,34 +1286,134 @@ def _signature_species_gallery(rows: list[dict[str, Any]]) -> str:
     return f'<div class="signature-gallery">{"".join(cards)}</div>'
 
 
+def _recap_species_line(item: dict[str, Any], detail: str) -> str:
+    label = h(item["label"])
+    title = f'<a href="{h(item["url"])}">{label}</a>' if item.get("url") else label
+    photo = (
+        f'<img src="{h(item["photo_url"])}" alt="{label}" loading="lazy">'
+        if item.get("photo_url")
+        else '<div class="record-placeholder" aria-hidden="true">no photo</div>'
+    )
+    return f"""
+      <div class="recap-spotlight">
+        <div class="recap-spotlight-image">{photo}</div>
+        <div class="recap-spotlight-copy">
+          <h4>{title}</h4>
+          <p>{h(detail)}</p>
+        </div>
+      </div>
+    """
+
+
+def _weekly_recap(data: dict[str, Any]) -> str:
+    week_range = f"{h(data['week_start'])} to {h(data['week_end'])}"
+    if not data.get("has_data"):
+        return f"""
+          <p class="empty">Last week ({week_range}) was quiet at this station -- no species-level observations recorded.</p>
+        """
+
+    if data["previous_total_species"] == 0:
+        trend_copy = "no prior week to compare yet"
+    elif data["trend"] > 0:
+        trend_copy = f"up {data['trend']} from {data['previous_total_species']} the week before"
+    elif data["trend"] < 0:
+        trend_copy = f"down {abs(data['trend'])} from {data['previous_total_species']} the week before"
+    else:
+        trend_copy = f"steady with {data['previous_total_species']} the week before"
+
+    new_in_town = data["new_in_town"]
+    new_in_town_html = (
+        "".join(
+            f"""
+            <li>
+              <span>{f'<a href="{h(item["url"])}">{h(item["label"])}</a>' if item.get("url") else h(item["label"])}</span>
+              <small>first seen here {h(item["first"])}</small>
+            </li>
+            """
+            for item in new_in_town
+        )
+        if new_in_town
+        else '<li class="recap-empty-line">No brand-new arrivals at this station last week.</li>'
+    )
+
+    if data["top_shared_station_name"]:
+        shared_copy = (
+            f"Shared the most species with {h(data['top_shared_station_name'])} "
+            f"({h(data['top_shared_count'])} species in common)."
+        )
+    else:
+        shared_copy = "No species overlap with other tracked stations last week."
+
+    return f"""
+      <p class="recap-range">{week_range}</p>
+      <div class="recap-grid">
+        <article class="recap-card recap-headline">
+          <strong>{h(data['total_species'])}</strong>
+          <span>species recorded last week</span>
+          <small>{h(trend_copy)}</small>
+        </article>
+        <article class="recap-card recap-card-wide">
+          <p class="recap-card-label">Moth of the Week</p>
+          {_recap_species_line(
+              data['moth_of_the_week'],
+              f"{data['moth_of_the_week']['network_count']} tracked network record"
+              + ("" if data['moth_of_the_week']['network_count'] == 1 else "s")
+              + " -- the rarest visitor of the week.",
+          )}
+        </article>
+        <article class="recap-card recap-card-wide">
+          <p class="recap-card-label">Frequent Flyer</p>
+          {_recap_species_line(
+              data['frequent_flyer'],
+              f"Seen {data['frequent_flyer']['count']} times here last week, more than anything else.",
+          )}
+        </article>
+        <article class="recap-card">
+          <strong>{h(data['nights_active'])}/{h(data['nights_total'])}</strong>
+          <span>moth nights with uploads</span>
+          <small>Perfect attendance is 7 of 7.</small>
+        </article>
+        <article class="recap-card recap-card-wide">
+          <p class="recap-card-label">New in Town</p>
+          <ol class="distinctive-list recap-new-list">{new_in_town_html}</ol>
+        </article>
+        <article class="recap-card recap-card-wide">
+          <p class="recap-card-label">How You Stacked Up</p>
+          <p class="recap-stacked-copy">
+            {h(data['total_species'])} species here, {h(data['total_shared_species'])} of them also seen
+            elsewhere in the network last week. {shared_copy}
+          </p>
+        </article>
+      </div>
+    """
+
+
 def _distinctive_records(data: dict[str, Any]) -> str:
     if not data.get("total"):
-        return '<p class="empty">No station-only species are available yet.</p>'
+        return '<p class="empty">No firsts or network-rare species are available yet.</p>'
 
-    def record_rows(rows: list[dict[str, Any]], repeated: bool) -> str:
+    def record_rows(rows: list[dict[str, Any]], unique: bool) -> str:
         if not rows:
             return '<p class="distinctive-empty">None in the current dataset.</p>'
         items = []
         for row in rows:
             label = h(row["label"])
-            if repeated:
-                dates = str(row["first"])
-                if row.get("latest") and row["latest"] != row["first"]:
-                    dates += f" to {row['latest']}"
-                detail = (
-                    f"{row['session_count']} moth nights · {row['count']} observations · {dates}"
-                )
-            else:
-                detail = f"One moth night · {row['latest']}"
+            count_detail = (
+                "Only tracked record, network-wide"
+                if unique
+                else f"{row['network_count']} tracked network records"
+            )
+            detail = f"{count_detail} · {row['count']} observations here · last {row['latest']}"
             title = (
                 f'<a href="{h(row["url"])}">{label}</a>'
                 if row.get("url")
                 else label
             )
+            flags = _flag_list(row["flags"]) if row.get("flags") else ""
             items.append(
                 f"""
                 <li>
-                  <span>{title}</span>
+                  <span>{title}{flags}</span>
                   <small>{h(detail)}</small>
                 </li>
                 """
@@ -1322,23 +1423,23 @@ def _distinctive_records(data: dict[str, Any]) -> str:
     return f"""
       <div class="distinctive-overview" aria-label="Distinctive record summary">
         <strong>{h(data['total'])}</strong>
-        <span>species currently found only here</span>
-        <small>{h(data['repeated_count'])} repeated across nights · {h(data['one_night_count'])} single-night records</small>
+        <span>firsts or network-rare species recorded here</span>
+        <small>{h(data['unique_count'])} unique network-wide · {h(data['rare_count'])} with 2-10 tracked network records</small>
       </div>
       <div class="distinctive-ledger">
         <section class="distinctive-group">
           <div class="distinctive-heading">
-            <p>Repeated signal</p>
-            <span>Station-only species returning on multiple moth nights.</span>
+            <p>Uniques</p>
+            <span>The only tracked record of this species anywhere in the network.</span>
           </div>
-          {record_rows(data['repeated'], True)}
+          {record_rows(data['uniques'], True)}
         </section>
         <section class="distinctive-group">
           <div class="distinctive-heading">
-            <p>Worth confirming</p>
-            <span>Single-night leads to watch for here and across the network.</span>
+            <p>2-10 network records</p>
+            <span>Rare across the whole network, or a state/county/network first, and worth a second look.</span>
           </div>
-          {record_rows(data['one_night'], False)}
+          {record_rows(data['rare'], False)}
         </section>
       </div>
     """
@@ -1761,7 +1862,7 @@ def _snapshot_payload(settings: Settings, stations: list[Station], taxa: list[di
     }
 
 
-def _station_profile_page(station: Station, profile: dict[str, Any], color: str) -> str:
+def _station_profile_page(station: Station, profile: dict[str, Any], recap: dict[str, Any], color: str) -> str:
     location = station.public_location or "Configured station"
     website = (
         f'<a href="{h(station.website)}">iNaturalist source</a>'
@@ -1818,6 +1919,14 @@ def _station_profile_page(station: Station, profile: dict[str, Any], color: str)
 
     <section>
       <div class="section-head">
+        <h2>Your Week at the Sheet</h2>
+        <p>A recap of the most recently completed Monday-through-Sunday week at this station.</p>
+      </div>
+      {_weekly_recap(recap)}
+    </section>
+
+    <section>
+      <div class="section-head">
         <h2>Sampling context</h2>
         <p>Automatically derived from species-level iNaturalist timestamps. These records show active moth nights and upload timing, not trap duration or light setup.</p>
       </div>
@@ -1867,7 +1976,7 @@ def _station_profile_page(station: Station, profile: dict[str, Any], color: str)
     <section>
       <div class="section-head">
         <h2>Distinctive records</h2>
-        <p>Species found nowhere else in the tracked network, separated into repeat evidence and one-night leads.</p>
+        <p>State, county, or network firsts recorded here, plus anything with fewer than 10 tracked network records overall.</p>
       </div>
       {_distinctive_records(profile["distinctive_records"])}
     </section>
@@ -4086,6 +4195,117 @@ h2 {
   color: var(--muted);
   font-size: 0.76rem;
 }
+.recap-range {
+  margin: 0 0 16px;
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.82rem;
+  text-transform: uppercase;
+}
+.recap-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+}
+.recap-card {
+  padding: 16px 18px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  min-width: 0;
+}
+.recap-card-wide {
+  grid-column: span 2;
+}
+@media (max-width: 720px) {
+  .recap-card-wide {
+    grid-column: span 1;
+  }
+}
+.recap-headline strong {
+  display: block;
+  color: var(--amber);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 2.6rem;
+  font-weight: 500;
+  line-height: 1;
+}
+.recap-headline span {
+  display: block;
+  margin-top: 6px;
+  color: var(--ink);
+}
+.recap-headline small {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+.recap-card-label {
+  margin: 0 0 10px;
+  color: var(--amber);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+}
+.recap-spotlight {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 14px;
+  align-items: center;
+}
+.recap-spotlight-image {
+  width: 72px;
+  height: 72px;
+  overflow: hidden;
+  border-radius: 6px;
+  background: var(--panel);
+}
+.recap-spotlight-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.recap-spotlight-image .record-placeholder {
+  height: 100%;
+  display: grid;
+  place-items: center;
+  color: var(--faint);
+  font-size: 0.7rem;
+}
+.recap-spotlight-copy h4 {
+  margin: 0 0 4px;
+  font-size: 1rem;
+  line-height: 1.25;
+}
+.recap-spotlight-copy p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+.recap-new-list {
+  counter-reset: none;
+}
+.recap-new-list li::before {
+  content: none;
+}
+.recap-new-list li {
+  grid-template-columns: minmax(0, 1fr);
+}
+.recap-new-list span,
+.recap-new-list small {
+  grid-column: 1;
+}
+.recap-empty-line {
+  border-top: none !important;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+.recap-stacked-copy {
+  margin: 0;
+  color: var(--ink);
+  line-height: 1.45;
+}
 .trend-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -5744,10 +5964,12 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
         if not station.enabled:
             continue
         profile = station_profile(settings, station.id)
+        recap = weekly_recap(settings, station.id)
         (stations_dir / f"{station.id}.html").write_text(
             _station_profile_page(
                 station,
                 profile,
+                recap,
                 station_colors.get(station.id, station.color or FALLBACK_COLORS[0]),
             ),
             encoding="utf-8",
