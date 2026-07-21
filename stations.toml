@@ -83,18 +83,14 @@ notes = "Moth observations by iandavies within 100 m of Dove Dr."
 id = "palpebrata-second-st"
 name = "Second St"
 enabled = true
-user_login = "palpebrata"
-lat = 43.3233056913
-lng = -77.7173089959
-radius = 0.1
-public_live_precise_query = true
+project_id = "second-street"
 county_place_id = 1842
 state_place_id = 48
 color = "#4fbf7f"
 timezone = "America/New_York"
 public_location = "Second St area, Monroe County, NY"
-website = "https://www.inaturalist.org/people/palpebrata"
-notes = "Moth observations by palpebrata within 100 m of observation 382290746."
+website = "https://www.inaturalist.org/projects/second-street"
+notes = "Moth observations from the Second Street iNaturalist project."
 
 [[stations]]
 id = "durfee-hill"
