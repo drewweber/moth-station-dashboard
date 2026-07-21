@@ -539,7 +539,12 @@ def _record_table(rows: list[dict[str, Any]]) -> str:
         body.append(
             f"""
             <tr data-record-row data-flags="{h('|'.join(row["flags"]))}"
-              data-station-id="{h(row["station_id"])}">
+              data-station-id="{h(row["station_id"])}"
+              data-label="{h(row["label"])}"
+              data-station-name="{h(row["station_name"])}"
+              data-first="{h(row["first"])}"
+              data-photo-url="{h(row.get("photo_url") or "")}"
+              data-href="{h(row.get("url") or "")}">
               <td>{h(row["label"])}</td>
               <td>{h(row["station_name"])}</td>
               <td data-sort-value="{h(row['first'])}">{h(row["first"])}</td>
@@ -2055,20 +2060,62 @@ function initUniqueFilter() {
   });
 }
 
+function recordEscapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+  }[char]));
+}
+
+function buildRecordCardHtml(row) {
+  const label = row.dataset.label || "";
+  const stationName = row.dataset.stationName || "";
+  const first = row.dataset.first || "";
+  const flags = (row.dataset.flags || "").split("|").filter(Boolean);
+  const photoUrl = row.dataset.photoUrl || "";
+  const href = row.dataset.href || "";
+  const image = photoUrl
+    ? `<img src="${recordEscapeHtml(photoUrl)}" alt="${recordEscapeHtml(label)}" loading="lazy">`
+    : '<div class="record-placeholder" aria-hidden="true">no photo</div>';
+  const title = href
+    ? `<a href="${recordEscapeHtml(href)}">${recordEscapeHtml(label)}</a>`
+    : recordEscapeHtml(label);
+  const flagHtml = flags.map((flag) => `<span class="flag">${recordEscapeHtml(flag)}</span>`).join("");
+  return `
+    <article class="record-card">
+      <div class="record-image">${image}</div>
+      <div class="record-copy">
+        <div class="record-flags">${flagHtml}</div>
+        <h3>${title}</h3>
+        <p>${recordEscapeHtml(stationName)} · ${recordEscapeHtml(first)}</p>
+      </div>
+    </article>
+  `;
+}
+
 function initRecordFilters() {
   const section = document.querySelector("#records");
   if (!section) return;
   const typeSelect = section.querySelector('[data-record-filter="type"]');
   const locationSelect = section.querySelector('[data-record-filter="location"]');
   const emptyMessage = section.querySelector("[data-record-empty]");
-  const cardGrid = section.querySelector(".record-grid");
+  const cardGrid = section.querySelector("[data-record-grid]");
+  const gridControls = section.querySelector("[data-record-grid-controls]");
+  const gridCount = section.querySelector("[data-record-grid-count]");
+  const gridExpand = section.querySelector("[data-record-grid-expand]");
   const archive = section.querySelector(".record-archive");
   const table = section.querySelector("[data-record-table]");
   const showMore = section.querySelector("[data-record-show-more]");
   const count = section.querySelector("[data-record-count]");
   if (!typeSelect || !locationSelect) return;
   const pageSize = Number(showMore?.dataset.pageSize || 100);
+  const cardPageSize = Number(gridExpand?.dataset.pageSize || 12);
+  const originalGridHtml = cardGrid ? cardGrid.innerHTML : "";
   let visibleLimit = pageSize;
+  let cardsExpanded = false;
 
   const apply = () => {
     const type = typeSelect.value;
@@ -2092,7 +2139,28 @@ function initRecordFilters() {
     });
 
     if (filterActive && archive) archive.open = true;
-    if (cardGrid) cardGrid.hidden = filterActive;
+
+    if (cardGrid) {
+      if (filterActive) {
+        const cap = cardsExpanded ? matching.length : cardPageSize;
+        cardGrid.innerHTML = matching.slice(0, cap).map(buildRecordCardHtml).join("");
+      } else {
+        cardGrid.innerHTML = originalGridHtml;
+      }
+    }
+    if (gridControls) gridControls.hidden = !filterActive;
+    if (gridCount) {
+      gridCount.textContent = matching.length <= cardPageSize
+        ? `Showing all ${matching.length} matching photo${matching.length === 1 ? "" : "s"}`
+        : cardsExpanded
+          ? `Showing all ${matching.length} matching photos`
+          : `Showing ${Math.min(cardPageSize, matching.length)} of ${matching.length} matching photos`;
+    }
+    if (gridExpand) {
+      gridExpand.hidden = matching.length <= cardPageSize;
+      gridExpand.textContent = cardsExpanded ? "Show fewer photos" : `Show all ${matching.length} matching photos`;
+    }
+
     if (emptyMessage) emptyMessage.hidden = matching.length > 0;
     if (showMore) {
       showMore.hidden = filterActive || visibleLimit >= rows.length;
@@ -2108,12 +2176,17 @@ function initRecordFilters() {
 
   const filterChanged = () => {
     visibleLimit = pageSize;
+    cardsExpanded = false;
     apply();
   };
   typeSelect.addEventListener("change", filterChanged);
   locationSelect.addEventListener("change", filterChanged);
   showMore?.addEventListener("click", () => {
     visibleLimit += pageSize;
+    apply();
+  });
+  gridExpand?.addEventListener("click", () => {
+    cardsExpanded = !cardsExpanded;
     apply();
   });
   table?.addEventListener("table-sorted", () => {
@@ -2521,10 +2594,23 @@ function sharedStationPills(taxonId, stationId) {
   </div>`;
 }
 
-function renderSpeciesList(species, emptyText, excludedSpecies = new Set(), limit = 24, rarityFirst = false, stationId = "") {
+function regionalFirstBadge(regionalCount) {
+  if (!Number.isFinite(regionalCount) || regionalCount > 2) return "";
+  const tiers = [
+    { rank: "1", tier: "gold", label: "First tracked network record of this species" },
+    { rank: "2", tier: "silver", label: "Second tracked network record of this species" },
+    { rank: "3", tier: "bronze", label: "Third tracked network record of this species" },
+  ];
+  const tier = tiers[regionalCount];
+  if (!tier) return "";
+  return `<span class="regional-badge regional-badge-${tier.tier}" title="${escapeHtml(tier.label)}" aria-label="${escapeHtml(tier.label)}">${tier.rank}</span>`;
+}
+
+function renderSpeciesList(species, emptyText, excludedSpecies = new Set(), limit = 24, rarityFirst = false, stationId = "", showRegional = null, showBadge = false) {
   const excluded = excludedSpecies instanceof Map
     ? new Set(excludedSpecies.keys())
     : excludedSpecies;
+  const includeRegional = showRegional === null ? rarityFirst : showRegional;
   const sortedItems = Array.from(species.values())
     .filter((item) => !excluded.has(item.taxonId))
     .sort((a, b) => rarityFirst
@@ -2538,7 +2624,7 @@ function renderSpeciesList(species, emptyText, excludedSpecies = new Set(), limi
         <a href="${escapeHtml(item.url)}">${escapeHtml(item.label)}</a>
         ${sharedStationPills(item.taxonId, stationId)}
       </div>
-      <span class="live-species-meta">${rarityFirst
+      <span class="live-species-meta">${showBadge ? regionalFirstBadge(item.regionalCount) : ""}${includeRegional
         ? `${item.count} event · ${item.regionalCount} regional`
         : item.count > 1 ? `${item.count} obs` : "1 obs"}</span>
     </li>
@@ -2645,7 +2731,7 @@ function renderStationSummaries() {
         <div class="live-station-lists">
           <div class="live-firsts">
             <h3>New species this event</h3>
-            ${renderSpeciesList(summary.stationFirstSpecies, summary.checked ? "No new station species in this event yet." : "Waiting for the first check.", new Set(), 20, false, station.id)}
+            ${renderSpeciesList(summary.stationFirstSpecies, summary.checked ? "No new station species in this event yet." : "Waiting for the first check.", new Set(), 20, false, station.id, true, true)}
           </div>
           <div class="live-other">
             <details>
@@ -3068,6 +3154,29 @@ def _live_page(live_snapshot: dict) -> str:
     flex: 0 0 auto;
     text-align: right;
     white-space: nowrap;
+  }}
+  .regional-badge {{
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 15px;
+    height: 15px;
+    margin-right: 5px;
+    border-radius: 50%;
+    font-size: 0.6rem;
+    font-weight: 700;
+    line-height: 1;
+    color: #2b2410;
+    vertical-align: -2px;
+  }}
+  .regional-badge-gold {{
+    background: #e8c14d;
+  }}
+  .regional-badge-silver {{
+    background: #c7cdd6;
+  }}
+  .regional-badge-bronze {{
+    background: #c98a4b;
   }}
   .live-shared-stations {{
     display: flex;
@@ -4751,7 +4860,8 @@ h2 {
 .record-archive[open] summary {
   margin-bottom: 8px;
 }
-.record-archive-controls {
+.record-archive-controls,
+.record-grid-controls {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -4760,7 +4870,11 @@ h2 {
   color: var(--muted);
   font-size: 0.86rem;
 }
-.record-archive-controls button {
+.record-grid-controls {
+  padding: 0 2px 14px;
+}
+.record-archive-controls button,
+.record-grid-controls button {
   border: 1px solid var(--amber);
   border-radius: 4px;
   padding: 8px 12px;
@@ -4769,10 +4883,12 @@ h2 {
   font: inherit;
   cursor: pointer;
 }
-.record-archive-controls button:hover {
+.record-archive-controls button:hover,
+.record-grid-controls button:hover {
   background: color-mix(in srgb, var(--amber) 10%, transparent);
 }
-.record-archive-controls button:focus-visible {
+.record-archive-controls button:focus-visible,
+.record-grid-controls button:focus-visible {
   outline: 3px solid var(--focus);
   outline-offset: 2px;
 }
@@ -5541,7 +5657,11 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
         <p>The newest county, state, and tracked-network firsts, ordered by observation date. Filter by type or location to see everything that matches, not just the newest batch.</p>
       </div>
       {_record_filters(stations)}
-      <div class="record-grid">{_record_cards(records)}</div>
+      <div class="record-grid" data-record-grid>{_record_cards(records)}</div>
+      <div class="record-grid-controls" data-record-grid-controls hidden>
+        <span data-record-grid-count aria-live="polite"></span>
+        <button type="button" data-record-grid-expand data-page-size="{RECORD_CARD_PREVIEW_LIMIT}">Show all matching photos</button>
+      </div>
       <details class="record-archive">
         <summary>Browse all flagged firsts ({h(len(records))})</summary>
         <div class="table-wrap">{_record_table(records)}</div>

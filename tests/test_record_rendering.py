@@ -218,6 +218,64 @@ class RecordRenderingTests(unittest.TestCase):
         self.assertIn('data-record-filter="location"', DASHBOARD_JS)
         self.assertIn('archive.open = true', DASHBOARD_JS)
 
+    def test_archive_rows_carry_card_rebuild_data(self) -> None:
+        # The filtered photo grid is rebuilt client-side from data embedded
+        # on the (always-complete) table rows, since the server-rendered
+        # card grid intentionally only ever contains a bounded preview.
+        html = _record_table(records(5))
+
+        self.assertIn('data-label="Species 0000"', html)
+        self.assertIn('data-station-name="Test Station"', html)
+        self.assertIn('data-first="2026-07-01"', html)
+        self.assertIn('data-photo-url="https://example.test/0.jpg"', html)
+        self.assertIn('data-href="https://example.test/observations/0"', html)
+
+    def test_archive_rows_tolerate_missing_photo_or_link(self) -> None:
+        rows = [
+            {
+                "label": "No Photo Moth",
+                "station_name": "Test Station",
+                "station_id": "test-station",
+                "first": "2026-07-01",
+                "flags": ["first among tracked"],
+                "photo_url": None,
+                "url": None,
+            }
+        ]
+
+        html = _record_table(rows)
+
+        self.assertIn('data-photo-url=""', html)
+        self.assertIn('data-href=""', html)
+
+    def test_filtered_photo_grid_rebuilds_from_table_data_instead_of_hiding(self) -> None:
+        # Earlier behavior force-hid the entire card grid whenever a filter
+        # was active, which read to users as "the photos just disappear."
+        # The grid should instead be rebuilt (bounded, with an explicit
+        # expand action), never blanket-hidden.
+        self.assertNotIn("cardGrid.hidden = filterActive", DASHBOARD_JS)
+        self.assertIn("function buildRecordCardHtml", DASHBOARD_JS)
+        self.assertIn("data-record-grid", DASHBOARD_JS)
+        self.assertIn("data-record-grid-expand", DASHBOARD_JS)
+        self.assertIn("matching.slice(0, cap).map(buildRecordCardHtml)", DASHBOARD_JS)
+        self.assertIn("originalGridHtml", DASHBOARD_JS)
+
+    def test_live_new_species_shows_regional_count_and_first_badges(self) -> None:
+        # "New species this event" previously omitted the regional count
+        # shown for "Other species", and had no way to flag that a new
+        # arrival is the network's actual 1st/2nd/3rd tracked record.
+        self.assertIn("function regionalFirstBadge", LIVE_JS)
+        self.assertIn('tier: "gold"', LIVE_JS)
+        self.assertIn('tier: "silver"', LIVE_JS)
+        self.assertIn('tier: "bronze"', LIVE_JS)
+        self.assertIn("regional-badge-${tier.tier}", LIVE_JS)
+        self.assertIn(
+            "renderSpeciesList(summary.stationFirstSpecies, summary.checked "
+            '? "No new station species in this event yet." : "Waiting for '
+            'the first check.", new Set(), 20, false, station.id, true, true)',
+            LIVE_JS,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
