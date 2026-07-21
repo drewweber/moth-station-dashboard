@@ -260,15 +260,18 @@ class RecordRenderingTests(unittest.TestCase):
         self.assertIn("matching.slice(0, cap).map(buildRecordCardHtml)", DASHBOARD_JS)
         self.assertIn("originalGridHtml", DASHBOARD_JS)
 
-    def test_live_new_species_shows_regional_count_and_first_badges(self) -> None:
-        # "New species this event" previously omitted the regional count
+    def test_live_new_species_shows_network_count_and_first_badges(self) -> None:
+        # "New species this event" previously omitted the network count
         # shown for "Other species", and had no way to flag that a new
         # arrival is the network's actual 1st/2nd/3rd tracked record.
-        self.assertIn("function regionalFirstBadge", LIVE_JS)
+        # ("Network" rather than "regional": this counts observations
+        # across tracked stations, not a true county/state iNaturalist
+        # search, so "regional" was a misleading label.)
+        self.assertIn("function networkFirstBadge", LIVE_JS)
         self.assertIn('tier: "gold"', LIVE_JS)
         self.assertIn('tier: "silver"', LIVE_JS)
         self.assertIn('tier: "bronze"', LIVE_JS)
-        self.assertIn("regional-badge-${tier.tier}", LIVE_JS)
+        self.assertIn("network-badge-${tier.tier}", LIVE_JS)
         self.assertIn(
             "renderSpeciesList(summary.stationFirstSpecies, summary.checked "
             '? "No new station species in this event yet." : "Waiting for '

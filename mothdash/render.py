@@ -1710,7 +1710,7 @@ def _snapshot_payload(settings: Settings, stations: list[Station], taxa: list[di
     known_taxa: dict[str, list[int]] = {}
     first_dates: dict[str, dict[str, str]] = {}
     with connect(settings.database) as conn:
-        regional_counts = {
+        network_counts = {
             str(row["taxon_id"]): int(row["observation_count"])
             for row in conn.execute(
                 """
@@ -1756,7 +1756,7 @@ def _snapshot_payload(settings: Settings, stations: list[Station], taxa: list[di
         "api_base": "https://api.inaturalist.org/v1",
         "live_mode_hours": 2,
         "poll_seconds": 10 * 60,
-        "regional_counts": regional_counts,
+        "network_counts": network_counts,
         "stations": enabled,
     }
 
@@ -2558,7 +2558,7 @@ function updateStationSummary(station, observations, now, eventWindow) {
       url: obs.uri || `https://www.inaturalist.org/observations/${obs.id}`,
       photo: obsPhoto(obs),
       count: 1,
-      regionalCount: Number((state.snapshot.regional_counts || {})[String(taxonId)] || 0),
+      networkCount: Number((state.snapshot.network_counts || {})[String(taxonId)] || 0),
     };
     addSpecies(summary.currentSpecies, item);
     if (item.photo && !summary.photos.some((photo) => photo.url === item.photo)) {
@@ -2594,27 +2594,27 @@ function sharedStationPills(taxonId, stationId) {
   </div>`;
 }
 
-function regionalFirstBadge(regionalCount) {
-  if (!Number.isFinite(regionalCount) || regionalCount > 2) return "";
+function networkFirstBadge(networkCount) {
+  if (!Number.isFinite(networkCount) || networkCount > 2) return "";
   const tiers = [
     { rank: "1", tier: "gold", label: "First tracked network record of this species" },
     { rank: "2", tier: "silver", label: "Second tracked network record of this species" },
     { rank: "3", tier: "bronze", label: "Third tracked network record of this species" },
   ];
-  const tier = tiers[regionalCount];
+  const tier = tiers[networkCount];
   if (!tier) return "";
-  return `<span class="regional-badge regional-badge-${tier.tier}" title="${escapeHtml(tier.label)}" aria-label="${escapeHtml(tier.label)}">${tier.rank}</span>`;
+  return `<span class="network-badge network-badge-${tier.tier}" title="${escapeHtml(tier.label)}" aria-label="${escapeHtml(tier.label)}">${tier.rank}</span>`;
 }
 
-function renderSpeciesList(species, emptyText, excludedSpecies = new Set(), limit = 24, rarityFirst = false, stationId = "", showRegional = null, showBadge = false) {
+function renderSpeciesList(species, emptyText, excludedSpecies = new Set(), limit = 24, rarityFirst = false, stationId = "", showNetwork = null, showBadge = false) {
   const excluded = excludedSpecies instanceof Map
     ? new Set(excludedSpecies.keys())
     : excludedSpecies;
-  const includeRegional = showRegional === null ? rarityFirst : showRegional;
+  const includeNetwork = showNetwork === null ? rarityFirst : showNetwork;
   const sortedItems = Array.from(species.values())
     .filter((item) => !excluded.has(item.taxonId))
     .sort((a, b) => rarityFirst
-      ? a.regionalCount - b.regionalCount || b.count - a.count || a.label.localeCompare(b.label)
+      ? a.networkCount - b.networkCount || b.count - a.count || a.label.localeCompare(b.label)
       : b.count - a.count || a.label.localeCompare(b.label));
   const items = Number.isFinite(limit) ? sortedItems.slice(0, limit) : sortedItems;
   if (!items.length) return `<p class="live-muted">${escapeHtml(emptyText)}</p>`;
@@ -2624,8 +2624,8 @@ function renderSpeciesList(species, emptyText, excludedSpecies = new Set(), limi
         <a href="${escapeHtml(item.url)}">${escapeHtml(item.label)}</a>
         ${sharedStationPills(item.taxonId, stationId)}
       </div>
-      <span class="live-species-meta">${showBadge ? regionalFirstBadge(item.regionalCount) : ""}${includeRegional
-        ? `${item.count} event · ${item.regionalCount} regional`
+      <span class="live-species-meta">${showBadge ? networkFirstBadge(item.networkCount) : ""}${includeNetwork
+        ? `${item.count} event · ${item.networkCount} network`
         : item.count > 1 ? `${item.count} obs` : "1 obs"}</span>
     </li>
   `).join("")}</ul>`;
@@ -3155,7 +3155,7 @@ def _live_page(live_snapshot: dict) -> str:
     text-align: right;
     white-space: nowrap;
   }}
-  .regional-badge {{
+  .network-badge {{
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -3169,13 +3169,13 @@ def _live_page(live_snapshot: dict) -> str:
     color: #2b2410;
     vertical-align: -2px;
   }}
-  .regional-badge-gold {{
+  .network-badge-gold {{
     background: #e8c14d;
   }}
-  .regional-badge-silver {{
+  .network-badge-silver {{
     background: #c7cdd6;
   }}
-  .regional-badge-bronze {{
+  .network-badge-bronze {{
     background: #c98a4b;
   }}
   .live-shared-stations {{
