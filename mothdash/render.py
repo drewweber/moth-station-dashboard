@@ -1320,6 +1320,50 @@ def _expected_next_list(rows: list[dict[str, Any]]) -> str:
     return f'<ul class="watch-grid">{"".join(items)}</ul>'
 
 
+def _seasonal_target_list(targets: dict[str, Any]) -> str:
+    rows = targets.get("items") or []
+    if not rows:
+        return '<p class="empty">No new-to-station seasonal targets are available from nearby tracked-station records yet.</p>'
+
+    items = []
+    for row in rows:
+        label = h(row["label"])
+        media = (
+            f'<img src="{h(row["photo_url"])}" alt="{label}" loading="lazy">'
+            if row.get("photo_url")
+            else '<div class="watch-placeholder" aria-hidden="true">No photo</div>'
+        )
+        title = f'<a href="{h(row["inat_taxon_url"])}">{label}</a>'
+        station_names = row.get("stations") or []
+        if len(station_names) > 2:
+            source_names = f"{station_names[0]}, {station_names[1]}, and {len(station_names) - 2} more"
+        else:
+            source_names = " and ".join(station_names)
+        scope = {
+            "county": "same county",
+            "state": "same state",
+            "network": "tracked network",
+        }.get(row.get("scope"), "tracked network")
+        year_word = "year" if row["years"] == 1 else "years"
+        if row.get("current_year_records"):
+            signal = f"seen this season at {source_names}"
+        else:
+            signal = f"{scope} history: {source_names}"
+        items.append(
+            f"""
+            <li class="watch-card seasonal-target-card">
+              <div class="watch-image">{media}</div>
+              <div class="watch-copy">
+                <span>{title}</span>
+                <small>{h(row['window'])} · {h(row['records'])} tracked records across {h(row['years'])} {year_word}</small>
+                <em>{h(signal)}</em>
+              </div>
+            </li>
+            """
+        )
+    return f'<ul class="watch-grid seasonal-target-grid">{"".join(items)}</ul>'
+
+
 def _signature_species_gallery(rows: list[dict[str, Any]]) -> str:
     if not rows:
         return '<p class="empty">Signature species will appear after observations are shared across stations.</p>'
@@ -2162,6 +2206,14 @@ def _station_profile_page(station: Station, profile: dict[str, Any], recap: dict
         <p>Latest synced observations from this station.</p>
       </div>
       <div class="sighting-grid">{_profile_recent(profile["recent"])}</div>
+    </section>
+
+    <section>
+      <div class="section-head">
+        <h2>Regional watchlist</h2>
+        <p>New-to-{h(station.name)} species for the current seasonal window, using other tracked-station records relevant to {h(profile["seasonal_targets"]["location_label"])}. Same-county records are prioritized; state records fill gaps.</p>
+      </div>
+      {_seasonal_target_list(profile["seasonal_targets"])}
     </section>
   </main>
   <footer><div>Generated {h(generated_at())}. Station profiles are generated from the synced iNaturalist observation cache.</div></footer>
@@ -4371,6 +4423,12 @@ h2 {
   overflow: hidden;
   background: var(--panel);
   transition: border-color 180ms ease-out;
+}
+.seasonal-target-card {
+  border-left: 4px solid var(--amber);
+}
+.seasonal-target-card .watch-copy em {
+  color: var(--leaf);
 }
 .watch-image {
   min-height: 124px;

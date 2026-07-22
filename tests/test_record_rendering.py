@@ -15,6 +15,7 @@ from mothdash.render import (
     _mode_toggle,
     _record_cards,
     _record_table,
+    _seasonal_target_list,
     _sampling_context,
     _taxa_period_dashboard,
 )
@@ -138,6 +139,32 @@ class RecordRenderingTests(unittest.TestCase):
         self.assertIn("data-dashboard-section-nav", DASHBOARD_JS)
         self.assertIn("initDashboardSectionNavigation();", DASHBOARD_JS)
         self.assertIn('aria-current", "location"', DASHBOARD_JS)
+
+    def test_seasonal_target_list_identifies_local_date_evidence(self) -> None:
+        html = _seasonal_target_list(
+            {
+                "items": [
+                    {
+                        "taxon_id": 77,
+                        "label": "Target Moth (Targetus localis)",
+                        "scope": "county",
+                        "records": 3,
+                        "years": 2,
+                        "window": "Jul 20 to Aug 4",
+                        "stations": ["Nearby Station"],
+                        "current_year_records": 1,
+                        "photo_url": "https://example.test/target.jpg",
+                        "inat_taxon_url": "https://www.inaturalist.org/taxa/77",
+                    }
+                ]
+            }
+        )
+
+        self.assertIn("Target Moth", html)
+        self.assertIn("Jul 20 to Aug 4", html)
+        self.assertIn("seen this season at Nearby Station", html)
+        self.assertIn("https://www.inaturalist.org/taxa/77", html)
+        self.assertIn("seasonal-target-card", html)
 
     def test_insight_feedback_cards_have_stable_rating_hooks(self) -> None:
         insight = {

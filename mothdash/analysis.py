@@ -1185,11 +1185,172 @@ def dashboard_insights(
     return _select_varied_insights(insights, limit)
 
 
-def station_profile(settings: Settings, station_id: str) -> dict[str, Any]:
-    rows = [
-        row for row in load_rows(settings)
-        if row["station_id"] == station_id
-    ]
+def _seasonal_offset(day: date, reference_day: date) -> int:
+    """Return the closest calendar-day offset, allowing the year boundary."""
+    day_of_year = date(2000, day.month, day.day).timetuple().tm_yday
+    reference_day_of_year = date(
+        2000, reference_day.month, reference_day.day
+    ).timetuple().tm_yday
+    raw_offset = day_of_year - reference_day_of_year
+    return min(
+        (raw_offset, raw_offset - 366, raw_offset + 366),
+        key=abs,
+    )
+
+
+def _station_seasonal_targets(
+    all_rows: list[dict[str, Any]],
+    station_id: str,
+    taxa_seen: set[int],
+    station_context: dict[str, dict[str, Any]],
+    reference_day: date,
+    limit: int = 12,
+) -> dict[str, Any]:
+    """Find new-to-station moths timed by nearby tracked-station records.
+
+    This deliberately relies only on the project's synced iNaturalist cache:
+    same-county observations are the primary evidence and same-state records
+    fill gaps when a county has too little coverage. It is separate from the
+    host-plant suggestions, which answer a different question.
+    """
+    station = station_context.get(station_id, {})
+    county_place_id = station.get("county_place_id")
+    state_place_id = station.get("state_place_id")
+    target_window_start = -7
+    target_window_end = 21
+    candidates: dict[int, dict[str, Any]] = {}
+
+    def new_evidence(row: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "label": row["label"],
+            "records": 0,
+            "years": set(),
+            "offsets": [],
+            "stations": set(),
+            "current_year_records": 0,
+            "photo_url": None,
+            "evidence_url": None,
+            "evidence_date": None,
+        }
+
+    for row in all_rows:
+        if row.get("station_id") == station_id or not row.get("taxon_id"):
+            continue
+        if not is_species(row):
+            continue
+        session = row.get("session_date")
+        if not session:
+            continue
+        taxon_id = int(row["taxon_id"])
+        if taxon_id in taxa_seen:
+            continue
+
+        source = station_context.get(row["station_id"], {})
+        same_county = bool(
+            county_place_id
+            and source.get("county_place_id") == county_place_id
+        )
+        same_state = bool(
+            state_place_id
+            and source.get("state_place_id") == state_place_id
+        )
+        if same_county:
+            scope = "county"
+            scope_rank = 2
+        elif same_state:
+            scope = "state"
+            scope_rank = 1
+        elif county_place_id is None and state_place_id is None:
+            scope = "network"
+            scope_rank = 0
+        else:
+            continue
+
+        offset = _seasonal_offset(session, reference_day)
+        if not target_window_start <= offset <= target_window_end:
+            continue
+
+        candidate = candidates.setdefault(
+            taxon_id,
+            {
+                "taxon_id": taxon_id,
+                "inat_taxon_url": f"https://www.inaturalist.org/taxa/{taxon_id}",
+                "evidence_by_scope": {},
+            },
+        )
+        item = candidate["evidence_by_scope"].setdefault(scope, new_evidence(row))
+        item["records"] += 1
+        item["years"].add(session.year)
+        item["offsets"].append(offset)
+        item["stations"].add(row["station_name"])
+        if session.year == reference_day.year and target_window_start <= offset <= 0:
+            item["current_year_records"] += 1
+        if item["evidence_date"] is None or session > item["evidence_date"]:
+            item["label"] = row["label"]
+            item["evidence_date"] = session
+            item["evidence_url"] = row.get("url")
+        if row.get("photo_url") and (
+            item["photo_url"] is None or session >= item["evidence_date"]
+        ):
+            item["photo_url"] = row["photo_url"]
+
+    scope_ranks = {"county": 2, "state": 1, "network": 0}
+    items = []
+    for candidate in candidates.values():
+        scope = max(
+            candidate["evidence_by_scope"],
+            key=lambda value: scope_ranks[value],
+        )
+        evidence = candidate["evidence_by_scope"][scope]
+        start = reference_day + timedelta(days=min(evidence["offsets"]))
+        end = reference_day + timedelta(days=max(evidence["offsets"]))
+        window = (
+            f"{start:%b} {start.day}"
+            if start == end
+            else f"{start:%b} {start.day} to {end:%b} {end.day}"
+        )
+        items.append(
+            {
+                "taxon_id": candidate["taxon_id"],
+                "label": evidence["label"],
+                "scope": scope,
+                "scope_rank": scope_ranks[scope],
+                "records": evidence["records"],
+                "years": len(evidence["years"]),
+                "window": window,
+                "stations": sorted(evidence["stations"]),
+                "current_year_records": evidence["current_year_records"],
+                "photo_url": evidence["photo_url"],
+                "inat_taxon_url": candidate["inat_taxon_url"],
+                "evidence_url": evidence["evidence_url"],
+            }
+        )
+
+    items.sort(
+        key=lambda item: (
+            -item["scope_rank"],
+            -int(item["current_year_records"] > 0),
+            -item["years"],
+            -len(item["stations"]),
+            -item["records"],
+            item["label"],
+        )
+    )
+    location_label = station.get("public_location") or "the tracked area"
+    return {
+        "reference_day": reference_day,
+        "location_label": location_label,
+        "items": items[:limit],
+    }
+
+
+def station_profile(
+    settings: Settings,
+    station_id: str,
+    today: date | None = None,
+) -> dict[str, Any]:
+    all_rows = load_rows(settings)
+    rows = [row for row in all_rows if row["station_id"] == station_id]
     taxa = station_taxa(settings)
     unique_taxa = unique_station_taxa(settings)
     species_rows = [
@@ -1443,6 +1604,23 @@ def station_profile(settings: Settings, station_id: str) -> dict[str, Any]:
             key=lambda item: (item["seen_this_year"], -item["records"], item["label"]),
         )[:12]
 
+    with connect(settings.database) as conn:
+        context_rows = conn.execute(
+            """
+            SELECT id, county_place_id, state_place_id, public_location
+            FROM stations
+            WHERE enabled = 1
+            """
+        ).fetchall()
+    station_context = {row["id"]: dict(row) for row in context_rows}
+    seasonal_targets = _station_seasonal_targets(
+        all_rows,
+        station_id,
+        taxa_seen,
+        station_context,
+        today or date.today(),
+    )
+
     active_sessions = len({row["session_date"] for row in species_rows if row.get("session_date")})
     observations = len(rows)
     species = len(taxa_seen)
@@ -1503,6 +1681,7 @@ def station_profile(settings: Settings, station_id: str) -> dict[str, Any]:
             "rare": distinctive_rare,
         },
         "expected_next": expected_next,
+        "seasonal_targets": seasonal_targets,
         "recent": recent,
         "narrative": " ".join(narrative_bits) if narrative_bits else "This station is configured and waiting for synced moth observations.",
     }

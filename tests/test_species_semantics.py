@@ -151,6 +151,63 @@ class SpeciesSemanticsTests(unittest.TestCase):
         self.assertEqual(trends["network_accumulation"][-1]["species"], 2)
         self.assertNotIn(201, {row["taxon_id"] for row in trends["phenology"]})
 
+    def test_station_profile_adds_nearby_seasonal_targets_not_seen_at_station(self) -> None:
+        with connect(self.settings.database) as conn:
+            conn.execute(
+                "UPDATE stations SET county_place_id = 1082, state_place_id = 48, public_location = 'Tompkins County, NY'"
+            )
+            conn.execute(
+                """
+                INSERT INTO stations (id, name, enabled, county_place_id, state_place_id)
+                VALUES ('station-c', 'State Station', 1, 9999, 48)
+                """
+            )
+            conn.executemany(
+                """
+                INSERT INTO observations (
+                    station_id, inat_obs_id, observed_on, observed_at,
+                    taxon_id, taxon_name, common_name, rank, url, photo_url
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        "station-b", 800, "2024-07-26", "2024-07-26T22:00:00-04:00",
+                        404, "Targetus localis", "Local Target", "species",
+                        "https://example.test/800", "https://example.test/800.jpg",
+                    ),
+                    (
+                        "station-b", 801, "2026-07-20", "2026-07-20T22:00:00-04:00",
+                        404, "Targetus localis", "Local Target", "species",
+                        "https://example.test/801", "https://example.test/801.jpg",
+                    ),
+                    (
+                        "station-b", 802, "2026-09-01", "2026-09-01T22:00:00-04:00",
+                        405, "Targetus later", "Later Target", "species",
+                        "https://example.test/802", None,
+                    ),
+                    (
+                        "station-c", 803, "2026-07-21", "2026-07-21T22:00:00-04:00",
+                        404, "Targetus localis", "Local Target", "species",
+                        "https://example.test/803", None,
+                    ),
+                ],
+            )
+
+        profile = station_profile(self.settings, "station-a", today=date(2026, 7, 22))
+        targets = profile["seasonal_targets"]
+        target_ids = {item["taxon_id"] for item in targets["items"]}
+        local_target = next(item for item in targets["items"] if item["taxon_id"] == 404)
+
+        self.assertIn(404, target_ids)
+        self.assertNotIn(405, target_ids)
+        self.assertNotIn(101, target_ids, "already-recorded species are not new targets")
+        self.assertEqual(local_target["scope"], "county")
+        self.assertEqual(local_target["current_year_records"], 1)
+        self.assertEqual(local_target["years"], 2)
+        self.assertEqual(local_target["records"], 2, "state evidence is not mixed into county evidence")
+        self.assertEqual(local_target["stations"], ["Station B"])
+        self.assertEqual(local_target["window"], "Jul 20 to Jul 26")
+
     def test_distinctive_records_combine_firsts_and_network_rarity(self) -> None:
         # Taxon 102 already qualifies via the setUp fixture's county-first
         # flag and has exactly one tracked observation network-wide, so it
