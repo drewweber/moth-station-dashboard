@@ -35,6 +35,9 @@ queries.
   and mobile widths.
 - Keep the main page fast and simple. Treat homepage sections as bounded
   previews, not complete archives.
+- When adding, removing, renaming, or reordering a visible page section, update
+  that page's section navigation in `mothdash/render.py` and verify it at
+  desktop and mobile widths.
 - Default to a collaborative network metric alongside any station-specific
   metric when the data supports it. Network totals must de-duplicate shared
   species across stations, and labels must make clear whether a value is a

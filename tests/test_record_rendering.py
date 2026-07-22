@@ -8,15 +8,17 @@ from mothdash.render import (
     RECORD_CARD_PREVIEW_LIMIT,
     RECORD_TABLE_PAGE_SIZE,
     _daily_species_line_chart,
-    _dashboard_section_nav,
+    _history_section_nav,
     _insight_cards,
     _insight_feedback_id,
     _live_page,
+    _live_section_nav,
     _mode_toggle,
     _record_cards,
     _record_table,
     _seasonal_target_list,
     _sampling_context,
+    _station_section_nav,
     _taxa_period_dashboard,
 )
 from mothdash.config import Station
@@ -38,15 +40,26 @@ def records(count: int) -> list[dict]:
 
 
 class RecordRenderingTests(unittest.TestCase):
-    def test_station_pages_can_use_the_full_dashboard_navigation(self) -> None:
-        nav = _dashboard_section_nav("../index.html")
+    def test_page_navigation_uses_relevant_sections(self) -> None:
+        history_nav = _history_section_nav("../index.html", active_tracking=True)
+        station_nav = _station_section_nav(active_tracking=True)
+        live_nav = _live_section_nav()
 
-        self.assertIn('aria-label="Dashboard sections"', nav)
-        self.assertIn('href="../index.html#last-night"', nav)
-        self.assertIn('href="../index.html#past-week"', nav)
-        self.assertIn('href="../index.html#stations"', nav)
-        self.assertIn('href="../index.html#feed"', nav)
-        self.assertIn('href="../index.html#species"', nav)
+        self.assertIn('aria-label="History sections"', history_nav)
+        self.assertIn('href="../index.html#last-night"', history_nav)
+        self.assertIn('href="../index.html#species"', history_nav)
+        self.assertIn("data-dashboard-section-nav", history_nav)
+
+        self.assertIn('aria-label="Station profile sections"', station_nav)
+        self.assertIn('href="#station-story"', station_nav)
+        self.assertIn('href="#station-watch-next"', station_nav)
+        self.assertIn('href="#station-targets"', station_nav)
+        self.assertNotIn("last-night", station_nav)
+
+        self.assertIn('aria-label="Live page sections"', live_nav)
+        self.assertIn('href="#live-main"', live_nav)
+        self.assertIn('href="#live-controls"', live_nav)
+        self.assertIn('href="#live-log-title"', live_nav)
 
     def test_history_live_mode_control_and_immediate_live_check_are_rendered(self) -> None:
         toggle = _mode_toggle("index.html", "live.html", "live")
@@ -63,6 +76,7 @@ class RecordRenderingTests(unittest.TestCase):
         self.assertIn("Live", toggle)
         self.assertIn('aria-current="page"', toggle)
         self.assertIn('class="live-page"', page)
+        self.assertIn('aria-label="Live page sections"', page)
         self.assertIn("Keep checking", page)
         self.assertIn('class="switch-track"', page)
         self.assertIn(".switch-track", page)

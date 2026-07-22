@@ -65,26 +65,90 @@ def _mode_toggle(history_href: str, live_href: str, active: str) -> str:
     """
 
 
-def _dashboard_section_nav(index_href: str = "index.html") -> str:
-    """Render the dashboard section menu for pages outside the dashboard root."""
-    items = (
-        ("Previous full night", "last-night"),
-        ("Past week", "past-week"),
-        ("Stations", "stations"),
-        ("Feed", "feed"),
-        ("Recent", "recent"),
-        ("First arrivals", "pulses"),
-        ("Firsts", "records"),
-        ("Unique", "unique"),
-        ("Calendar", "calendar"),
-        ("Trends", "trends"),
-        ("Species", "species"),
-    )
+HISTORY_NAV_ITEMS = (
+    ("Previous full night", "last-night"),
+    ("Past week", "past-week"),
+    ("Stations", "stations"),
+    ("Feed", "feed"),
+    ("Recent", "recent"),
+    ("First arrivals", "pulses"),
+    ("Firsts", "records"),
+    ("Unique", "unique"),
+    ("Calendar", "calendar"),
+    ("Trends", "trends"),
+    ("Species", "species"),
+)
+
+STATION_NAV_ITEMS = (
+    ("Story", "station-story"),
+    ("Week", "station-week"),
+    ("Sampling", "station-sampling"),
+    ("Richness", "station-richness"),
+    ("Phenology", "station-phenology"),
+    ("Accumulation", "station-accumulation"),
+    ("Watch next", "station-watch-next"),
+    ("Signature", "station-signature"),
+    ("Records", "station-records"),
+    ("Habitat", "station-habitat"),
+    ("Recent", "station-recent"),
+    ("Targets", "station-targets"),
+)
+
+LIVE_NAV_ITEMS = (
+    ("Overview", "live-main"),
+    ("Updates", "live-controls"),
+    ("Stations", "live-log-title"),
+)
+
+
+def _section_nav(
+    items: tuple[tuple[str, str], ...],
+    aria_label: str,
+    *,
+    anchor_prefix: str = "",
+    active_tracking: bool = False,
+) -> str:
+    """Render a compact section menu for a generated page."""
     links = "".join(
-        f'<a href="{h(index_href)}#{section_id}">{h(label)}</a>'
+        f'<a href="{h(anchor_prefix)}#{h(section_id)}">{h(label)}</a>'
         for label, section_id in items
     )
-    return f'<nav class="section-nav" aria-label="Dashboard sections">{links}</nav>'
+    tracking = " data-dashboard-section-nav" if active_tracking else ""
+    return f'<nav class="section-nav" aria-label="{h(aria_label)}"{tracking}>{links}</nav>'
+
+
+def _history_section_nav(index_href: str = "", *, active_tracking: bool = False) -> str:
+    """Render navigation for the History dashboard sections."""
+    return _section_nav(
+        HISTORY_NAV_ITEMS,
+        "History sections",
+        anchor_prefix=index_href,
+        active_tracking=active_tracking,
+    )
+
+
+def _station_section_nav(*, active_tracking: bool = False) -> str:
+    """Render navigation for a station profile's own sections."""
+    return _section_nav(
+        STATION_NAV_ITEMS,
+        "Station profile sections",
+        active_tracking=active_tracking,
+    )
+
+
+def _live_section_nav() -> str:
+    """Render navigation for the Live page's own sections."""
+    return _section_nav(LIVE_NAV_ITEMS, "Live page sections")
+
+
+def _station_habitat_section_nav(profile_href: str) -> str:
+    """Render navigation for the station habitat archive."""
+    items = (
+        ("Station profile", f"{profile_href}#station-habitat"),
+        ("Host records", "#host-records"),
+    )
+    links = "".join(f'<a href="{h(href)}">{h(label)}</a>' for label, href in items)
+    return f'<nav class="section-nav" aria-label="Station habitat sections">{links}</nav>'
 
 
 def _insight_feedback_id(insight: dict[str, Any]) -> str:
@@ -2141,7 +2205,7 @@ def _station_profile_page(station: Station, profile: dict[str, Any], recap: dict
         <a class="brand" href="../index.html"><span class="brand-mark" aria-hidden="true"></span><span>Moth stations</span></a>
         {_mode_toggle("../index.html", "../live.html", "history")}
       </div>
-      {_dashboard_section_nav("../index.html")}
+      {_station_section_nav(active_tracking=True)}
     </div>
     <div class="profile-hero" style="--station-color: {h(color)}">
       <p class="eyebrow">station profile</p>
@@ -2152,14 +2216,14 @@ def _station_profile_page(station: Station, profile: dict[str, Any], recap: dict
     </div>
   </header>
   <main id="main" class="site-shell">
-    <section>
+    <section id="station-story">
       <div class="section-head">
         <h2>Station story</h2>
         <p>{h(profile["narrative"])}</p>
       </div>
     </section>
 
-    <section>
+    <section id="station-week">
       <div class="section-head">
         <h2>Your Week at the Sheet</h2>
         <p>A recap of the most recently completed Monday-through-Sunday week at this station.</p>
@@ -2167,7 +2231,7 @@ def _station_profile_page(station: Station, profile: dict[str, Any], recap: dict
       {_weekly_recap(recap)}
     </section>
 
-    <section>
+    <section id="station-sampling">
       <div class="section-head">
         <h2>Sampling context</h2>
         <p>Automatically derived from species-level iNaturalist timestamps. These records show active moth nights and upload timing, not trap duration or light setup.</p>
@@ -2175,7 +2239,7 @@ def _station_profile_page(station: Station, profile: dict[str, Any], recap: dict
       {_sampling_context(profile)}
     </section>
 
-    <section>
+    <section id="station-richness">
       <div class="section-head">
         <h2>Seasonal richness</h2>
         <p>Unique moth species by month across all synced years. Each row also shows how many active moth nights contributed to that month.</p>
@@ -2183,7 +2247,7 @@ def _station_profile_page(station: Station, profile: dict[str, Any], recap: dict
       <div class="profile-chart">{_seasonal_bars(profile)}</div>
     </section>
 
-    <section>
+    <section id="station-phenology">
       <div class="section-head">
         <h2>Phenology calendar</h2>
         <p>Weekly unique moth species across all synced years. Each cell includes active moth-night coverage for that week.</p>
@@ -2191,7 +2255,7 @@ def _station_profile_page(station: Station, profile: dict[str, Any], recap: dict
       <div class="profile-chart">{_profile_phenology_calendar(profile)}</div>
     </section>
 
-    <section>
+    <section id="station-accumulation">
       <div class="section-head">
         <h2>Species accumulation</h2>
         <p>Running species list, with active moth-night coverage in each chart point.</p>
@@ -2199,7 +2263,7 @@ def _station_profile_page(station: Station, profile: dict[str, Any], recap: dict
       <div class="profile-chart">{_accumulation_bars(profile)}</div>
     </section>
 
-    <section>
+    <section id="station-watch-next">
       <div class="section-head">
         <h2>Watch next</h2>
         <p>A visual field guide to species historically recorded here in the 30 calendar days after the latest synced session.</p>
@@ -2207,7 +2271,7 @@ def _station_profile_page(station: Station, profile: dict[str, Any], recap: dict
       {_expected_next_list(profile["expected_next"])}
     </section>
 
-    <section>
+    <section id="station-signature">
       <div class="section-head">
         <h2>Signature species</h2>
         <p>Shared species that lean most strongly toward this station, based on its share of their network observations.</p>
@@ -2215,7 +2279,7 @@ def _station_profile_page(station: Station, profile: dict[str, Any], recap: dict
       {_signature_species_gallery(profile["signature_species"])}
     </section>
 
-    <section>
+    <section id="station-records">
       <div class="section-head">
         <h2>Distinctive records</h2>
         <p>State, county, or network firsts recorded here, plus anything with fewer than 10 tracked network records overall.</p>
@@ -2223,7 +2287,7 @@ def _station_profile_page(station: Station, profile: dict[str, Any], recap: dict
       {_distinctive_records(profile["distinctive_records"])}
     </section>
 
-    <section>
+    <section id="station-habitat">
       <div class="section-head">
         <h2>Habitat summary</h2>
         <p>Recent documented host associations, with a separate full archive and specificity-weighted companion suggestions.</p>
@@ -2231,7 +2295,7 @@ def _station_profile_page(station: Station, profile: dict[str, Any], recap: dict
       {_habitat_summary(habitat, f"{station.id}-habitat.html")}
     </section>
 
-    <section>
+    <section id="station-recent">
       <div class="section-head">
         <h2>Recent observations</h2>
         <p>Latest synced observations from this station.</p>
@@ -2239,7 +2303,7 @@ def _station_profile_page(station: Station, profile: dict[str, Any], recap: dict
       <div class="sighting-grid">{_profile_recent(profile["recent"])}</div>
     </section>
 
-    <section>
+    <section id="station-targets">
       <div class="section-head">
         <h2>{seasonal_target_title}</h2>
         <p>{seasonal_target_intro}</p>
@@ -2274,7 +2338,7 @@ def _station_habitat_page(station: Station, habitat: dict[str, Any], color: str)
         <a class="brand" href="../index.html"><span class="brand-mark" aria-hidden="true"></span><span>Moth stations</span></a>
         {_mode_toggle("../index.html", "../live.html", "history")}
       </div>
-      {_dashboard_section_nav("../index.html")}
+      {_station_habitat_section_nav(f"{station.id}.html")}
     </div>
     <div class="profile-hero" style="--station-color: {h(color)}">
       <p class="eyebrow">habitat archive</p>
@@ -2283,7 +2347,7 @@ def _station_habitat_page(station: Station, habitat: dict[str, Any], color: str)
     </div>
   </header>
   <main id="main" class="site-shell">
-    <section>
+    <section id="host-records">
       <div class="section-head">
         <h2>Documented host associations</h2>
         <p>Full static archive of host-plant records for moth species confirmed at this station.</p>
@@ -3761,11 +3825,12 @@ def _live_page(live_snapshot: dict) -> str:
 <body class="live-page">
   <a class="skip-link" href="#live-main">Skip to live log</a>
   <header>
-    <div class="topbar topbar-mode-only">
+    <div class="topbar">
       <div class="topbar-primary">
         <a class="brand" href="index.html"><span class="brand-mark" aria-hidden="true"></span><span>Moth stations</span></a>
         {_mode_toggle("index.html", "live.html", "live")}
       </div>
+      {_live_section_nav()}
     </div>
   </header>
   <script id="live-snapshot-data" type="application/json">{json.dumps(live_snapshot, sort_keys=True)}</script>
@@ -6276,12 +6341,48 @@ footer div {
     grid-column: span 1;
   }
 }
-@media (max-width: 620px) {
+@media (min-width: 621px) and (max-width: 1180px) {
   :root {
     --topbar-height: 108px;
   }
-  .live-page {
-    --topbar-height: 64px;
+  .topbar {
+    align-items: stretch;
+    flex-direction: column;
+    justify-content: flex-start;
+    gap: 0;
+    min-height: var(--topbar-height);
+    padding: 10px 16px 0;
+  }
+  .topbar-primary {
+    width: 100%;
+    min-height: 38px;
+    justify-content: space-between;
+  }
+  .section-nav {
+    width: 100%;
+    min-width: 0;
+    min-height: 44px;
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    align-items: center;
+    gap: 18px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .section-nav::-webkit-scrollbar {
+    display: none;
+  }
+  .section-nav a {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+}
+@media (max-width: 620px) {
+  :root {
+    --topbar-height: 108px;
   }
   .topbar {
     align-items: stretch;
@@ -6485,19 +6586,7 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
         <a class="brand" href="#main"><span class="brand-mark" aria-hidden="true"></span><span>Moth stations</span></a>
         {_mode_toggle("#main", "live.html", "history")}
       </div>
-      <nav class="section-nav" aria-label="Dashboard sections" data-dashboard-section-nav>
-        <a href="#last-night">Previous full night</a>
-        <a href="#past-week">Past week</a>
-        <a href="#stations">Stations</a>
-        <a href="#feed">Feed</a>
-        <a href="#recent">Recent</a>
-        <a href="#pulses">First arrivals</a>
-        <a href="#records">Firsts</a>
-        <a href="#unique">Unique</a>
-        <a href="#calendar">Calendar</a>
-        <a href="#trends">Trends</a>
-        <a href="#species">Species</a>
-      </nav>
+      {_history_section_nav(active_tracking=True)}
     </div>
     <div class="hero">
       <div class="hero-copy">
