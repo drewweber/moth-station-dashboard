@@ -38,6 +38,11 @@ queries.
 - When adding, removing, renaming, or reordering a visible page section, update
   that page's section navigation in `mothdash/render.py` and verify it at
   desktop and mobile widths.
+- Keep each page's section menu in the same order as its rendered sections.
+  Preserve the narrative grouping: current activity first, interpretation and
+  likely next finds second, and long-term evidence or full reference views
+  last. If a section moves between those chapters, update both its menu group
+  and its DOM position in the same change.
 - Default to a collaborative network metric alongside any station-specific
   metric when the data supports it. Network totals must de-duplicate shared
   species across stations, and labels must make clear whether a value is a

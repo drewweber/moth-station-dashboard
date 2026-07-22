@@ -65,37 +65,60 @@ def _mode_toggle(history_href: str, live_href: str, active: str) -> str:
     """
 
 
-HISTORY_NAV_ITEMS = (
-    ("Previous full night", "last-night"),
-    ("Past week", "past-week"),
-    ("Stations", "stations"),
-    ("Feed", "feed"),
-    ("Recent", "recent"),
-    ("First arrivals", "pulses"),
-    ("Firsts", "records"),
-    ("Unique", "unique"),
-    ("Calendar", "calendar"),
-    ("Trends", "trends"),
-    ("Species", "species"),
+HISTORY_NAV_GROUPS = (
+    (
+        "Latest",
+        (
+            ("Previous full night", "last-night"),
+            ("Past week", "past-week"),
+            ("Feed", "feed"),
+            ("Recent", "recent"),
+        ),
+    ),
+    ("Network", (("Stations", "stations"),)),
+    (
+        "Season",
+        (
+            ("First arrivals", "pulses"),
+            ("Calendar", "calendar"),
+            ("Trends", "trends"),
+        ),
+    ),
+    ("Finds", (("Firsts", "records"), ("Unique", "unique"))),
+    ("Explore", (("Species", "species"),)),
 )
 
-STATION_NAV_ITEMS = (
-    ("Story", "station-story"),
-    ("Week", "station-week"),
-    ("Sampling", "station-sampling"),
-    ("Richness", "station-richness"),
-    ("Phenology", "station-phenology"),
-    ("Accumulation", "station-accumulation"),
-    ("Watch next", "station-watch-next"),
-    ("Signature", "station-signature"),
-    ("Records", "station-records"),
-    ("Habitat", "station-habitat"),
-    ("Recent", "station-recent"),
-    ("Targets", "station-targets"),
+STATION_NAV_GROUPS = (
+    ("Overview", (("Story", "station-story"),)),
+    ("Now", (("Week", "station-week"), ("Recent", "station-recent"))),
+    (
+        "Look ahead",
+        (
+            ("Next two weeks", "station-targets"),
+            ("Return watch", "station-watch-next"),
+        ),
+    ),
+    (
+        "Identity",
+        (
+            ("Signature", "station-signature"),
+            ("Records", "station-records"),
+            ("Habitat", "station-habitat"),
+        ),
+    ),
+    (
+        "Evidence",
+        (
+            ("Sampling", "station-sampling"),
+            ("Richness", "station-richness"),
+            ("Phenology", "station-phenology"),
+            ("Accumulation", "station-accumulation"),
+        ),
+    ),
 )
 
 LIVE_NAV_ITEMS = (
-    ("Overview", "live-main"),
+    ("Overview", "live-overview"),
     ("Updates", "live-controls"),
     ("Stations", "live-log-title"),
 )
@@ -117,10 +140,44 @@ def _section_nav(
     return f'<nav class="section-nav" aria-label="{h(aria_label)}"{tracking}>{links}</nav>'
 
 
+def _grouped_section_nav(
+    groups: tuple[tuple[str, tuple[tuple[str, str], ...]], ...],
+    aria_label: str,
+    *,
+    anchor_prefix: str = "",
+    active_tracking: bool = False,
+) -> str:
+    """Render section links in small narrative groups without hiding destinations."""
+    group_markup = []
+    for group_label, items in groups:
+        if len(items) == 1:
+            _, section_id = items[0]
+            group_markup.append(
+                f'<span class="section-nav-group section-nav-group-single" '
+                f'role="group" aria-label="{h(group_label)}">'
+                f'<a href="{h(anchor_prefix)}#{h(section_id)}">{h(group_label)}</a></span>'
+            )
+            continue
+        links = "".join(
+            f'<a href="{h(anchor_prefix)}#{h(section_id)}">{h(label)}</a>'
+            for label, section_id in items
+        )
+        group_markup.append(
+            f'<span class="section-nav-group" role="group" aria-label="{h(group_label)}">'
+            f'<span class="section-nav-group-label" aria-hidden="true">{h(group_label)}</span>'
+            f"{links}</span>"
+        )
+    tracking = " data-dashboard-section-nav" if active_tracking else ""
+    return (
+        f'<nav class="section-nav section-nav-grouped" '
+        f'aria-label="{h(aria_label)}"{tracking}>{"".join(group_markup)}</nav>'
+    )
+
+
 def _history_section_nav(index_href: str = "", *, active_tracking: bool = False) -> str:
     """Render navigation for the History dashboard sections."""
-    return _section_nav(
-        HISTORY_NAV_ITEMS,
+    return _grouped_section_nav(
+        HISTORY_NAV_GROUPS,
         "History sections",
         anchor_prefix=index_href,
         active_tracking=active_tracking,
@@ -129,8 +186,8 @@ def _history_section_nav(index_href: str = "", *, active_tracking: bool = False)
 
 def _station_section_nav(*, active_tracking: bool = False) -> str:
     """Render navigation for a station profile's own sections."""
-    return _section_nav(
-        STATION_NAV_ITEMS,
+    return _grouped_section_nav(
+        STATION_NAV_GROUPS,
         "Station profile sections",
         active_tracking=active_tracking,
     )
@@ -138,7 +195,7 @@ def _station_section_nav(*, active_tracking: bool = False) -> str:
 
 def _live_section_nav() -> str:
     """Render navigation for the Live page's own sections."""
-    return _section_nav(LIVE_NAV_ITEMS, "Live page sections")
+    return _section_nav(LIVE_NAV_ITEMS, "Live page sections", active_tracking=True)
 
 
 def _station_habitat_section_nav(profile_href: str) -> str:
@@ -2298,15 +2355,63 @@ def _station_profile_page(station: Station, profile: dict[str, Any], recap: dict
       </div>
     </section>
 
-    <section id="station-week">
+    <section id="station-week" class="section-chapter-start" data-chapter="Now">
       <div class="section-head">
-        <h2>Your Week at the Sheet</h2>
+        <h2>Week at the sheet</h2>
         <p>A recap of the most recently completed Monday-through-Sunday week at this station.</p>
       </div>
       {_weekly_recap(recap)}
     </section>
 
-    <section id="station-sampling">
+    <section id="station-recent">
+      <div class="section-head">
+        <h2>Recent observations</h2>
+        <p>Latest synced observations from this station.</p>
+      </div>
+      <div class="sighting-grid">{_profile_recent(profile["recent"])}</div>
+    </section>
+
+    <section id="station-targets" class="section-chapter-start" data-chapter="Look ahead">
+      <div class="section-head">
+        <h2>{seasonal_target_title}</h2>
+        <p>{seasonal_target_intro}</p>
+      </div>
+      {_seasonal_target_list(profile["seasonal_targets"])}
+    </section>
+
+    <section id="station-watch-next">
+      <div class="section-head">
+        <h2>Seasonal return watch</h2>
+        <p>A visual field guide to species historically recorded here in the 30 calendar days after the latest synced session.</p>
+      </div>
+      {_expected_next_list(profile["expected_next"])}
+    </section>
+
+    <section id="station-signature" class="section-chapter-start" data-chapter="Identity">
+      <div class="section-head">
+        <h2>Signature species</h2>
+        <p>Shared species that lean most strongly toward this station, based on its share of their network observations.</p>
+      </div>
+      {_signature_species_gallery(profile["signature_species"])}
+    </section>
+
+    <section id="station-records">
+      <div class="section-head">
+        <h2>Distinctive records</h2>
+        <p>State, county, or network firsts recorded here, plus anything with fewer than 10 tracked network records overall.</p>
+      </div>
+      {_distinctive_records(profile["distinctive_records"])}
+    </section>
+
+    <section id="station-habitat">
+      <div class="section-head">
+        <h2>Habitat summary</h2>
+        <p>Recent documented host associations, with a separate full archive and specificity-weighted companion suggestions.</p>
+      </div>
+      {_habitat_summary(habitat, f"{station.id}-habitat.html")}
+    </section>
+
+    <section id="station-sampling" class="section-chapter-start" data-chapter="Evidence">
       <div class="section-head">
         <h2>Sampling context</h2>
         <p>Automatically derived from species-level iNaturalist timestamps. These records show active moth nights and upload timing, not trap duration or light setup.</p>
@@ -2336,54 +2441,6 @@ def _station_profile_page(station: Station, profile: dict[str, Any], recap: dict
         <p>Running species list, with active moth-night coverage in each chart point.</p>
       </div>
       <div class="profile-chart">{_accumulation_bars(profile)}</div>
-    </section>
-
-    <section id="station-watch-next">
-      <div class="section-head">
-        <h2>Watch next</h2>
-        <p>A visual field guide to species historically recorded here in the 30 calendar days after the latest synced session.</p>
-      </div>
-      {_expected_next_list(profile["expected_next"])}
-    </section>
-
-    <section id="station-signature">
-      <div class="section-head">
-        <h2>Signature species</h2>
-        <p>Shared species that lean most strongly toward this station, based on its share of their network observations.</p>
-      </div>
-      {_signature_species_gallery(profile["signature_species"])}
-    </section>
-
-    <section id="station-records">
-      <div class="section-head">
-        <h2>Distinctive records</h2>
-        <p>State, county, or network firsts recorded here, plus anything with fewer than 10 tracked network records overall.</p>
-      </div>
-      {_distinctive_records(profile["distinctive_records"])}
-    </section>
-
-    <section id="station-habitat">
-      <div class="section-head">
-        <h2>Habitat summary</h2>
-        <p>Recent documented host associations, with a separate full archive and specificity-weighted companion suggestions.</p>
-      </div>
-      {_habitat_summary(habitat, f"{station.id}-habitat.html")}
-    </section>
-
-    <section id="station-recent">
-      <div class="section-head">
-        <h2>Recent observations</h2>
-        <p>Latest synced observations from this station.</p>
-      </div>
-      <div class="sighting-grid">{_profile_recent(profile["recent"])}</div>
-    </section>
-
-    <section id="station-targets">
-      <div class="section-head">
-        <h2>{seasonal_target_title}</h2>
-        <p>{seasonal_target_intro}</p>
-      </div>
-      {_seasonal_target_list(profile["seasonal_targets"])}
     </section>
   </main>
   <footer><div>Generated {h(generated_at())}. Station profiles are generated from the synced iNaturalist observation cache.</div></footer>
@@ -2512,12 +2569,18 @@ function initDashboardSectionNavigation() {
     .filter(Boolean);
   if (!links.length || !sections.length) return;
 
-  const setActive = (id) => {
+  let activeId = "";
+  const setActive = (id, reveal = false) => {
+    if (id === activeId) return;
+    activeId = id;
     links.forEach((link) => {
       const active = link.getAttribute("href") === `#${id}`;
       link.classList.toggle("is-active", active);
       if (active) {
         link.setAttribute("aria-current", "location");
+        if (reveal && nav.scrollWidth > nav.clientWidth) {
+          link.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
+        }
       } else {
         link.removeAttribute("aria-current");
       }
@@ -2525,9 +2588,26 @@ function initDashboardSectionNavigation() {
   };
 
   const initialId = window.location.hash.slice(1);
-  setActive(sections.some((section) => section.id === initialId) ? initialId : sections[0].id);
-  links.forEach((link) => link.addEventListener("click", () => setActive(link.getAttribute("href").slice(1))));
+  setActive(sections.some((section) => section.id === initialId) ? initialId : sections[0].id, true);
+  links.forEach((link) => link.addEventListener("click", () => {
+    setActive(link.getAttribute("href").slice(1), true);
+  }));
 
+  let scrollFrame = 0;
+  const updateFromScroll = () => {
+    scrollFrame = 0;
+    const topbarOffset = (document.querySelector(".topbar")?.offsetHeight || 0) + 48;
+    let current = sections[0];
+    sections.forEach((section) => {
+      if (section.getBoundingClientRect().top <= topbarOffset) current = section;
+    });
+    const nearPageBottom = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 8;
+    if (nearPageBottom) current = sections[sections.length - 1];
+    setActive(current.id, true);
+  };
+  window.addEventListener("scroll", () => {
+    if (!scrollFrame) scrollFrame = window.requestAnimationFrame(updateFromScroll);
+  }, { passive: true });
 }
 
 function initNightStationFilters() {
@@ -3565,7 +3645,51 @@ async function loadSnapshot() {
   renderStationSummaries();
 }
 
+function initLiveSectionNavigation() {
+  const nav = document.querySelector("[data-dashboard-section-nav]");
+  if (!nav) return;
+  const links = Array.from(nav.querySelectorAll('a[href^="#"]'));
+  const sections = links
+    .map((link) => document.querySelector(link.getAttribute("href")))
+    .filter(Boolean);
+  if (!links.length || !sections.length) return;
+
+  let activeId = "";
+  const setActive = (id) => {
+    if (id === activeId) return;
+    activeId = id;
+    links.forEach((link) => {
+      const active = link.getAttribute("href") === `#${id}`;
+      link.classList.toggle("is-active", active);
+      if (active) link.setAttribute("aria-current", "location");
+      else link.removeAttribute("aria-current");
+    });
+  };
+
+  setActive(window.location.hash.slice(1) || sections[0].id);
+  links.forEach((link) => link.addEventListener("click", () => {
+    setActive(link.getAttribute("href").slice(1));
+  }));
+
+  let scrollFrame = 0;
+  const updateFromScroll = () => {
+    scrollFrame = 0;
+    const topbarOffset = (document.querySelector(".topbar")?.offsetHeight || 0) + 48;
+    let current = sections[0];
+    sections.forEach((section) => {
+      if (section.getBoundingClientRect().top <= topbarOffset) current = section;
+    });
+    const nearPageBottom = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 8;
+    if (nearPageBottom) current = sections[sections.length - 1];
+    setActive(current.id);
+  };
+  window.addEventListener("scroll", () => {
+    if (!scrollFrame) scrollFrame = window.requestAnimationFrame(updateFromScroll);
+  }, { passive: true });
+}
+
 async function init() {
+  initLiveSectionNavigation();
   els.toggle = document.querySelector("#live-toggle");
   els.status = document.querySelector("#live-status");
   els.lastCheck = document.querySelector("#last-check");
@@ -3972,11 +4096,13 @@ def _live_page(live_snapshot: dict) -> str:
   </header>
   <script id="live-snapshot-data" type="application/json">{json.dumps(live_snapshot, sort_keys=True)}</script>
   <main id="live-main" class="live-shell">
-    <p class="eyebrow">10-minute iNaturalist check</p>
-    <h1>Live station summary.</h1>
-    <p class="subhead">Opening Live checks iNaturalist once for the current 12pm-to-12pm moth event. Turn on updates to refresh every 10 minutes for 2 hours.</p>
-    <div id="live-new-species-counter" class="night-stations live-new-station-counter"
-      aria-label="Unique moth species by active station in this event" hidden></div>
+    <div id="live-overview">
+      <p class="eyebrow">10-minute iNaturalist check</p>
+      <h1>Live station summary.</h1>
+      <p class="subhead">Opening Live checks iNaturalist once for the current 12pm-to-12pm moth event. Turn on updates to refresh every 10 minutes for 2 hours.</p>
+      <div id="live-new-species-counter" class="night-stations live-new-station-counter"
+        aria-label="Unique moth species by active station in this event" hidden></div>
+    </div>
 
     <section class="live-panel" aria-labelledby="live-controls">
       <div class="toggle-row">
@@ -4152,11 +4278,37 @@ header {
   flex: 1 1 auto;
   min-width: 0;
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   justify-content: flex-end;
   gap: 14px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.section-nav::-webkit-scrollbar {
+  display: none;
+}
+.section-nav-group {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.section-nav-group + .section-nav-group {
+  margin-left: 2px;
+  padding-left: 16px;
+  border-left: 1px solid var(--line);
+}
+.section-nav-group-label {
+  color: var(--faint);
+  font-size: 0.68rem;
+  font-weight: 650;
+  white-space: nowrap;
 }
 .section-nav a {
+  flex: 0 0 auto;
   position: relative;
   display: inline-flex;
   align-items: center;
@@ -4164,6 +4316,7 @@ header {
   color: var(--muted);
   text-decoration: none;
   font-size: 0.9rem;
+  white-space: nowrap;
   transition: color 160ms ease-out;
 }
 .section-nav a::after {
@@ -4396,6 +4549,20 @@ main {
 }
 section {
   margin-top: 42px;
+}
+.section-chapter-start {
+  margin-top: 76px;
+  padding-top: 24px;
+  border-top: 1px solid var(--line);
+}
+.section-chapter-start::before {
+  content: attr(data-chapter);
+  display: block;
+  margin-bottom: 10px;
+  color: var(--amber);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.72rem;
+  font-weight: 650;
 }
 h2 {
   font-family: Georgia, "Times New Roman", serif;
@@ -6824,14 +6991,6 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
       {_recent_week_dashboard(recent_week, stations)}
     </section>
 
-    <section id="stations">
-      <div class="section-head">
-        <h2>All-time location info</h2>
-        <p>Configured stations stay visible even before their first sync, so owners can see what is online, what is waiting for observations, and what is no longer active.</p>
-      </div>
-      <div class="cards">{_station_cards(summaries, stations)}</div>
-    </section>
-
     <section id="feed">
       <div class="section-head feed-section-head">
         <h2>Naturalist feed</h2>
@@ -6853,7 +7012,15 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
       <div class="table-wrap">{_recent_table(recent)}</div>
     </section>
 
-    <section id="pulses">
+    <section id="stations" class="section-chapter-start" data-chapter="Network">
+      <div class="section-head">
+        <h2>Station network</h2>
+        <p>Configured stations stay visible even before their first sync, so owners can see what is online, what is waiting for observations, and what is no longer active.</p>
+      </div>
+      <div class="cards">{_station_cards(summaries, stations)}</div>
+    </section>
+
+    <section id="pulses" class="section-chapter-start" data-chapter="Season">
       <div class="section-head">
         <h2>{h(year) if year else "Current"} first-of-season pulses</h2>
         <p>Species appearing at two or more stations are grouped by how tightly their first session dates line up. Switch to all-time to compare first arrivals across the full station history.</p>
@@ -6862,31 +7029,6 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
       {_view_toggle("First arrival view", ("pulse-year", f"{year} season" if year else "Current season"), ("pulse-all-time", "All time"))}
       <div class="view-panel" id="pulse-year"><div class="table-wrap">{_pulse_table(pulses, stations)}</div></div>
       <div class="view-panel" id="pulse-all-time" hidden><div class="table-wrap">{_pulse_table(all_time_pulses, stations)}</div></div>
-    </section>
-
-    <section id="records">
-      <div class="section-head">
-        <h2>Recent firsts</h2>
-        <p>The newest county, state, and tracked-network firsts, ordered by observation date. Filter by type or location to see everything that matches, not just the newest batch.</p>
-      </div>
-      {_record_filters(stations)}
-      <div class="record-grid" data-record-grid>{_record_cards(records)}</div>
-      <div class="record-grid-controls" data-record-grid-controls hidden>
-        <span data-record-grid-count aria-live="polite"></span>
-        <button type="button" data-record-grid-expand data-page-size="{RECORD_CARD_PREVIEW_LIMIT}">Show all matching photos</button>
-      </div>
-      <details class="record-archive">
-        <summary>Browse all flagged firsts ({h(len(records))})</summary>
-        <div class="table-wrap">{_record_table(records)}</div>
-      </details>
-    </section>
-
-    <section id="unique">
-      <div class="section-head">
-        <h2>Moths unique to one station</h2>
-        <p>These species currently appear at only one tracked station, which can reflect habitat, effort, observer focus, or upload timing.</p>
-      </div>
-      {_unique_station_sections(uniques, stations)}
     </section>
 
     <section id="calendar">
@@ -6915,7 +7057,32 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
       {_trend_section(trends, stations)}
     </section>
 
-    <section id="species">
+    <section id="records" class="section-chapter-start" data-chapter="Finds">
+      <div class="section-head">
+        <h2>Recent firsts</h2>
+        <p>The newest county, state, and tracked-network firsts, ordered by observation date. Filter by type or location to see everything that matches, not just the newest batch.</p>
+      </div>
+      {_record_filters(stations)}
+      <div class="record-grid" data-record-grid>{_record_cards(records)}</div>
+      <div class="record-grid-controls" data-record-grid-controls hidden>
+        <span data-record-grid-count aria-live="polite"></span>
+        <button type="button" data-record-grid-expand data-page-size="{RECORD_CARD_PREVIEW_LIMIT}">Show all matching photos</button>
+      </div>
+      <details class="record-archive">
+        <summary>Browse all flagged firsts ({h(len(records))})</summary>
+        <div class="table-wrap">{_record_table(records)}</div>
+      </details>
+    </section>
+
+    <section id="unique">
+      <div class="section-head">
+        <h2>Moths unique to one station</h2>
+        <p>These species currently appear at only one tracked station, which can reflect habitat, effort, observer focus, or upload timing.</p>
+      </div>
+      {_unique_station_sections(uniques, stations)}
+    </section>
+
+    <section id="species" class="section-chapter-start" data-chapter="Explore">
       <div class="section-head">
         <h2>Station species comparison</h2>
         <p>Each cell shows the observation count, first session date, and any county, state, or tracked-station first flags. Default sort favors species found across the most stations.</p>

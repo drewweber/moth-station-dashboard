@@ -49,17 +49,30 @@ class RecordRenderingTests(unittest.TestCase):
         self.assertIn('href="../index.html#last-night"', history_nav)
         self.assertIn('href="../index.html#species"', history_nav)
         self.assertIn("data-dashboard-section-nav", history_nav)
+        self.assertIn('aria-label="Latest"', history_nav)
+        self.assertIn('aria-label="Season"', history_nav)
+        self.assertLess(history_nav.index("#last-night"), history_nav.index("#feed"))
+        self.assertLess(history_nav.index("#recent"), history_nav.index("#stations"))
+        self.assertLess(history_nav.index("#trends"), history_nav.index("#records"))
+        self.assertLess(history_nav.index("#unique"), history_nav.index("#species"))
 
         self.assertIn('aria-label="Station profile sections"', station_nav)
         self.assertIn('href="#station-story"', station_nav)
         self.assertIn('href="#station-watch-next"', station_nav)
         self.assertIn('href="#station-targets"', station_nav)
         self.assertNotIn("last-night", station_nav)
+        self.assertIn('aria-label="Look ahead"', station_nav)
+        self.assertIn('aria-label="Evidence"', station_nav)
+        self.assertLess(station_nav.index("#station-week"), station_nav.index("#station-recent"))
+        self.assertLess(station_nav.index("#station-targets"), station_nav.index("#station-watch-next"))
+        self.assertLess(station_nav.index("#station-habitat"), station_nav.index("#station-sampling"))
 
         self.assertIn('aria-label="Live page sections"', live_nav)
-        self.assertIn('href="#live-main"', live_nav)
+        self.assertIn('href="#live-overview"', live_nav)
         self.assertIn('href="#live-controls"', live_nav)
         self.assertIn('href="#live-log-title"', live_nav)
+        self.assertIn("data-dashboard-section-nav", live_nav)
+        self.assertIn("initLiveSectionNavigation();", LIVE_JS)
 
     def test_history_live_mode_control_and_immediate_live_check_are_rendered(self) -> None:
         toggle = _mode_toggle("index.html", "live.html", "live")
@@ -154,6 +167,10 @@ class RecordRenderingTests(unittest.TestCase):
         self.assertIn("data-dashboard-section-nav", DASHBOARD_JS)
         self.assertIn("initDashboardSectionNavigation();", DASHBOARD_JS)
         self.assertIn('aria-current", "location"', DASHBOARD_JS)
+        self.assertIn("updateFromScroll", DASHBOARD_JS)
+        self.assertIn("scrollIntoView", DASHBOARD_JS)
+        self.assertIn("nearPageBottom", DASHBOARD_JS)
+        self.assertIn("nearPageBottom", LIVE_JS)
 
     def test_seasonal_target_list_identifies_local_date_evidence(self) -> None:
         html = _seasonal_target_list(
