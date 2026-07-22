@@ -788,7 +788,7 @@ def _unique_station_sections(rows: list[dict[str, Any]], stations: list[Station]
                   <div class="unique-station-head">
                     <div>
                       <p>{h(station.public_location or "tracked station")}</p>
-                      <h3>{h(station.name)}</h3>
+                      <h3><a class="station-heading-link" href="{h(_station_page_path(station))}">{h(station.name)}</a></h3>
                     </div>
                     <strong>0</strong>
                   </div>
@@ -810,7 +810,7 @@ def _unique_station_sections(rows: list[dict[str, Any]], stations: list[Station]
               <div class="unique-station-head">
                 <div>
                   <p>{h(station.public_location or "tracked station")}</p>
-                  <h3>{h(station.name)}</h3>
+                  <h3><a class="station-heading-link" href="{h(_station_page_path(station))}">{h(station.name)}</a></h3>
                 </div>
                 <strong>{h(count)}</strong>
               </div>
@@ -2342,7 +2342,7 @@ def _station_habitat_page(station: Station, habitat: dict[str, Any], color: str)
     </div>
     <div class="profile-hero" style="--station-color: {h(color)}">
       <p class="eyebrow">habitat archive</p>
-      <h1>{h(station.name)}</h1>
+      <h1><a class="station-heading-link" href="{h(station.id)}.html">{h(station.name)}</a></h1>
       <p class="subhead">{h(location)}</p>
     </div>
   </header>
@@ -3281,7 +3281,7 @@ function renderStationSummaries() {
         <div class="live-station-head">
           <div>
             <p>${escapeHtml(station.public_location || "tracked station")}</p>
-            <h2>${escapeHtml(station.name)}</h2>
+            <h2><a class="station-heading-link" href="stations/${encodeURIComponent(station.id)}.html">${escapeHtml(station.name)}</a></h2>
           </div>
           <span>${escapeHtml(status)}</span>
         </div>
@@ -6056,6 +6056,14 @@ a:focus-visible {
   outline-offset: 2px;
 }
 a:hover { color: #f2d78e; }
+.station-heading-link {
+  color: var(--ink);
+  text-decoration-color: color-mix(in srgb, var(--station-color, var(--amber)) 72%, transparent);
+  text-underline-offset: 3px;
+}
+.station-heading-link:hover {
+  color: var(--amber);
+}
 .tag {
   display: inline-block;
   color: #1b170f;

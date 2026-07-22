@@ -99,6 +99,7 @@ class RecordRenderingTests(unittest.TestCase):
         self.assertIn("All stations", LIVE_JS)
         self.assertIn('href="#live-station-${escapeHtml(summary.station.id)}"', LIVE_JS)
         self.assertIn('id="live-station-${escapeHtml(station.id)}"', LIVE_JS)
+        self.assertIn('href="stations/${encodeURIComponent(station.id)}.html"', LIVE_JS)
         self.assertIn("obs.time_observed_at", LIVE_JS)
         self.assertIn("obs.created_at", LIVE_JS)
         self.assertIn(
