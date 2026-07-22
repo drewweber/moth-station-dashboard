@@ -1705,20 +1705,56 @@ def _forecast_scorecard(data: dict[str, Any], *, title: str, detail: str, empty:
 def _forecast_validation(validation: dict[str, Any]) -> str:
     historical = validation.get("historical") or {}
     published = validation.get("published") or {}
-    return f"""
-    <div class="forecast-validation">
+    historical_cards = f"""
       {_forecast_scorecard(
-          historical,
-          title="Historical network backtest",
-          detail="Weekly 14-night checkpoints use only tracked-station records uploaded by local noon on the forecast date.",
+          historical.get("seasonal-only") or {},
+          title="Seasonal-only baseline",
+          detail="Ranks targets using only the frozen seasonal station-record evidence available at each checkpoint.",
           empty="Not enough station history and later moth-night activity are available for a conservative backtest yet.",
       )}
       {_forecast_scorecard(
-          published,
-          title="Published forecast check",
-          detail="This uses the first exact target list published for each forecast day, including nearby-iNaturalist evidence when it was available.",
-          empty="Exact checks begin after a published target list has a complete 14-night outcome window.",
+          historical.get("host-evidence") or {},
+          title="Seasonal + host evidence",
+          detail="Uses the same checkpoint, target pool, and outcome window, with comprehensive host evidence used only to change ranking.",
+          empty="Not enough station history and later moth-night activity are available for a conservative backtest yet.",
       )}
+    """
+    paired_published = published.get("seasonal-only") or {}
+    paired_available = int(paired_published.get("available_snapshots") or 0)
+    if paired_available:
+        published_cards = f"""
+          {_forecast_scorecard(
+              paired_published,
+              title="Seasonal-only baseline",
+              detail="The saved baseline list for each published forecast window.",
+              empty="Paired published checks begin after a saved baseline has a complete 14-night outcome window.",
+          )}
+          {_forecast_scorecard(
+              published.get("host-evidence") or {},
+              title="Seasonal + host evidence",
+              detail="The saved host-evidence ranking for those same published forecast windows.",
+              empty="Paired published checks begin after a saved host-evidence ranking has a complete 14-night outcome window.",
+          )}
+        """
+    else:
+        published_cards = _forecast_scorecard(
+            published.get("legacy") or {},
+            title="Legacy published target lists",
+            detail="These earlier published lists were saved as one ranking, before the paired comparison began.",
+            empty="Paired published checks begin after a saved baseline and host-evidence ranking have a complete 14-night outcome window.",
+        )
+    return f"""
+    <div class="forecast-comparison">
+      <div class="forecast-comparison-head">
+        <h3>Historical paired backtest</h3>
+        <p>Weekly 14-night checkpoints freeze tracked-station records uploaded by local noon. Both rankings are tested against the same later new species.</p>
+      </div>
+      <div class="forecast-validation">{historical_cards}</div>
+      <div class="forecast-comparison-head">
+        <h3>Published paired forecast check</h3>
+        <p>Each new build saves both rankings from the same candidate pool. Mature windows will provide the exact nearby-iNaturalist comparison.</p>
+      </div>
+      <div class="forecast-validation">{published_cards}</div>
     </div>
     """
 
@@ -1740,10 +1776,11 @@ def _forecast_station_table(rows: list[dict[str, Any]]) -> str:
         f"""
         <tr>
           <th scope="row"><a href="stations/{h(row['station_id'])}.html">{h(row['station_name'])}</a></th>
-          <td>{h(result_cell(row['historical']))}</td>
-          <td>{h(row['historical'].get('target_hits', 0))} / {h(row['historical'].get('new_species', 0))}</td>
-          <td>{h(row['historical'].get('active_nights', 0))}</td>
-          <td>{h(result_cell(row['published']))}</td>
+          <td>{h(result_cell(row['historical'].get('seasonal-only') or {}))}</td>
+          <td>{h(result_cell(row['historical'].get('host-evidence') or {}))}</td>
+          <td>{h(row['historical'].get('seasonal-only', {}).get('active_nights', 0))}</td>
+          <td>{h(result_cell(row['published'].get('seasonal-only') or {}))}</td>
+          <td>{h(result_cell(row['published'].get('host-evidence') or {}))}</td>
         </tr>
         """
         for row in rows
@@ -1751,7 +1788,7 @@ def _forecast_station_table(rows: list[dict[str, Any]]) -> str:
     return f"""
     <div class="table-wrap forecast-station-table">
       <table>
-        <thead><tr><th>Station</th><th>Backtest targets found</th><th>Backtest new species caught</th><th>Active station-nights</th><th>Exact published targets found</th></tr></thead>
+        <thead><tr><th>Station</th><th>Historical seasonal-only</th><th>Historical + host</th><th>Historical active nights</th><th>Published seasonal-only</th><th>Published + host</th></tr></thead>
         <tbody>{table_rows}</tbody>
       </table>
     </div>
@@ -1795,7 +1832,7 @@ def _forecast_validation_page(validation: dict[str, Any]) -> str:
     <section>
       <div class="section-head">
         <h2>By station</h2>
-        <p>Stations with few moth nights have less evidence. The exact column will fill after the first saved 14-night windows complete.</p>
+        <p>Stations with few moth nights have less evidence. Published paired columns begin filling after the first saved 14-night windows complete.</p>
       </div>
       {_forecast_station_table(validation.get("stations") or [])}
     </section>
@@ -1804,8 +1841,8 @@ def _forecast_validation_page(validation: dict[str, Any]) -> str:
         <h2>Method notes</h2>
       </div>
       <div class="forecast-method-copy">
-        <p><strong>Historical network backtest:</strong> fourteen overlapping Monday checkpoints freeze the tracked-station records uploaded by local noon, then check which new station species appear during the next fourteen moth nights. It is a conservative reconstruction, not a test of the full nearby-iNaturalist forecast.</p>
-        <p><strong>Published forecast check:</strong> each build saves the exact rendered target list in the existing SQLite cache. Once its full fourteen-night outcome window closes, the first published list for that day is scored without new iNaturalist queries.</p>
+        <p><strong>Historical paired backtest:</strong> fourteen overlapping Monday checkpoints freeze the tracked-station records uploaded by local noon, then rebuild both rankings from that same information. Exact shared host plants are weighted above broader genus overlap; neither ranking can use observations uploaded after the checkpoint.</p>
+        <p><strong>Published paired forecast check:</strong> each new build saves both the seasonal-only and host-evidence rankings in the existing SQLite cache. Once a shared fourteen-night outcome window closes, both lists are scored without new iNaturalist queries. Older saved lists remain visible as legacy single-list checks but are not treated as a comparison.</p>
       </div>
     </section>
   </main>
@@ -4974,6 +5011,24 @@ h2 {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
+}
+.forecast-comparison {
+  display: grid;
+  gap: 18px;
+}
+.forecast-comparison-head h3 {
+  margin: 0 0 4px;
+  color: var(--ink);
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 1rem;
+  font-weight: 720;
+}
+.forecast-comparison-head p {
+  max-width: 72ch;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.45;
 }
 .forecast-scorecard {
   min-width: 0;

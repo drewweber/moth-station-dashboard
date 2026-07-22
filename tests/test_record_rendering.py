@@ -311,31 +311,36 @@ class RecordRenderingTests(unittest.TestCase):
         html = _forecast_validation(
             {
                 "historical": {
-                    "checked_windows": 2,
-                    "quiet_windows": 1,
-                    "target_count": 40,
-                    "target_hits": 5,
-                    "new_species": 12,
-                    "active_nights": 9,
-                    "median_hit_rank": 4,
-                    "windows": [
-                        {
-                            "anchor": "2026-06-01",
-                            "window_end": "2026-06-14",
-                            "active_nights": 4,
-                            "target_count": 20,
-                            "target_hits": 2,
-                            "new_species": 5,
-                            "caught_new_species": 2,
-                        }
-                    ],
+                    "seasonal-only": {
+                        "checked_windows": 2,
+                        "quiet_windows": 1,
+                        "target_count": 40,
+                        "target_hits": 5,
+                        "new_species": 12,
+                        "active_nights": 9,
+                        "median_hit_rank": 4,
+                        "windows": [
+                            {
+                                "anchor": "2026-06-01",
+                                "window_end": "2026-06-14",
+                                "active_nights": 4,
+                                "target_count": 20,
+                                "target_hits": 2,
+                                "new_species": 5,
+                                "caught_new_species": 2,
+                            }
+                        ],
+                    },
+                    "host-evidence": {"checked_windows": 2, "target_count": 40, "target_hits": 6, "new_species": 12, "active_nights": 9},
                 },
-                "published": {"available_snapshots": 3, "checked_windows": 0},
+                "published": {"legacy": {"available_snapshots": 3, "checked_windows": 0}},
             }
         )
 
-        self.assertIn("Historical network backtest", html)
-        self.assertIn("Published forecast check", html)
+        self.assertIn("Historical paired backtest", html)
+        self.assertIn("Seasonal-only baseline", html)
+        self.assertIn("Seasonal + host evidence", html)
+        self.assertIn("Legacy published target lists", html)
         self.assertIn("5 / 40", html)
         self.assertIn("42% of new finds", html)
         self.assertIn("3 published forecasts still need", html)

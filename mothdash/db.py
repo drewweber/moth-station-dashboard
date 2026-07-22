@@ -146,6 +146,20 @@ CREATE TABLE IF NOT EXISTS forecast_targets (
 CREATE INDEX IF NOT EXISTS idx_forecast_targets_run_rank
     ON forecast_targets(forecast_run_id, target_rank);
 
+-- Paired ranking variants let forecast validation isolate the contribution of
+-- host evidence while preserving the original rendered list for legacy runs.
+CREATE TABLE IF NOT EXISTS forecast_target_variants (
+    forecast_run_id INTEGER NOT NULL,
+    variant         TEXT NOT NULL,
+    taxon_id        INTEGER NOT NULL,
+    target_rank     INTEGER NOT NULL,
+    label           TEXT,
+    PRIMARY KEY (forecast_run_id, variant, taxon_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_forecast_target_variants_run_rank
+    ON forecast_target_variants(forecast_run_id, variant, target_rank);
+
 CREATE TABLE IF NOT EXISTS sync_log (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
     station_id     TEXT NOT NULL,

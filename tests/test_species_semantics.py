@@ -638,11 +638,13 @@ class SpeciesSemanticsTests(unittest.TestCase):
             weeks=1,
         )
 
-        self.assertEqual(backtest["checked_windows"], 1)
-        self.assertEqual(backtest["target_count"], 1)
-        self.assertEqual(backtest["target_hits"], 1)
-        self.assertEqual(backtest["caught_new_species"], 1)
-        self.assertEqual(backtest["median_hit_rank"], 1)
+        for variant in ("seasonal-only", "host-evidence"):
+            result = backtest[variant]
+            self.assertEqual(result["checked_windows"], 1)
+            self.assertEqual(result["target_count"], 1)
+            self.assertEqual(result["target_hits"], 1)
+            self.assertEqual(result["caught_new_species"], 1)
+            self.assertEqual(result["median_hit_rank"], 1)
 
     def test_published_forecast_validation_uses_first_snapshot_per_day(self) -> None:
         with connect(self.settings.database) as conn:
@@ -702,11 +704,63 @@ class SpeciesSemanticsTests(unittest.TestCase):
             date(2026, 7, 22),
         )
 
-        self.assertEqual(validation["available_snapshots"], 1)
-        self.assertEqual(validation["checked_windows"], 1)
-        self.assertEqual(validation["target_count"], 1)
-        self.assertEqual(validation["target_hits"], 1)
-        self.assertEqual(validation["caught_new_species"], 1)
+        legacy = validation["legacy"]
+        self.assertEqual(legacy["available_snapshots"], 1)
+        self.assertEqual(legacy["checked_windows"], 1)
+        self.assertEqual(legacy["target_count"], 1)
+        self.assertEqual(legacy["target_hits"], 1)
+        self.assertEqual(legacy["caught_new_species"], 1)
+        self.assertEqual(validation["seasonal-only"]["available_snapshots"], 0)
+
+    def test_published_forecast_validation_compares_saved_ranking_variants(self) -> None:
+        with connect(self.settings.database) as conn:
+            conn.executemany(
+                """
+                INSERT INTO observations (
+                    station_id, inat_obs_id, observed_on, observed_at, created_at,
+                    taxon_id, taxon_name, common_name, rank, url
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        "station-a", 1200, "2026-06-01", "2026-06-01T22:00:00-04:00",
+                        "2026-06-02T02:00:00Z", 101, "Species alpha", "Alpha", "species",
+                        "https://example.test/1200",
+                    ),
+                    (
+                        "station-a", 1201, "2026-07-12", "2026-07-12T22:00:00-04:00",
+                        "2026-07-13T02:00:00Z", 404, "Targetus host", "Host Target", "species",
+                        "https://example.test/1201",
+                    ),
+                ],
+            )
+
+        targets = {
+            "reference_day": date(2026, 7, 6),
+            "source": "nearby-inaturalist",
+            "items": [{"taxon_id": 404, "label": "Host Target"}],
+            "ranking_variants": {
+                "seasonal-only": [{"taxon_id": 405, "label": "Baseline Target"}],
+                "host-evidence": [{"taxon_id": 404, "label": "Host Target"}],
+            },
+        }
+        store_forecast_snapshot(
+            self.settings,
+            "station-a",
+            targets,
+            snapshot_at=datetime(2026, 7, 6, 12, tzinfo=ZoneInfo("America/New_York")),
+        )
+
+        validation = _published_forecast_validation(
+            self.settings,
+            load_rows(self.settings),
+            "station-a",
+            date(2026, 7, 22),
+        )
+
+        self.assertEqual(validation["seasonal-only"]["available_snapshots"], 1)
+        self.assertEqual(validation["seasonal-only"]["target_hits"], 0)
+        self.assertEqual(validation["host-evidence"]["target_hits"], 1)
 
 
 if __name__ == "__main__":

@@ -1332,7 +1332,19 @@ def _station_seasonal_targets(
         )
 
     _add_target_host_matches(items, taxa, station_id)
-    items.sort(
+    seasonal_only_items = sorted(
+        items,
+        key=lambda item: (
+            -item["scope_rank"],
+            -int(item["current_year_records"] > 0),
+            -item["years"],
+            -len(item["stations"]),
+            -item["records"],
+            item["label"],
+        ),
+    )
+    host_evidence_items = sorted(
+        items,
         key=lambda item: (
             -item["scope_rank"],
             -int(item["current_year_records"] > 0),
@@ -1348,7 +1360,11 @@ def _station_seasonal_targets(
         "reference_day": reference_day,
         "location_label": location_label,
         "source": "tracked-network",
-        "items": items[:limit],
+        "items": host_evidence_items[:limit],
+        "ranking_variants": {
+            "seasonal-only": seasonal_only_items[:limit],
+            "host-evidence": host_evidence_items[:limit],
+        },
     }
 
 
@@ -1491,7 +1507,16 @@ def _regional_seasonal_targets(
             }
         )
     _add_target_host_matches(items, taxa, station_id)
-    items.sort(
+    seasonal_only_items = sorted(
+        items,
+        key=lambda item: (
+            -item["seasonal_score"],
+            -item["records"],
+            item["label"],
+        ),
+    )
+    host_evidence_items = sorted(
+        items,
         key=lambda item: (
             -item["prediction_score"],
             -item["records"],
@@ -1504,11 +1529,16 @@ def _regional_seasonal_targets(
         "window": window,
         "radius_km": float(run["radius_km"]),
         "cached_at": run.get("cached_at"),
-        "items": items[:limit],
+        "items": host_evidence_items[:limit],
+        "ranking_variants": {
+            "seasonal-only": seasonal_only_items[:limit],
+            "host-evidence": host_evidence_items[:limit],
+        },
     }
 
 
 FORECAST_BACKTEST_WEEKS = 14
+FORECAST_RANKING_VARIANTS = ("seasonal-only", "host-evidence")
 
 
 def _forecast_station_context(settings: Settings) -> dict[str, dict[str, Any]]:
@@ -1521,6 +1551,65 @@ def _forecast_station_context(settings: Settings) -> dict[str, dict[str, Any]]:
             """
         ).fetchall()
     return {row["id"]: dict(row) for row in rows}
+
+
+def _forecast_result(
+    method: str,
+    windows: list[dict[str, Any]],
+    *,
+    available_snapshots: int = 0,
+    quiet_windows: int = 0,
+    no_history_windows: int = 0,
+) -> dict[str, Any]:
+    """Summarize ranked forecast windows for one fixed ranking variant."""
+    hit_ranks = sorted(
+        rank
+        for window in windows
+        for rank in window.get("hit_ranks") or []
+    )
+    median_hit_rank = None
+    if hit_ranks:
+        middle = len(hit_ranks) // 2
+        median_hit_rank = hit_ranks[middle]
+        if len(hit_ranks) % 2 == 0:
+            median_hit_rank = (median_hit_rank + hit_ranks[middle - 1]) / 2
+    return {
+        "method": method,
+        "windows": windows,
+        "available_snapshots": available_snapshots,
+        "checked_windows": len(windows),
+        "quiet_windows": quiet_windows,
+        "no_history_windows": no_history_windows,
+        "target_count": sum(int(row["target_count"]) for row in windows),
+        "target_hits": sum(int(row["target_hits"]) for row in windows),
+        "new_species": sum(int(row["new_species"]) for row in windows),
+        "caught_new_species": sum(int(row["caught_new_species"]) for row in windows),
+        "active_nights": sum(int(row["active_nights"]) for row in windows),
+        "median_hit_rank": median_hit_rank,
+        "hit_ranks": hit_ranks,
+    }
+
+
+def _historical_station_taxa(
+    known_rows: list[dict[str, Any]], station_id: str
+) -> list[dict[str, Any]]:
+    """Rebuild just enough station taxa for a leak-free host-evidence check."""
+    taxa: dict[int, dict[str, Any]] = {}
+    for row in known_rows:
+        if row.get("station_id") != station_id or not row.get("taxon_id"):
+            continue
+        if not is_species(row):
+            continue
+        taxon_id = int(row["taxon_id"])
+        taxa.setdefault(
+            taxon_id,
+            {
+                "taxon_name": row.get("taxon_name"),
+                "label": row.get("label") or row.get("taxon_name") or str(taxon_id),
+                "stations": {station_id: {}},
+            },
+        )
+    return list(taxa.values())
 
 
 def _historical_target_backtest(
@@ -1547,17 +1636,8 @@ def _historical_target_backtest(
     ]
     if not species_rows:
         return {
-            "method": "tracked-network",
-            "windows": [],
-            "checked_windows": 0,
-            "quiet_windows": 0,
-            "target_count": 0,
-            "target_hits": 0,
-            "new_species": 0,
-            "caught_new_species": 0,
-            "active_nights": 0,
-            "median_hit_rank": None,
-            "hit_ranks": [],
+            variant: _forecast_result("tracked-network", [])
+            for variant in FORECAST_RANKING_VARIANTS
         }
 
     # A checkpoint is set on Monday at the start of a full 14-night interval.
@@ -1567,10 +1647,9 @@ def _historical_target_backtest(
     anchors = [latest_anchor - timedelta(days=7 * offset) for offset in range(weeks)]
     anchors.reverse()
     zone = ZoneInfo(timezone)
-    windows = []
+    windows_by_variant = {variant: [] for variant in FORECAST_RANKING_VARIANTS}
     quiet_windows = 0
     no_history_windows = 0
-    hit_ranks: list[int] = []
 
     for anchor in anchors:
         cutoff = datetime.combine(anchor, time(cutoff_hour), tzinfo=zone)
@@ -1595,10 +1674,10 @@ def _historical_target_backtest(
             known_rows,
             station_id,
             known_taxa,
-            [],
+            _historical_station_taxa(known_rows, station_id),
             station_context,
             anchor,
-        ).get("items", [])
+        )
         window_end = anchor + timedelta(days=13)
         outcome_rows = [
             row for row in species_rows
@@ -1613,49 +1692,40 @@ def _historical_target_backtest(
 
         outcome_taxa = {int(row["taxon_id"]) for row in outcome_rows}
         new_taxa = outcome_taxa - known_taxa
-        target_ids = {int(item["taxon_id"]) for item in targets}
-        hits = target_ids & new_taxa
-        rank_by_taxon = {
-            int(item["taxon_id"]): rank
-            for rank, item in enumerate(targets, start=1)
+        variants = targets.get("ranking_variants") or {
+            "host-evidence": targets.get("items") or []
         }
-        hit_ranks.extend(rank_by_taxon[taxon_id] for taxon_id in hits)
-        windows.append(
-            {
-                "anchor": anchor,
-                "window_end": window_end,
-                "active_nights": len(active_nights),
-                "target_count": len(target_ids),
-                "target_hits": len(hits),
-                "new_species": len(new_taxa),
-                "caught_new_species": len(hits),
+        for variant in FORECAST_RANKING_VARIANTS:
+            ranked_targets = variants.get(variant)
+            if ranked_targets is None:
+                continue
+            target_ids = {int(item["taxon_id"]) for item in ranked_targets}
+            hits = target_ids & new_taxa
+            rank_by_taxon = {
+                int(item["taxon_id"]): rank
+                for rank, item in enumerate(ranked_targets, start=1)
             }
-        )
-
-    target_count = sum(row["target_count"] for row in windows)
-    target_hits = sum(row["target_hits"] for row in windows)
-    new_species = sum(row["new_species"] for row in windows)
-    median_hit_rank = None
-    if hit_ranks:
-        hit_ranks.sort()
-        middle = len(hit_ranks) // 2
-        median_hit_rank = hit_ranks[middle]
-        if len(hit_ranks) % 2 == 0:
-            median_hit_rank = (median_hit_rank + hit_ranks[middle - 1]) / 2
+            windows_by_variant[variant].append(
+                {
+                    "anchor": anchor,
+                    "window_end": window_end,
+                    "active_nights": len(active_nights),
+                    "target_count": len(target_ids),
+                    "target_hits": len(hits),
+                    "new_species": len(new_taxa),
+                    "caught_new_species": len(hits),
+                    "hit_ranks": [rank_by_taxon[taxon_id] for taxon_id in hits],
+                }
+            )
 
     return {
-        "method": "tracked-network",
-        "windows": windows,
-        "checked_windows": len(windows),
-        "quiet_windows": quiet_windows,
-        "no_history_windows": no_history_windows,
-        "target_count": target_count,
-        "target_hits": target_hits,
-        "new_species": new_species,
-        "caught_new_species": target_hits,
-        "active_nights": sum(row["active_nights"] for row in windows),
-        "median_hit_rank": median_hit_rank,
-        "hit_ranks": hit_ranks,
+        variant: _forecast_result(
+            "tracked-network",
+            windows_by_variant[variant],
+            quiet_windows=quiet_windows,
+            no_history_windows=no_history_windows,
+        )
+        for variant in FORECAST_RANKING_VARIANTS
     }
 
 
@@ -1676,6 +1746,9 @@ def store_forecast_snapshot(
         snapshot_at = snapshot_at.replace(tzinfo=ZoneInfo(settings.timezone))
     snapshot_text = snapshot_at.isoformat(timespec="seconds")
     items = targets.get("items") or []
+    ranking_variants = targets.get("ranking_variants") or {
+        "host-evidence": items,
+    }
     window_end = reference_day + timedelta(days=settings.regional_watch_days - 1)
 
     with connect(settings.database) as conn:
@@ -1711,6 +1784,26 @@ def store_forecast_snapshot(
                 if item.get("taxon_id") is not None
             ],
         )
+        conn.executemany(
+            """
+            INSERT INTO forecast_target_variants (
+                forecast_run_id, variant, taxon_id, target_rank, label
+            ) VALUES (?,?,?,?,?)
+            """,
+            [
+                (
+                    forecast_run_id,
+                    variant,
+                    int(item["taxon_id"]),
+                    rank,
+                    item.get("label"),
+                )
+                for variant, ranked_items in ranking_variants.items()
+                for rank, item in enumerate(ranked_items, start=1)
+                if variant in FORECAST_RANKING_VARIANTS
+                and item.get("taxon_id") is not None
+            ],
+        )
 
 
 def _published_forecast_validation(
@@ -1718,8 +1811,8 @@ def _published_forecast_validation(
     all_rows: list[dict[str, Any]],
     station_id: str,
     reference_day: date,
-) -> dict[str, Any]:
-    """Score mature, first-published target lists against actual outcomes."""
+) -> dict[str, dict[str, Any]]:
+    """Score legacy and paired published target lists against actual outcomes."""
     with connect(settings.database) as conn:
         run_rows = conn.execute(
             """
@@ -1743,6 +1836,7 @@ def _published_forecast_validation(
             selected_runs.append(dict(row))
 
         target_rows = {}
+        variant_rows: dict[tuple[int, str], list[dict[str, Any]]] = {}
         for run in selected_runs:
             rows = conn.execute(
                 """
@@ -1754,13 +1848,29 @@ def _published_forecast_validation(
                 (run["id"],),
             ).fetchall()
             target_rows[run["id"]] = [dict(row) for row in rows]
+            rows = conn.execute(
+                """
+                SELECT variant, taxon_id, target_rank
+                FROM forecast_target_variants
+                WHERE forecast_run_id = ?
+                ORDER BY variant, target_rank
+                """,
+                (run["id"],),
+            ).fetchall()
+            for row in rows:
+                variant_rows.setdefault((run["id"], row["variant"]), []).append(dict(row))
 
     species_rows = [
         row for row in all_rows if row.get("taxon_id") and is_species(row)
     ]
-    windows = []
-    quiet_windows = 0
-    hit_ranks: list[int] = []
+    legacy_windows = []
+    paired_windows = {variant: [] for variant in FORECAST_RANKING_VARIANTS}
+    quiet_legacy_windows = 0
+    quiet_paired_windows = 0
+    paired_available_snapshots = sum(
+        all((run["id"], variant) in variant_rows for variant in FORECAST_RANKING_VARIANTS)
+        for run in selected_runs
+    )
     for run in selected_runs:
         snapshot_at = parse_timestamp(run["snapshot_at"])
         start = parse_date(run["reference_day"])
@@ -1782,53 +1892,74 @@ def _published_forecast_validation(
         ]
         active_nights = {row["session_date"] for row in outcome_rows}
         if not active_nights:
-            quiet_windows += 1
+            quiet_legacy_windows += 1
+            if all(
+                (run["id"], variant) in variant_rows
+                for variant in FORECAST_RANKING_VARIANTS
+            ):
+                quiet_paired_windows += 1
             continue
         outcome_taxa = {int(row["taxon_id"]) for row in outcome_rows}
         new_taxa = outcome_taxa - known_taxa
-        target_rank = {
+        legacy_rank = {
             int(row["taxon_id"]): int(row["target_rank"])
             for row in target_rows.get(run["id"], [])
         }
-        hits = set(target_rank) & new_taxa
-        hit_ranks.extend(target_rank[taxon_id] for taxon_id in hits)
-        windows.append(
+        legacy_hits = set(legacy_rank) & new_taxa
+        legacy_windows.append(
             {
                 "anchor": start,
                 "window_end": end,
                 "active_nights": len(active_nights),
-                "target_count": len(target_rank),
-                "target_hits": len(hits),
+                "target_count": len(legacy_rank),
+                "target_hits": len(legacy_hits),
                 "new_species": len(new_taxa),
-                "caught_new_species": len(hits),
+                "caught_new_species": len(legacy_hits),
                 "source": run["source"],
+                "hit_ranks": [legacy_rank[taxon_id] for taxon_id in legacy_hits],
             }
         )
-
-    target_count = sum(row["target_count"] for row in windows)
-    target_hits = sum(row["target_hits"] for row in windows)
-    new_species = sum(row["new_species"] for row in windows)
-    median_hit_rank = None
-    if hit_ranks:
-        hit_ranks.sort()
-        middle = len(hit_ranks) // 2
-        median_hit_rank = hit_ranks[middle]
-        if len(hit_ranks) % 2 == 0:
-            median_hit_rank = (median_hit_rank + hit_ranks[middle - 1]) / 2
+        if not all(
+            (run["id"], variant) in variant_rows
+            for variant in FORECAST_RANKING_VARIANTS
+        ):
+            continue
+        for variant in FORECAST_RANKING_VARIANTS:
+            rank_by_taxon = {
+                int(row["taxon_id"]): int(row["target_rank"])
+                for row in variant_rows[(run["id"], variant)]
+            }
+            hits = set(rank_by_taxon) & new_taxa
+            paired_windows[variant].append(
+                {
+                    "anchor": start,
+                    "window_end": end,
+                    "active_nights": len(active_nights),
+                    "target_count": len(rank_by_taxon),
+                    "target_hits": len(hits),
+                    "new_species": len(new_taxa),
+                    "caught_new_species": len(hits),
+                    "source": run["source"],
+                    "hit_ranks": [rank_by_taxon[taxon_id] for taxon_id in hits],
+                }
+            )
 
     return {
-        "method": "published",
-        "windows": windows,
-        "available_snapshots": len(selected_runs),
-        "checked_windows": len(windows),
-        "quiet_windows": quiet_windows,
-        "target_count": target_count,
-        "target_hits": target_hits,
-        "new_species": new_species,
-        "caught_new_species": target_hits,
-        "active_nights": sum(row["active_nights"] for row in windows),
-        "median_hit_rank": median_hit_rank,
-        "hit_ranks": hit_ranks,
+        "legacy": _forecast_result(
+            "published",
+            legacy_windows,
+            available_snapshots=len(selected_runs),
+            quiet_windows=quiet_legacy_windows,
+        ),
+        **{
+            variant: _forecast_result(
+                "published-paired",
+                paired_windows[variant],
+                available_snapshots=paired_available_snapshots,
+                quiet_windows=quiet_paired_windows,
+            )
+            for variant in FORECAST_RANKING_VARIANTS
+        },
     }
 
 
@@ -1907,12 +2038,26 @@ def forecast_validation_summary(
         )
     return {
         "reference_day": reference_day,
-        "historical": _combine_forecast_results(
-            [row["historical"] for row in station_rows], "tracked-network"
-        ),
-        "published": _combine_forecast_results(
-            [row["published"] for row in station_rows], "published"
-        ),
+        "historical": {
+            variant: _combine_forecast_results(
+                [row["historical"][variant] for row in station_rows],
+                "tracked-network",
+            )
+            for variant in FORECAST_RANKING_VARIANTS
+        },
+        "published": {
+            "legacy": _combine_forecast_results(
+                [row["published"]["legacy"] for row in station_rows],
+                "published",
+            ),
+            **{
+                variant: _combine_forecast_results(
+                    [row["published"][variant] for row in station_rows],
+                    "published-paired",
+                )
+                for variant in FORECAST_RANKING_VARIANTS
+            },
+        },
         "stations": station_rows,
     }
 
