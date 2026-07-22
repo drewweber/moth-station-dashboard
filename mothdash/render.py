@@ -3360,12 +3360,53 @@ def _live_page(live_snapshot: dict) -> str:
     display: inline-flex;
     align-items: center;
     gap: 10px;
+    min-height: 32px;
+    color: var(--muted);
+    font-size: 0.86rem;
     cursor: pointer;
   }}
   .switch input {{
-    width: 48px;
-    height: 28px;
-    accent-color: var(--amber);
+    position: absolute;
+    inline-size: 1px;
+    block-size: 1px;
+    opacity: 0;
+    pointer-events: none;
+  }}
+  .switch-track {{
+    position: relative;
+    flex: 0 0 auto;
+    width: 42px;
+    height: 24px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--panel-2);
+    transition: background-color 160ms ease-out, border-color 160ms ease-out;
+  }}
+  .switch-track::after {{
+    content: "";
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--faint);
+    transition: transform 160ms ease-out, background-color 160ms ease-out;
+  }}
+  .switch input:checked + .switch-track {{
+    border-color: color-mix(in srgb, var(--amber) 72%, var(--line));
+    background: color-mix(in srgb, var(--amber) 24%, var(--panel-2));
+  }}
+  .switch input:checked + .switch-track::after {{
+    transform: translateX(18px);
+    background: var(--amber);
+  }}
+  .switch input:focus-visible + .switch-track {{
+    outline: 3px solid var(--focus);
+    outline-offset: 3px;
+  }}
+  .switch:hover {{
+    color: var(--ink);
   }}
   .live-freshness {{
     display: flex;
@@ -3660,6 +3701,7 @@ def _live_page(live_snapshot: dict) -> str:
         </div>
         <label class="switch">
           <input id="live-toggle" type="checkbox">
+          <span class="switch-track" aria-hidden="true"></span>
           <span>Keep checking</span>
         </label>
       </div>
@@ -5223,6 +5265,10 @@ h2 {
   .station-card:hover::before {
     box-shadow: 0 0 14px color-mix(in srgb, var(--station-color) 38%, transparent);
   }
+  .sighting-card:hover .sighting-image img,
+  .night-card:hover .night-image img {
+    transform: scale(1.025);
+  }
 }
 .station-card p {
   margin: 0;
@@ -5279,6 +5325,7 @@ h2 {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  transition: transform 180ms ease-out;
 }
 .sighting-placeholder {
   height: 100%;
@@ -5428,6 +5475,7 @@ h2 {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  transition: transform 180ms ease-out;
 }
 .night-placeholder {
   height: 100%;

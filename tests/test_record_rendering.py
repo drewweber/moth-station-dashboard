@@ -63,6 +63,8 @@ class RecordRenderingTests(unittest.TestCase):
         self.assertIn('aria-current="page"', toggle)
         self.assertIn('class="live-page"', page)
         self.assertIn("Keep checking", page)
+        self.assertIn('class="switch-track"', page)
+        self.assertIn(".switch-track", page)
         self.assertIn("refresh every 10 minutes", page)
         self.assertIn('id="live-new-species-counter"', page)
         self.assertIn('id="last-check"', page)
