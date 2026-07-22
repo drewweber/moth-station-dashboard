@@ -1203,9 +1203,10 @@ def _station_seasonal_targets(
     all_rows: list[dict[str, Any]],
     station_id: str,
     taxa_seen: set[int],
+    taxa: list[dict[str, Any]],
     station_context: dict[str, dict[str, Any]],
     reference_day: date,
-    limit: int = 12,
+    limit: int = 20,
 ) -> dict[str, Any]:
     """Find new-to-station moths timed by nearby tracked-station records.
 
@@ -1224,6 +1225,7 @@ def _station_seasonal_targets(
     def new_evidence(row: dict[str, Any]) -> dict[str, Any]:
         return {
             "label": row["label"],
+            "taxon_name": row.get("taxon_name"),
             "records": 0,
             "years": set(),
             "offsets": [],
@@ -1314,6 +1316,7 @@ def _station_seasonal_targets(
             {
                 "taxon_id": candidate["taxon_id"],
                 "label": evidence["label"],
+                "taxon_name": evidence["taxon_name"],
                 "scope": scope,
                 "scope_rank": scope_ranks[scope],
                 "records": evidence["records"],
@@ -1324,13 +1327,16 @@ def _station_seasonal_targets(
                 "photo_url": evidence["photo_url"],
                 "inat_taxon_url": candidate["inat_taxon_url"],
                 "evidence_url": evidence["evidence_url"],
+                "time_buckets": _fallback_target_time_buckets(evidence["offsets"]),
             }
         )
 
+    _add_target_host_matches(items, taxa, station_id)
     items.sort(
         key=lambda item: (
             -item["scope_rank"],
             -int(item["current_year_records"] > 0),
+            -item["host_match_score"],
             -item["years"],
             -len(item["stations"]),
             -item["records"],
@@ -1346,13 +1352,53 @@ def _station_seasonal_targets(
     }
 
 
+def _fallback_target_time_buckets(offsets: list[int]) -> list[str]:
+    """Describe where tracked-network evidence falls in the upcoming fortnight."""
+    buckets = []
+    if any(-7 <= offset <= 6 for offset in offsets):
+        buckets.append("this-week")
+    if any(7 <= offset <= 13 for offset in offsets):
+        buckets.append("next-week")
+    return buckets or ["this-week", "next-week"]
+
+
+def _regional_target_time_metadata(
+    day_counts: dict[date, int], reference_day: date
+) -> tuple[list[str], str]:
+    """Summarize nearby seasonal evidence for the two filterable forecast weeks."""
+    this_week_end = reference_day + timedelta(days=6)
+    next_week_end = reference_day + timedelta(days=13)
+    this_week_records = sum(
+        count for day, count in day_counts.items() if reference_day <= day <= this_week_end
+    )
+    next_week_records = sum(
+        count for day, count in day_counts.items() if this_week_end < day <= next_week_end
+    )
+    buckets = []
+    if this_week_records:
+        buckets.append("this-week")
+    if next_week_records:
+        buckets.append("next-week")
+    if not buckets:
+        buckets = ["this-week", "next-week"]
+        label = "Across the next two weeks"
+    elif len(buckets) == 2:
+        label = "This week and next"
+    elif buckets[0] == "this-week":
+        label = "This week"
+    else:
+        label = "Next week"
+    return buckets, label
+
+
 def _regional_seasonal_targets(
     settings: Settings,
     station_id: str,
     taxa_seen: set[int],
+    taxa: list[dict[str, Any]],
     reference_day: date,
     *,
-    limit: int = 18,
+    limit: int = 20,
 ) -> dict[str, Any] | None:
     """Convert the cached nearby-iNat seasonal census into station targets."""
     cached = cached_regional_watchlist(settings, station_id, reference_day)
@@ -1367,22 +1413,43 @@ def _regional_seasonal_targets(
         if window_start == window_end
         else f"{window_start:%b} {window_start.day} to {window_end:%b} {window_end.day}"
     )
+    daily_counts: dict[int, dict[date, int]] = defaultdict(dict)
+    for daily_row in cached.get("day_rows", []):
+        taxon_id = daily_row.get("taxon_id")
+        calendar_day = parse_date(daily_row.get("calendar_day"))
+        if taxon_id is None or calendar_day is None:
+            continue
+        daily_counts[int(taxon_id)][calendar_day] = int(daily_row.get("record_count") or 0)
+
     items = []
     for row in cached["rows"]:
         taxon_id = row.get("taxon_id")
         if taxon_id is None or int(taxon_id) in taxa_seen:
             continue
         label = _label(row)
+        time_buckets, timing_label = _regional_target_time_metadata(
+            daily_counts.get(int(taxon_id), {}), reference_day
+        )
         items.append(
             {
                 "taxon_id": int(taxon_id),
                 "label": label,
+                "taxon_name": row.get("taxon_name"),
                 "records": int(row.get("record_count") or 0),
                 "photo_url": row.get("photo_url"),
                 "inat_taxon_url": f"https://www.inaturalist.org/taxa/{taxon_id}",
+                "time_buckets": time_buckets,
+                "timing_label": timing_label,
             }
         )
-    items.sort(key=lambda item: (-item["records"], item["label"]))
+    _add_target_host_matches(items, taxa, station_id)
+    items.sort(
+        key=lambda item: (
+            -item["prediction_score"],
+            -item["records"],
+            item["label"],
+        )
+    )
     return {
         "reference_day": reference_day,
         "source": "nearby-inaturalist",
@@ -1667,6 +1734,7 @@ def station_profile(
         settings,
         station_id,
         taxa_seen,
+        taxa,
         reference_day,
     )
     if seasonal_targets is None:
@@ -1676,6 +1744,7 @@ def station_profile(
             all_rows,
             station_id,
             taxa_seen,
+            taxa,
             station_context,
             reference_day,
         )
@@ -1916,6 +1985,89 @@ def _dedupe_hosts(hosts: list[dict[str, str]]) -> list[dict[str, str]]:
         seen.add(key)
         out.append({"family": family, "genus": genus, "species": species})
     return out
+
+
+def _add_target_host_matches(
+    targets: list[dict[str, Any]],
+    taxa: list[dict[str, Any]],
+    station_id: str,
+) -> None:
+    """Attach conservative host-association evidence to seasonal targets.
+
+    A shared host genus does not establish a plant's presence at a station.
+    It is presented only as supporting evidence: the target shares a
+    species-level HOSTS association with moths already documented there.
+    """
+    host_data = _load_host_plants()
+    species_hosts: dict[str, list[dict[str, str]]] = host_data.get("species", {})
+    match_level: dict[str, str] = host_data.get("match_level", {})
+
+    for target in targets:
+        target["host_matches"] = []
+        target["host_match_score"] = 0.0
+        target["prediction_score"] = float(target.get("records") or 0)
+    if not species_hosts:
+        return
+
+    confirmed_by_genus: dict[str, set[str]] = defaultdict(set)
+    genus_catalog: dict[str, set[str]] = defaultdict(set)
+    for name, hosts in species_hosts.items():
+        if match_level.get(name) != "species":
+            continue
+        for host in _dedupe_hosts(hosts):
+            if host["genus"]:
+                genus_catalog[host["genus"]].add(name)
+
+    for taxon in taxa:
+        if station_id not in taxon.get("stations", {}):
+            continue
+        name = taxon.get("taxon_name")
+        if not name or match_level.get(name) != "species":
+            continue
+        for host in _dedupe_hosts(species_hosts.get(name, [])):
+            if host["genus"]:
+                confirmed_by_genus[host["genus"]].add(taxon["label"])
+
+    if not confirmed_by_genus:
+        return
+
+    for target in targets:
+        name = target.get("taxon_name")
+        if not name or match_level.get(name) != "species":
+            continue
+        matches_by_genus: dict[str, dict[str, Any]] = {}
+        for host in _dedupe_hosts(species_hosts.get(name, [])):
+            genus = host["genus"]
+            matching_species = confirmed_by_genus.get(genus, set())
+            if not genus or not matching_species:
+                continue
+            matches_by_genus.setdefault(
+                genus,
+                {
+                    "genus": genus,
+                    "family": host["family"],
+                    "matching_species": sorted(matching_species),
+                    "specificity": 1 / max(1, len(genus_catalog[genus])),
+                },
+            )
+        matches = list(matches_by_genus.values())
+        matches.sort(
+            key=lambda match: (
+                -len(match["matching_species"]),
+                -match["specificity"],
+                match["genus"],
+            )
+        )
+        target["host_matches"] = matches[:3]
+        target["host_match_score"] = sum(
+            len(match["matching_species"]) * match["specificity"]
+            for match in matches
+        )
+        # Nearby seasonal records remain the dominant forecast signal. Host
+        # agreement can improve a close ranking, but never overwhelms it.
+        target["prediction_score"] = float(target.get("records") or 0) * (
+            1 + min(0.35, target["host_match_score"] * 0.5)
+        )
 
 
 def habitat_summary(

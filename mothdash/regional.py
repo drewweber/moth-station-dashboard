@@ -321,4 +321,19 @@ def cached_regional_watchlist(
             """,
             (station_id, reference_day.isoformat()),
         ).fetchall()
-    return {"run": dict(run), "rows": [dict(row) for row in rows]}
+        day_rows = conn.execute(
+            """
+            SELECT calendar_day, taxon_id, record_count
+            FROM regional_watch_day_taxa
+            WHERE station_id = ?
+              AND calendar_day >= ?
+              AND calendar_day <= ?
+            ORDER BY calendar_day, taxon_id
+            """,
+            (station_id, run["window_start"], run["window_end"]),
+        ).fetchall()
+    return {
+        "run": dict(run),
+        "rows": [dict(row) for row in rows],
+        "day_rows": [dict(row) for row in day_rows],
+    }

@@ -2,6 +2,7 @@ from datetime import date, datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from unittest import mock
 from zoneinfo import ZoneInfo
 
 from mothdash.analysis import (
@@ -244,6 +245,70 @@ class SpeciesSemanticsTests(unittest.TestCase):
         self.assertEqual(targets["radius_km"], 100.0)
         self.assertEqual([item["taxon_id"] for item in targets["items"]], [404])
         self.assertEqual(targets["items"][0]["records"], 12)
+
+    def test_station_profile_targets_use_weekly_timing_and_host_overlap(self) -> None:
+        with connect(self.settings.database) as conn:
+            conn.execute(
+                """
+                INSERT INTO regional_watch_runs (
+                    station_id, window_start, window_end, latitude, longitude, radius_km
+                ) VALUES ('station-a', '2026-07-22', '2026-08-04', 42.4, -76.4, 100)
+                """
+            )
+            conn.executemany(
+                """
+                INSERT INTO regional_watch_taxa (
+                    station_id, window_start, taxon_id, taxon_name, common_name,
+                    photo_url, record_count
+                ) VALUES ('station-a', '2026-07-22', ?, ?, ?, ?, ?)
+                """,
+                [
+                    (404, "Targetus regionalis", "Regional Target", None, 12),
+                    (405, "Targetus later", "Later Target", None, 11),
+                ],
+            )
+            conn.executemany(
+                """
+                INSERT INTO regional_watch_day_taxa (
+                    station_id, calendar_day, taxon_id, taxon_name, common_name,
+                    photo_url, record_count
+                ) VALUES ('station-a', ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    ("2026-07-23", 404, "Targetus regionalis", "Regional Target", None, 7),
+                    ("2026-07-30", 404, "Targetus regionalis", "Regional Target", None, 5),
+                    ("2026-07-31", 405, "Targetus later", "Later Target", None, 11),
+                ],
+            )
+
+        host_data = {
+            "species": {
+                "Species alpha": [{"family": "Fagaceae", "genus": "Quercus", "species": "alba"}],
+                "Targetus regionalis": [{"family": "Fagaceae", "genus": "Quercus", "species": "rubra"}],
+                "Targetus later": [{"family": "Rosaceae", "genus": "Prunus", "species": "serotina"}],
+            },
+            "match_level": {
+                "Species alpha": "species",
+                "Targetus regionalis": "species",
+                "Targetus later": "species",
+            },
+        }
+        with mock.patch("mothdash.analysis._load_host_plants", return_value=host_data):
+            profile = station_profile(self.settings, "station-a", today=date(2026, 7, 22))
+
+        targets = {item["taxon_id"]: item for item in profile["seasonal_targets"]["items"]}
+        regional = targets[404]
+        later = targets[405]
+
+        self.assertEqual(regional["time_buckets"], ["this-week", "next-week"])
+        self.assertEqual(later["time_buckets"], ["next-week"])
+        self.assertEqual(regional["host_matches"][0]["genus"], "Quercus")
+        self.assertEqual(
+            regional["host_matches"][0]["matching_species"],
+            ["Alpha (Species alpha)"],
+        )
+        self.assertGreater(regional["prediction_score"], regional["records"])
+        self.assertFalse(later["host_matches"])
 
     def test_distinctive_records_combine_firsts_and_network_rarity(self) -> None:
         # Taxon 102 already qualifies via the setUp fixture's county-first

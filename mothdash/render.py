@@ -1389,6 +1389,26 @@ def _seasonal_target_list(targets: dict[str, Any]) -> str:
     if not rows:
         return '<p class="empty">No new-to-station moth targets are available for this seasonal window yet.</p>'
 
+    host_match_count = sum(1 for row in rows if row.get("host_matches"))
+    host_filter_disabled = " disabled" if not host_match_count else ""
+    host_filter_note = (
+        "No species-level shared host associations are available for these targets."
+        if not host_match_count else ""
+    )
+    filters = f"""
+      <div class="seasonal-target-filters" data-seasonal-target-filters>
+        <div class="seasonal-target-filter-group" role="group" aria-label="Filter targets by seasonal timing">
+          <span class="seasonal-target-filter-label">When</span>
+          <button type="button" class="seasonal-target-filter is-active" data-seasonal-target-time-filter="all" aria-pressed="true">All 14 days</button>
+          <button type="button" class="seasonal-target-filter" data-seasonal-target-time-filter="this-week" aria-pressed="false">This week</button>
+          <button type="button" class="seasonal-target-filter" data-seasonal-target-time-filter="next-week" aria-pressed="false">Next week</button>
+        </div>
+        <button type="button" class="seasonal-target-filter seasonal-target-host-filter" data-seasonal-target-host-filter aria-pressed="false"{host_filter_disabled} title="{h(host_filter_note)}">
+          <span aria-hidden="true">&#127793;</span> Shared host association
+        </button>
+        <p class="seasonal-target-filter-status" data-seasonal-target-filter-status aria-live="polite">Showing {h(len(rows))} targets</p>
+      </div>
+    """
     items = []
     for row in rows:
         label = h(row["label"])
@@ -1398,11 +1418,20 @@ def _seasonal_target_list(targets: dict[str, Any]) -> str:
             else '<div class="watch-placeholder" aria-hidden="true">No photo</div>'
         )
         title = f'<a href="{h(row["inat_taxon_url"])}">{label}</a>'
+        time_buckets = " ".join(row.get("time_buckets") or ["this-week", "next-week"])
+        if row.get("timing_label"):
+            timing_label = row["timing_label"]
+        elif time_buckets == "this-week":
+            timing_label = "This week"
+        elif time_buckets == "next-week":
+            timing_label = "Next week"
+        else:
+            timing_label = "Across the next two weeks"
         if targets.get("source") == "nearby-inaturalist":
             radius = targets.get("radius_km", 100)
             radius_label = f"{radius:g} km"
             detail = (
-                f"{targets['window']} · {row['records']} nearby iNaturalist record"
+                f"{timing_label} · {targets['window']} · {row['records']} nearby iNaturalist record"
                 f"{'s' if row['records'] != 1 else ''}"
             )
             signal = f"within {radius_label} · historical seasonal evidence"
@@ -1418,24 +1447,56 @@ def _seasonal_target_list(targets: dict[str, Any]) -> str:
                 "network": "tracked network",
             }.get(row.get("scope"), "tracked network")
             year_word = "year" if row["years"] == 1 else "years"
-            detail = f"{row['window']} · {row['records']} tracked records across {row['years']} {year_word}"
+            detail = f"{timing_label} · {row['window']} · {row['records']} tracked records across {row['years']} {year_word}"
             if row.get("current_year_records"):
                 signal = f"seen this season at {source_names}"
             else:
                 signal = f"{scope} history: {source_names}"
+        host_matches = row.get("host_matches") or []
+        if host_matches:
+            primary_match = host_matches[0]
+            matching_species = primary_match.get("matching_species") or []
+            matching_count = len(matching_species)
+            source_label = (
+                matching_species[0]
+                if matching_count == 1
+                else f"{matching_count} moths found here"
+            )
+            all_host_genera = ", ".join(dict.fromkeys(match["genus"] for match in host_matches))
+            source_preview = ", ".join(matching_species[:2])
+            source_tail = f", and {matching_count - 2} more" if matching_count > 2 else ""
+            host_title = (
+                f"Shares documented host association: {all_host_genera}. "
+                f"{source_preview}{source_tail} already recorded at this station share {primary_match['genus']}."
+            )
+            host_marker = f"""
+                <span class="target-host-marker" title="{h(host_title)}">
+                <span aria-hidden="true">&#127793;</span>
+                Shares {h(primary_match['genus'])} association with {h(source_label)}
+              </span>
+            """
+        else:
+            host_marker = ""
         items.append(
             f"""
-            <li class="watch-card seasonal-target-card">
+            <li class="watch-card seasonal-target-card" data-seasonal-target-card
+                data-seasonal-target-time="{h(time_buckets)}"
+                data-seasonal-target-host-match="{str(bool(host_matches)).lower()}">
               <div class="watch-image">{media}</div>
               <div class="watch-copy">
                 <span>{title}</span>
                 <small>{h(detail)}</small>
                 <em>{h(signal)}</em>
+                {host_marker}
               </div>
             </li>
             """
         )
-    return f'<ul class="watch-grid seasonal-target-grid">{"".join(items)}</ul>'
+    return (
+        f'{filters}<ul class="watch-grid seasonal-target-grid">{"".join(items)}</ul>'
+        '<p class="empty seasonal-target-filter-empty" data-seasonal-target-filter-empty hidden>'
+        'No targets match these filters.</p>'
+    )
 
 
 def _seasonal_target_intro(station: Station, targets: dict[str, Any]) -> tuple[str, str]:
@@ -1445,7 +1506,7 @@ def _seasonal_target_intro(station: Station, targets: dict[str, Any]) -> tuple[s
             "Next two weeks",
             "Moths not yet recorded at "
             f"{h(station.name)} that iNaturalist has documented within {radius:g} km "
-            "during the next 14 calendar days. Ranked by nearby seasonal record count.",
+            "during the next 14 calendar days. Top 20 are ranked by nearby seasonal record count, with shared host associations as supporting evidence.",
         )
     return (
         "Regional watchlist",
@@ -2572,6 +2633,63 @@ function initUniqueFilter() {
   });
 }
 
+function initSeasonalTargetFilters() {
+  document.querySelectorAll("[data-seasonal-target-filters]").forEach((filters) => {
+    const section = filters.closest("section");
+    if (!section) return;
+    const cards = Array.from(section.querySelectorAll("[data-seasonal-target-card]"));
+    const timeButtons = Array.from(filters.querySelectorAll("[data-seasonal-target-time-filter]"));
+    const hostButton = filters.querySelector("[data-seasonal-target-host-filter]");
+    const status = filters.querySelector("[data-seasonal-target-filter-status]");
+    const empty = section.querySelector("[data-seasonal-target-filter-empty]");
+    if (!cards.length || !timeButtons.length) return;
+
+    let timeFilter = "all";
+    let hostOnly = false;
+    const applyFilters = () => {
+      let visible = 0;
+      cards.forEach((card) => {
+        const buckets = (card.dataset.seasonalTargetTime || "").split(" ").filter(Boolean);
+        const timeMatches = timeFilter === "all" || buckets.includes(timeFilter);
+        const hostMatches = !hostOnly || card.dataset.seasonalTargetHostMatch === "true";
+        const show = timeMatches && hostMatches;
+        card.hidden = !show;
+        if (show) visible += 1;
+      });
+      timeButtons.forEach((button) => {
+        button.classList.toggle("is-active", button.dataset.seasonalTargetTimeFilter === timeFilter);
+        button.setAttribute("aria-pressed", String(button.dataset.seasonalTargetTimeFilter === timeFilter));
+      });
+      if (hostButton) {
+        hostButton.classList.toggle("is-active", hostOnly);
+        hostButton.setAttribute("aria-pressed", String(hostOnly));
+      }
+      if (status) {
+        const filtersApplied = [
+          timeFilter === "all" ? "" : timeFilter === "this-week" ? "this week" : "next week",
+          hostOnly ? "shared host association" : "",
+        ].filter(Boolean);
+        status.textContent = filtersApplied.length
+          ? `Showing ${visible} targets: ${filtersApplied.join(" + ")}`
+          : `Showing ${visible} targets`;
+      }
+      if (empty) empty.hidden = visible > 0;
+    };
+
+    timeButtons.forEach((button) => {
+      button.addEventListener("click", () => {
+        timeFilter = button.dataset.seasonalTargetTimeFilter || "all";
+        applyFilters();
+      });
+    });
+    hostButton?.addEventListener("click", () => {
+      hostOnly = !hostOnly;
+      applyFilters();
+    });
+    applyFilters();
+  });
+}
+
 function recordEscapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (char) => ({
     "&": "&amp;",
@@ -2928,6 +3046,7 @@ initViewToggles();
 initDashboardSectionNavigation();
 initNightStationFilters();
 initUniqueFilter();
+initSeasonalTargetFilters();
 initRecordFilters();
 initInsightFeedback();
 initMonthlyTooltips();
@@ -4525,6 +4644,70 @@ h2 {
 }
 .seasonal-target-card .watch-copy em {
   color: var(--leaf);
+}
+.seasonal-target-filters {
+  display: flex;
+  align-items: center;
+  gap: 10px 14px;
+  margin: 0 0 14px;
+  flex-wrap: wrap;
+}
+.seasonal-target-filter-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.seasonal-target-filter-label {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 650;
+}
+.seasonal-target-filter {
+  min-height: 30px;
+  padding: 4px 9px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+.seasonal-target-filter:hover,
+.seasonal-target-filter.is-active {
+  border-color: var(--amber);
+  color: var(--ink);
+  background: color-mix(in srgb, var(--amber) 13%, transparent);
+}
+.seasonal-target-filter:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+.seasonal-target-filter:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+.seasonal-target-host-filter span[aria-hidden="true"] {
+  margin-right: 3px;
+}
+.seasonal-target-filter-status {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+.target-host-marker {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  margin-top: 7px;
+  color: var(--ink);
+  font-size: 0.76rem;
+  line-height: 1.3;
+}
+.target-host-marker span[aria-hidden="true"] {
+  flex: 0 0 auto;
+  font-size: 0.92rem;
 }
 .watch-image {
   min-height: 124px;

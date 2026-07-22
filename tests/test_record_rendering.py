@@ -166,10 +166,17 @@ class RecordRenderingTests(unittest.TestCase):
                         "records": 3,
                         "years": 2,
                         "window": "Jul 20 to Aug 4",
+                        "time_buckets": ["this-week"],
                         "stations": ["Nearby Station"],
                         "current_year_records": 1,
                         "photo_url": "https://example.test/target.jpg",
                         "inat_taxon_url": "https://www.inaturalist.org/taxa/77",
+                        "host_matches": [
+                            {
+                                "genus": "Quercus",
+                                "matching_species": ["Known Moth"],
+                            }
+                        ],
                     }
                 ]
             }
@@ -180,6 +187,12 @@ class RecordRenderingTests(unittest.TestCase):
         self.assertIn("seen this season at Nearby Station", html)
         self.assertIn("https://www.inaturalist.org/taxa/77", html)
         self.assertIn("seasonal-target-card", html)
+        self.assertIn("Shared host association", html)
+        self.assertIn("Shares Quercus association with Known Moth", html)
+        self.assertIn('data-seasonal-target-time="this-week"', html)
+        self.assertIn('data-seasonal-target-host-match="true"', html)
+        self.assertIn('data-seasonal-target-filter-empty', html)
+        self.assertIn("initSeasonalTargetFilters();", DASHBOARD_JS)
 
     def test_seasonal_target_list_explains_nearby_inaturalist_evidence(self) -> None:
         html = _seasonal_target_list(
