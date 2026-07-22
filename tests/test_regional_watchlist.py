@@ -5,7 +5,7 @@ import unittest
 from unittest.mock import patch
 
 from mothdash.config import Settings, Station
-from mothdash.db import init_db
+from mothdash.db import connect, init_db
 from mothdash.regional import cached_regional_watchlist, refresh_regional_watchlists
 
 
@@ -96,6 +96,25 @@ class RegionalWatchlistTests(unittest.TestCase):
             today=date(2026, 7, 25),
         )
         self.assertEqual(counts_mock.call_count, 14, "current daily cache avoids duplicate API calls")
+
+        counts_mock.reset_mock()
+        counts_mock.side_effect = None
+        counts_mock.return_value = [species_count(101, "Mothus commonus", "Common Moth", 4)]
+        with connect(self.settings.database) as conn:
+            conn.execute(
+                "DELETE FROM regional_watch_day_taxa WHERE station_id = ? AND calendar_day = ?",
+                ("test-station", "2026-07-25"),
+            )
+        refresh_regional_watchlists(
+            self.settings,
+            [self.station],
+            today=date(2026, 7, 25),
+        )
+        self.assertEqual(
+            counts_mock.call_count,
+            1,
+            "a cache marker without day taxa is refreshed rather than reused",
+        )
 
         counts_mock.reset_mock()
         counts_mock.side_effect = None

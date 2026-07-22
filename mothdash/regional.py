@@ -88,13 +88,19 @@ def _fresh_day_cache_exists(
         row = conn.execute(
             """
             SELECT 1
-            FROM regional_watch_day_runs
-            WHERE station_id = ?
-              AND calendar_day = ?
-              AND latitude = ?
-              AND longitude = ?
-              AND radius_km = ?
-              AND cached_at > datetime('now', ?)
+            FROM regional_watch_day_runs AS run
+            WHERE run.station_id = ?
+              AND run.calendar_day = ?
+              AND run.latitude = ?
+              AND run.longitude = ?
+              AND run.radius_km = ?
+              AND run.cached_at > datetime('now', ?)
+              AND EXISTS (
+                SELECT 1
+                FROM regional_watch_day_taxa AS taxa
+                WHERE taxa.station_id = run.station_id
+                  AND taxa.calendar_day = run.calendar_day
+              )
             """,
             (
                 station_id,
