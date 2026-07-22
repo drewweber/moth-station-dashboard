@@ -126,6 +126,8 @@ class RecordRenderingTests(unittest.TestCase):
         self.assertIn("Only shared contributions are shown.", DASHBOARD_JS)
         self.assertIn('bar.toggleAttribute("hidden", !visible)', DASHBOARD_JS)
         self.assertIn(".sr-only {", CSS)
+        self.assertIn("@media (prefers-reduced-motion: reduce)", CSS)
+        self.assertIn(".watch-card:hover .watch-image img", CSS)
 
     def test_dashboard_navigation_has_current_section_state(self) -> None:
         self.assertIn("data-dashboard-section-nav", DASHBOARD_JS)

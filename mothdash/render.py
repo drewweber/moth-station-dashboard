@@ -4370,6 +4370,7 @@ h2 {
   border-radius: 6px;
   overflow: hidden;
   background: var(--panel);
+  transition: border-color 180ms ease-out;
 }
 .watch-image {
   min-height: 124px;
@@ -4383,6 +4384,7 @@ h2 {
 .watch-image img {
   display: block;
   object-fit: cover;
+  transition: transform 180ms ease-out;
 }
 .watch-placeholder {
   display: grid;
@@ -4497,9 +4499,6 @@ h2 {
 .signature-copy small {
   color: var(--muted);
 }
-.signature-card:hover .signature-media img {
-  transform: scale(1.025);
-}
 .signature-card:focus-visible {
   outline: 3px solid var(--amber);
   outline-offset: -3px;
@@ -4608,6 +4607,7 @@ h2 {
   border: 1px solid var(--line);
   border-radius: 6px;
   min-width: 0;
+  transition: border-color 180ms ease-out;
 }
 .recap-showcase-image {
   height: 150px;
@@ -4618,6 +4618,7 @@ h2 {
   height: 100%;
   object-fit: cover;
   display: block;
+  transition: transform 180ms ease-out;
 }
 .recap-showcase-image .record-placeholder {
   height: 100%;
@@ -5269,6 +5270,17 @@ h2 {
   .night-card:hover .night-image img {
     transform: scale(1.025);
   }
+  .watch-card:hover,
+  .recap-showcase-card:hover,
+  .record-card:hover {
+    border-color: color-mix(in srgb, var(--amber) 48%, var(--line));
+  }
+  .watch-card:hover .watch-image img,
+  .recap-showcase-card:hover .recap-showcase-image img,
+  .record-card:hover .record-image img,
+  .signature-card:hover .signature-media img {
+    transform: scale(1.025);
+  }
 }
 .station-card p {
   margin: 0;
@@ -5552,6 +5564,7 @@ h2 {
   background: var(--panel-2);
   border: 1px solid var(--line);
   border-radius: 6px;
+  transition: border-color 180ms ease-out;
 }
 .record-image {
   min-width: 0;
@@ -5561,6 +5574,7 @@ h2 {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  transition: transform 180ms ease-out;
 }
 .record-placeholder {
   height: 100%;
@@ -6285,6 +6299,18 @@ footer div {
   .sampling-context-metrics > div:last-child:nth-child(odd) {
     grid-column: 1 / -1;
     border-right: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
   }
 }
 """
