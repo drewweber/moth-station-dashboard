@@ -130,6 +130,8 @@ class RecordRenderingTests(unittest.TestCase):
         self.assertIn(".watch-card:hover .watch-image img", CSS)
         self.assertIn('.daily-richness-legend button[aria-pressed="true"]', CSS)
         self.assertIn("min-height: 28px", CSS)
+        self.assertIn("tbody tr:nth-child(even)", CSS)
+        self.assertIn("tbody tr:hover", CSS)
 
     def test_dashboard_navigation_has_current_section_state(self) -> None:
         self.assertIn("data-dashboard-section-nav", DASHBOARD_JS)

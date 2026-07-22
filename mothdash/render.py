@@ -5832,6 +5832,18 @@ th {
   color: var(--amber);
   font-weight: 650;
   white-space: nowrap;
+  box-shadow: 0 1px 0 rgba(240, 232, 214, 0.13), 0 7px 12px rgba(0, 0, 0, 0.12);
+}
+tbody tr {
+  transition: background-color 150ms ease-out;
+}
+tbody tr:nth-child(even) {
+  background: rgba(255, 255, 255, 0.018);
+}
+@media (hover: hover) {
+  tbody tr:hover {
+    background: color-mix(in srgb, var(--amber) 6%, var(--panel));
+  }
 }
 th.station-head {
   color: var(--station-color);
