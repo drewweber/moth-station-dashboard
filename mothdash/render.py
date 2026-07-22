@@ -68,7 +68,7 @@ def _mode_toggle(history_href: str, live_href: str, active: str) -> str:
 def _dashboard_section_nav(index_href: str = "index.html") -> str:
     """Render the dashboard section menu for pages outside the dashboard root."""
     items = (
-        ("Last night", "last-night"),
+        ("Previous full night", "last-night"),
         ("Past week", "past-week"),
         ("Stations", "stations"),
         ("Feed", "feed"),
@@ -6486,7 +6486,7 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
         {_mode_toggle("#main", "live.html", "history")}
       </div>
       <nav class="section-nav" aria-label="Dashboard sections" data-dashboard-section-nav>
-        <a href="#last-night">Last night</a>
+        <a href="#last-night">Previous full night</a>
         <a href="#past-week">Past week</a>
         <a href="#stations">Stations</a>
         <a href="#feed">Feed</a>
@@ -6512,7 +6512,7 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
   <main id="main" class="site-shell">
     <section id="last-night">
       <div class="section-head">
-        <h2>Last night</h2>
+        <h2>Previous full night</h2>
         <p>A photo-first scan of the previous completed 12pm-to-12pm moth session, grouped by unique species so shared and station-only sightings are easy to compare.</p>
       </div>
       {_last_night_dashboard(latest_night, stations)}
@@ -6521,7 +6521,7 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
     <section id="past-week">
       <div class="section-head">
         <h2>Past week</h2>
-        <p>The same view as last night, widened to the trailing seven nights so slower-moving activity and multi-night visitors are easier to spot.</p>
+        <p>The same view as the previous full night, widened to the trailing seven nights so slower-moving activity and multi-night visitors are easier to spot.</p>
       </div>
       {_recent_week_dashboard(recent_week, stations)}
     </section>
@@ -6622,7 +6622,7 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
         <h2>Station species comparison</h2>
         <p>Each cell shows the observation count, first session date, and any county, state, or tracked-station first flags. Default sort favors species found across the most stations.</p>
       </div>
-      {_view_toggle("Species comparison view", ("species-all-time", "All time"), ("species-year", f"{year} only" if year else "Current year"), ("species-past-week", "Past week"), ("species-last-night", "Last night"))}
+      {_view_toggle("Species comparison view", ("species-all-time", "All time"), ("species-year", f"{year} only" if year else "Current year"), ("species-past-week", "Past week"), ("species-last-night", "Previous full night"))}
       <div class="view-panel" id="species-all-time"><div class="table-wrap">{_comparison_table(taxa, stations)}</div></div>
       <div class="view-panel" id="species-year" hidden><div class="table-wrap">{_comparison_table(year_taxa, stations)}</div></div>
       <div class="view-panel" id="species-past-week" hidden><div class="table-wrap">{_comparison_table(recent_week_taxa, stations)}</div></div>
