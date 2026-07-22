@@ -34,14 +34,14 @@ from .db import connect, init_db
 
 
 FALLBACK_COLORS = [
-    "#d7b56d",
-    "#6eb7a8",
-    "#cf7d92",
-    "#9b8ed4",
-    "#7fb3d5",
-    "#90b66f",
-    "#d88b61",
-    "#c8a7d8",
+    "#e5bd4e",
+    "#21a5a0",
+    "#dc6689",
+    "#836fc5",
+    "#438fca",
+    "#35ad6b",
+    "#a4bd49",
+    "#df7542",
 ]
 
 
