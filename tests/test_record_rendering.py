@@ -1,6 +1,7 @@
 import unittest
 
 from mothdash.render import (
+    CSS,
     DASHBOARD_JS,
     LIVE_JS,
     PERIOD_CARD_PREVIEW_LIMIT,
@@ -56,6 +57,8 @@ class RecordRenderingTests(unittest.TestCase):
         self.assertIn('id="last-check"', page)
         self.assertIn('id="latest-observation"', page)
         self.assertIn('id="latest-upload"', page)
+        self.assertIn('class="live-freshness"', page)
+        self.assertNotIn('class="live-meta"', page)
         self.assertNotIn("snapshot generated", page)
         self.assertIn("els.lastCheck.textContent = fmtMinuteStamp(now)", LIVE_JS)
         self.assertIn("async function startLiveUpdates", LIVE_JS)
@@ -202,6 +205,7 @@ class RecordRenderingTests(unittest.TestCase):
         self.assertIn("Number(b.dataset.stationCount || 0)", DASHBOARD_JS)
         self.assertIn("button.dataset.nightStationTotal", DASHBOARD_JS)
         self.assertIn("showing ${visible}", DASHBOARD_JS)
+        self.assertIn(".night-card[hidden]", CSS)
 
     def test_period_preview_includes_station_only_cards_beyond_shared_default(self) -> None:
         stations = [

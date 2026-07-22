@@ -3263,26 +3263,28 @@ def _live_page(live_snapshot: dict) -> str:
     height: 28px;
     accent-color: var(--amber);
   }}
-  .live-meta {{
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-    gap: 1px;
-    margin-top: 18px;
-    background: var(--line);
-    border: 1px solid var(--line);
+  .live-freshness {{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 14px;
+    margin: 12px 0 0;
+    color: var(--faint);
+    font-size: 0.78rem;
   }}
-  .live-meta div {{
-    padding: 12px;
-    background: var(--panel-2);
+  .live-freshness span {{
+    white-space: nowrap;
   }}
-  .live-meta strong {{
-    display: block;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    font-variant-numeric: tabular-nums;
+  .live-freshness span + span::before {{
+    content: "·";
+    margin-right: 14px;
+    color: var(--line);
   }}
-  .live-meta span {{
+  .live-freshness strong {{
     color: var(--muted);
-    font-size: 0.82rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: inherit;
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
   }}
   .live-log {{
     display: grid;
@@ -3557,11 +3559,11 @@ def _live_page(live_snapshot: dict) -> str:
           <span>Keep checking</span>
         </label>
       </div>
-      <div class="live-meta">
-        <div><strong id="last-check">not yet</strong><span>last check</span></div>
-        <div><strong id="latest-observation">not yet</strong><span>most recent observation</span></div>
-        <div><strong id="latest-upload">not yet</strong><span>most recent upload</span></div>
-      </div>
+      <p class="live-freshness" aria-label="Live update timing">
+        <span>Checked <strong id="last-check">not yet</strong></span>
+        <span>Latest observation <strong id="latest-observation">not yet</strong></span>
+        <span>Latest upload <strong id="latest-upload">not yet</strong></span>
+      </p>
     </section>
 
     <section aria-labelledby="live-log-title">
@@ -5253,6 +5255,9 @@ h2 {
   border: 1px solid var(--line);
   border-radius: 6px;
   background: var(--panel);
+}
+.night-card[hidden] {
+  display: none;
 }
 .night-image {
   min-width: 0;
