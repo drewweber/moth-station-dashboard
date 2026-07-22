@@ -1454,7 +1454,8 @@ def _seasonal_target_list(targets: dict[str, Any]) -> str:
     host_filter_disabled = " disabled" if not host_match_count else ""
     host_filter_note = (
         "No species-level shared host associations are available for these targets."
-        if not host_match_count else ""
+        if not host_match_count
+        else "Show only targets with a documented host association shared by moths already recorded at this station."
     )
     filters = f"""
       <div class="seasonal-target-filters" data-seasonal-target-filters>
@@ -1465,13 +1466,13 @@ def _seasonal_target_list(targets: dict[str, Any]) -> str:
           <button type="button" class="seasonal-target-filter" data-seasonal-target-time-filter="next-week" aria-pressed="false">Stronger next week</button>
         </div>
         <button type="button" class="seasonal-target-filter seasonal-target-host-filter" data-seasonal-target-host-filter aria-pressed="false"{host_filter_disabled} title="{h(host_filter_note)}">
-          <span aria-hidden="true">&#127793;</span> Shared host association
+          <span aria-hidden="true">&#127793;</span> Host-linked ({h(host_match_count)})
         </button>
         <p class="seasonal-target-filter-status" data-seasonal-target-filter-status aria-live="polite">Showing {h(len(rows))} targets</p>
       </div>
     """
     items = []
-    for row in rows:
+    for order, row in enumerate(rows):
         label = h(row["label"])
         media = (
             f'<img src="{h(row["photo_url"])}" alt="{label}" loading="lazy">'
@@ -1527,6 +1528,9 @@ def _seasonal_target_list(targets: dict[str, Any]) -> str:
             else:
                 signal = f"{scope} history: {source_names}"
         host_matches = row.get("host_matches") or []
+        host_overlap = sum(
+            len(match.get("matching_species") or []) for match in host_matches
+        )
         if host_matches:
             primary_match = host_matches[0]
             matching_species = primary_match.get("matching_species") or []
@@ -1546,7 +1550,7 @@ def _seasonal_target_list(targets: dict[str, Any]) -> str:
             host_marker = f"""
                 <span class="target-host-marker" title="{h(host_title)}">
                 <span aria-hidden="true">&#127793;</span>
-                Shares {h(primary_match['genus'])} association with {h(source_label)}
+                Documented host overlap: {h(primary_match['genus'])} · {h(source_label)}
               </span>
             """
         else:
@@ -1556,7 +1560,9 @@ def _seasonal_target_list(targets: dict[str, Any]) -> str:
             <li class="watch-card seasonal-target-card" data-seasonal-target-card
                 data-seasonal-target-time="{h(time_buckets)}"
                 data-seasonal-target-peak="{h(peak_buckets)}"
-                data-seasonal-target-host-match="{str(bool(host_matches)).lower()}">
+                data-seasonal-target-host-match="{str(bool(host_matches)).lower()}"
+                data-seasonal-target-host-overlap="{host_overlap}"
+                data-seasonal-target-order="{order}">
               <div class="watch-image">{media}</div>
               <div class="watch-copy">
                 <span>{title}</span>
@@ -2926,11 +2932,23 @@ function initSeasonalTargetFilters() {
     const hostButton = filters.querySelector("[data-seasonal-target-host-filter]");
     const status = filters.querySelector("[data-seasonal-target-filter-status]");
     const empty = section.querySelector("[data-seasonal-target-filter-empty]");
+    const grid = section.querySelector(".seasonal-target-grid");
     if (!cards.length || !timeButtons.length) return;
 
     let timeFilter = "all";
     let hostOnly = false;
     const applyFilters = () => {
+      if (grid) {
+        cards
+          .sort((left, right) => {
+            if (!hostOnly) {
+              return Number(left.dataset.seasonalTargetOrder) - Number(right.dataset.seasonalTargetOrder);
+            }
+            const overlapDifference = Number(right.dataset.seasonalTargetHostOverlap) - Number(left.dataset.seasonalTargetHostOverlap);
+            return overlapDifference || Number(left.dataset.seasonalTargetOrder) - Number(right.dataset.seasonalTargetOrder);
+          })
+          .forEach((card) => grid.appendChild(card));
+      }
       let visible = 0;
       cards.forEach((card) => {
         const buckets = (card.dataset.seasonalTargetPeak || "").split(" ").filter(Boolean);
@@ -2949,17 +2967,15 @@ function initSeasonalTargetFilters() {
         hostButton.setAttribute("aria-pressed", String(hostOnly));
       }
       if (status) {
-        const filtersApplied = [
-          timeFilter === "all"
-            ? ""
-            : timeFilter === "this-week"
-              ? "stronger this week"
-              : "stronger next week",
-          hostOnly ? "shared host association" : "",
-        ].filter(Boolean);
-        status.textContent = filtersApplied.length
-          ? `Showing ${visible} targets: ${filtersApplied.join(" + ")}`
-          : `Showing ${visible} targets`;
+        const timingDetail = timeFilter === "all"
+          ? ""
+          : timeFilter === "this-week"
+            ? " · stronger this week"
+            : " · stronger next week";
+        const hostDetail = hostOnly
+          ? " with a shared documented host association"
+          : "";
+        status.textContent = `Showing ${visible} of ${cards.length} targets${hostDetail}${timingDetail}`;
       }
       if (empty) empty.hidden = visible > 0;
     };
@@ -5149,6 +5165,9 @@ h2 {
 .target-host-marker span[aria-hidden="true"] {
   flex: 0 0 auto;
   font-size: 0.92rem;
+}
+.seasonal-target-filter-empty[hidden] {
+  display: none;
 }
 .watch-image {
   min-height: 124px;
