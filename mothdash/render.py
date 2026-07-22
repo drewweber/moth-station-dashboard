@@ -16,6 +16,7 @@ from .analysis import (
     first_of_season,
     generated_at,
     diversify_by_station,
+    habitat_summary,
     hero_photos,
     latest_session_taxa,
     record_highlights,
@@ -1286,7 +1287,7 @@ def _signature_species_gallery(rows: list[dict[str, Any]]) -> str:
     return f'<div class="signature-gallery">{"".join(cards)}</div>'
 
 
-def _recap_species_line(item: dict[str, Any], detail: str) -> str:
+def _recap_showcase_card(item: dict[str, Any], kicker: str, detail: str) -> str:
     label = h(item["label"])
     title = f'<a href="{h(item["url"])}">{label}</a>' if item.get("url") else label
     photo = (
@@ -1295,13 +1296,14 @@ def _recap_species_line(item: dict[str, Any], detail: str) -> str:
         else '<div class="record-placeholder" aria-hidden="true">no photo</div>'
     )
     return f"""
-      <div class="recap-spotlight">
-        <div class="recap-spotlight-image">{photo}</div>
-        <div class="recap-spotlight-copy">
+      <article class="recap-showcase-card">
+        <div class="recap-showcase-image">{photo}</div>
+        <div class="recap-showcase-copy">
+          <p class="recap-card-label">{h(kicker)}</p>
           <h4>{title}</h4>
           <p>{h(detail)}</p>
         </div>
-      </div>
+      </article>
     """
 
 
@@ -1321,20 +1323,45 @@ def _weekly_recap(data: dict[str, Any]) -> str:
     else:
         trend_copy = f"steady with {data['previous_total_species']} the week before"
 
-    new_in_town = data["new_in_town"]
-    new_in_town_html = (
-        "".join(
-            f"""
-            <li>
-              <span>{f'<a href="{h(item["url"])}">{h(item["label"])}</a>' if item.get("url") else h(item["label"])}</span>
-              <small>first seen here {h(item["first"])}</small>
-            </li>
-            """
-            for item in new_in_town
+    moths = data.get("moths_of_the_week") or []
+    showcase_cards = []
+    for index, moth in enumerate(moths, start=1):
+        kicker = "Moth of the Week" if len(moths) == 1 else f"Moth of the Week #{index}"
+        record_word = "record" if moth["network_count"] == 1 else "records"
+        rarity_copy = "the rarest visitor of the week" if index == 1 else "another standout rarity this week"
+        showcase_cards.append(
+            _recap_showcase_card(
+                moth,
+                kicker,
+                f"{moth['network_count']} tracked network {record_word} -- {rarity_copy}.",
+            )
         )
-        if new_in_town
-        else '<li class="recap-empty-line">No brand-new arrivals at this station last week.</li>'
+    showcase_cards.append(
+        _recap_showcase_card(
+            data["frequent_flyer"],
+            "Frequent Flyer",
+            f"Seen {data['frequent_flyer']['count']} times here last week, more than anything else.",
+        )
     )
+    showcase_html = "".join(showcase_cards)
+
+    new_in_town = data["new_in_town"]
+    new_in_town_count = data.get("new_in_town_count", len(new_in_town))
+    if not new_in_town:
+        new_in_town_body = '<p class="recap-empty-line">No brand-new arrivals at this station last week.</p>'
+    else:
+        preview = new_in_town[:2]
+        names = ", ".join(
+            f'<a href="{h(item["url"])}">{h(item["label"])}</a>' if item.get("url") else h(item["label"])
+            for item in preview
+        )
+        remainder = new_in_town_count - len(preview)
+        tail = f", and {remainder} more" if remainder > 0 else ""
+        plural = "species" if new_in_town_count == 1 else "species"
+        new_in_town_body = (
+            f'<p class="recap-stacked-copy">{h(new_in_town_count)} new {plural} first appeared here '
+            f"this week, including {names}{tail}.</p>"
+        )
 
     if data["top_shared_station_name"]:
         shared_copy = (
@@ -1346,36 +1373,21 @@ def _weekly_recap(data: dict[str, Any]) -> str:
 
     return f"""
       <p class="recap-range">{week_range}</p>
-      <div class="recap-grid">
+      <div class="recap-showcase">{showcase_html}</div>
+      <div class="recap-stats">
         <article class="recap-card recap-headline">
           <strong>{h(data['total_species'])}</strong>
           <span>species recorded last week</span>
           <small>{h(trend_copy)}</small>
-        </article>
-        <article class="recap-card recap-card-wide">
-          <p class="recap-card-label">Moth of the Week</p>
-          {_recap_species_line(
-              data['moth_of_the_week'],
-              f"{data['moth_of_the_week']['network_count']} tracked network record"
-              + ("" if data['moth_of_the_week']['network_count'] == 1 else "s")
-              + " -- the rarest visitor of the week.",
-          )}
-        </article>
-        <article class="recap-card recap-card-wide">
-          <p class="recap-card-label">Frequent Flyer</p>
-          {_recap_species_line(
-              data['frequent_flyer'],
-              f"Seen {data['frequent_flyer']['count']} times here last week, more than anything else.",
-          )}
         </article>
         <article class="recap-card">
           <strong>{h(data['nights_active'])}/{h(data['nights_total'])}</strong>
           <span>moth nights with uploads</span>
           <small>Perfect attendance is 7 of 7.</small>
         </article>
-        <article class="recap-card recap-card-wide">
+        <article class="recap-card">
           <p class="recap-card-label">New in Town</p>
-          <ol class="distinctive-list recap-new-list">{new_in_town_html}</ol>
+          {new_in_town_body}
         </article>
         <article class="recap-card recap-card-wide">
           <p class="recap-card-label">How You Stacked Up</p>
@@ -1386,6 +1398,93 @@ def _weekly_recap(data: dict[str, Any]) -> str:
         </article>
       </div>
     """
+
+def _habitat_summary(data: dict[str, Any]) -> str:
+    if not data.get("has_data"):
+        return '<p class="empty">No host-plant reference data is available for confirmed species at this station yet.</p>'
+
+    host_rows = data["host_plants"]
+    if host_rows:
+        host_items = []
+        for row in host_rows:
+            label = h(row["label"])
+            title = f'<a href="{h(row["url"])}">{label}</a>' if row.get("url") else label
+            host_bits = []
+            for hst in row["hosts"]:
+                bit = h(hst["family"])
+                if hst["genus"]:
+                    bit = f"{h(hst['genus'])} {h(hst['species'])}".strip() if hst["species"] else h(hst["genus"])
+                    if hst["family"]:
+                        bit = f"{bit} ({h(hst['family'])})"
+                host_bits.append(bit)
+            host_text = "; ".join(host_bits)
+            genus_note = (
+                ' <small class="habitat-genus-note">(known at the genus level only)</small>'
+                if row.get("genus_level_only") else ""
+            )
+            host_items.append(
+                f'<li><span class="habitat-species">{title}</span>{genus_note}'
+                f'<p class="habitat-hosts">{host_text}</p></li>'
+            )
+        host_list_html = f'<ul class="habitat-list">{"".join(host_items)}</ul>'
+    else:
+        host_list_html = '<p class="habitat-empty">No host-plant matches yet for species confirmed at this station.</p>'
+
+    def candidate_list(items: list[dict[str, Any]], empty_copy: str) -> str:
+        if not items:
+            return f'<p class="habitat-empty">{h(empty_copy)}</p>'
+        rows = []
+        for item in items:
+            genera = ", ".join(h(g) for g in item["shared_genera"])
+            rows.append(
+                f'<li><a href="{h(item["inat_taxon_url"])}">{h(item["label"])}</a>'
+                f'<small>shares a host-plant genus ({genera}) with a confirmed species here</small></li>'
+            )
+        return f'<ul class="habitat-list habitat-candidates">{"".join(rows)}</ul>'
+
+    network_html = candidate_list(
+        data["network_candidates"],
+        "No matching companions confirmed at other tracked stations yet.",
+    )
+    regional_html = candidate_list(
+        data["regional_candidates"],
+        "No matching companions reported elsewhere in New York yet.",
+    )
+
+    coverage_note = h(data.get("coverage_note") or "")
+    retrieved_at = h(data.get("retrieved_at") or "unknown date")
+    source_label = h(data.get("source_label") or "the HOSTS database")
+    source_url = data.get("source_url")
+    source_link = f'<a href="{h(source_url)}">{source_label}</a>' if source_url else source_label
+
+    return f"""
+      <p class="habitat-overview">
+        {h(data['matched_count'])} of {h(data['confirmed_count'])} species confirmed at this station have
+        documented host plants ({h(data['unmatched_count'])} not yet matched).
+      </p>
+      {host_list_html}
+      <details class="habitat-info">
+        <summary><span aria-hidden="true">?</span> About this data</summary>
+        <p>
+          Host-plant records come from {source_link}, a CC0-licensed archive from the Natural History
+          Museum, London. It has not been updated since 2023, so it reflects historical literature rather
+          than necessarily current or local usage -- some matches are only known at the genus level, not
+          the exact species, and some confirmed species here have no HOSTS record at all. {coverage_note}
+          Retrieved {retrieved_at}.
+        </p>
+      </details>
+      <div class="habitat-companions">
+        <div>
+          <p class="recap-card-label">Seen at other tracked stations</p>
+          {network_html}
+        </div>
+        <div>
+          <p class="recap-card-label">Reported elsewhere in New York, not yet tracked</p>
+          {regional_html}
+        </div>
+      </div>
+    """
+
 
 
 def _distinctive_records(data: dict[str, Any]) -> str:
@@ -1862,7 +1961,7 @@ def _snapshot_payload(settings: Settings, stations: list[Station], taxa: list[di
     }
 
 
-def _station_profile_page(station: Station, profile: dict[str, Any], recap: dict[str, Any], color: str) -> str:
+def _station_profile_page(station: Station, profile: dict[str, Any], recap: dict[str, Any], habitat: dict[str, Any], color: str) -> str:
     location = station.public_location or "Configured station"
     website = (
         f'<a href="{h(station.website)}">iNaturalist source</a>'
@@ -1979,6 +2078,14 @@ def _station_profile_page(station: Station, profile: dict[str, Any], recap: dict
         <p>State, county, or network firsts recorded here, plus anything with fewer than 10 tracked network records overall.</p>
       </div>
       {_distinctive_records(profile["distinctive_records"])}
+    </section>
+
+    <section>
+      <div class="section-head">
+        <h2>Habitat summary</h2>
+        <p>Host plants documented for species confirmed here, and companion species that share a host plant -- grounded in real network and New York State records, never an arbitrary global match.</p>
+      </div>
+      {_habitat_summary(habitat)}
     </section>
 
     <section>
@@ -4202,7 +4309,52 @@ h2 {
   font-size: 0.82rem;
   text-transform: uppercase;
 }
-.recap-grid {
+.recap-showcase {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.recap-showcase-card {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  min-width: 0;
+}
+.recap-showcase-image {
+  height: 150px;
+  background: var(--panel);
+}
+.recap-showcase-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.recap-showcase-image .record-placeholder {
+  height: 100%;
+  display: grid;
+  place-items: center;
+  color: var(--faint);
+  font-size: 0.7rem;
+}
+.recap-showcase-copy {
+  padding: 12px 14px 16px;
+}
+.recap-showcase-copy h4 {
+  margin: 0 0 4px;
+  font-size: 1rem;
+  line-height: 1.25;
+}
+.recap-showcase-copy p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+.recap-stats {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 16px;
@@ -4248,56 +4400,8 @@ h2 {
   font-size: 0.78rem;
   text-transform: uppercase;
 }
-.recap-spotlight {
-  display: grid;
-  grid-template-columns: 72px minmax(0, 1fr);
-  gap: 14px;
-  align-items: center;
-}
-.recap-spotlight-image {
-  width: 72px;
-  height: 72px;
-  overflow: hidden;
-  border-radius: 6px;
-  background: var(--panel);
-}
-.recap-spotlight-image img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-.recap-spotlight-image .record-placeholder {
-  height: 100%;
-  display: grid;
-  place-items: center;
-  color: var(--faint);
-  font-size: 0.7rem;
-}
-.recap-spotlight-copy h4 {
-  margin: 0 0 4px;
-  font-size: 1rem;
-  line-height: 1.25;
-}
-.recap-spotlight-copy p {
-  margin: 0;
-  color: var(--muted);
-  font-size: 0.82rem;
-}
-.recap-new-list {
-  counter-reset: none;
-}
-.recap-new-list li::before {
-  content: none;
-}
-.recap-new-list li {
-  grid-template-columns: minmax(0, 1fr);
-}
-.recap-new-list span,
-.recap-new-list small {
-  grid-column: 1;
-}
 .recap-empty-line {
-  border-top: none !important;
+  margin: 0;
   color: var(--muted);
   font-size: 0.85rem;
 }
@@ -4305,6 +4409,90 @@ h2 {
   margin: 0;
   color: var(--ink);
   line-height: 1.45;
+}
+.habitat-overview {
+  margin: 0 0 14px;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+.habitat-list {
+  list-style: none;
+  margin: 0 0 14px;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+.habitat-list li {
+  padding: 12px 14px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.habitat-species {
+  font-weight: 600;
+}
+.habitat-genus-note {
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+.habitat-hosts {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+.habitat-empty {
+  margin: 0 0 14px;
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+.habitat-info {
+  border-top: 1px solid var(--line);
+  margin-bottom: 16px;
+}
+.habitat-info summary {
+  cursor: pointer;
+  padding: 10px 2px;
+  color: var(--amber);
+  font-size: 0.84rem;
+  list-style: none;
+}
+.habitat-info summary::-webkit-details-marker {
+  display: none;
+}
+.habitat-info summary span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-right: 6px;
+  border: 1px solid var(--amber);
+  border-radius: 50%;
+  font-size: 0.72rem;
+}
+.habitat-info p {
+  margin: 0 0 12px;
+  padding: 0 2px;
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+.habitat-companions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px;
+}
+.habitat-candidates li {
+  padding: 10px 12px;
+}
+.habitat-candidates a {
+  color: var(--amber);
+}
+.habitat-candidates small {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.76rem;
 }
 .trend-grid {
   display: grid;
@@ -5965,11 +6153,13 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
             continue
         profile = station_profile(settings, station.id)
         recap = weekly_recap(settings, station.id)
+        habitat = habitat_summary(settings, station.id)
         (stations_dir / f"{station.id}.html").write_text(
             _station_profile_page(
                 station,
                 profile,
                 recap,
+                habitat,
                 station_colors.get(station.id, station.color or FALLBACK_COLORS[0]),
             ),
             encoding="utf-8",

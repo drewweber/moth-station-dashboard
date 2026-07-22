@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import date, datetime, timedelta
+from pathlib import Path
 from typing import Any
+import json
 from zoneinfo import ZoneInfo
 
 from .config import Settings
@@ -359,6 +361,7 @@ def station_taxa(settings: Settings, year: int | None = None) -> list[dict[str, 
             {
                 "taxon_id": int(taxon_id),
                 "label": row["label"],
+                "taxon_name": row.get("taxon_name"),
                 "station_id": row["station_id"],
                 "station_name": row["station_name"],
                 "count": 0,
@@ -394,6 +397,7 @@ def station_taxa(settings: Settings, year: int | None = None) -> list[dict[str, 
         taxon = by_taxon[item["taxon_id"]]
         taxon["taxon_id"] = item["taxon_id"]
         taxon["label"] = item["label"]
+        taxon["taxon_name"] = item.get("taxon_name")
         taxon["stations"][item["station_id"]] = item
 
     results = []
@@ -1573,14 +1577,14 @@ def weekly_recap(settings: Settings, station_id: str, today: date | None = None)
         this_week,
         key=lambda taxon_id: (-this_week[taxon_id], labels.get(taxon_id, "")),
     )
-    moth_of_the_week_id = min(
+    moths_of_the_week_ids = sorted(
         this_week,
         key=lambda taxon_id: (
             network_counts.get(taxon_id, 10**9),
             0 if evidence.get(taxon_id, {}).get("photo_url") else 1,
             labels.get(taxon_id, ""),
         ),
-    )
+    )[:3]
 
     nights_active = len({
         row["session_date"] for row in species_rows
@@ -1616,13 +1620,154 @@ def weekly_recap(settings: Settings, station_id: str, today: date | None = None)
         "previous_total_species": len(previous_week),
         "trend": len(this_week_species) - len(previous_week),
         "new_in_town": new_in_town[:8],
+        "new_in_town_count": len(new_in_town),
         "frequent_flyer": species_summary(frequent_flyer_id),
-        "moth_of_the_week": species_summary(moth_of_the_week_id),
+        "moths_of_the_week": [species_summary(tid) for tid in moths_of_the_week_ids],
         "nights_active": nights_active,
         "nights_total": 7,
         "total_shared_species": len(shared_species),
         "top_shared_station_name": station_names.get(top_shared_station_id),
         "top_shared_count": top_shared_count,
+    }
+
+
+_HOST_PLANTS_PATH = Path(__file__).resolve().parent / "data" / "host_plants.json"
+
+
+def _load_host_plants() -> dict[str, Any]:
+    if not _HOST_PLANTS_PATH.exists():
+        return {"species": {}, "taxa": {}, "match_level": {}, "metadata": {}}
+    with _HOST_PLANTS_PATH.open() as f:
+        return json.load(f)
+
+
+def _dedupe_hosts(hosts: list[dict[str, str]]) -> list[dict[str, str]]:
+    seen: set[tuple[str, str, str]] = set()
+    out: list[dict[str, str]] = []
+    for h in hosts:
+        genus = (h.get("genus") or "").strip()
+        family = (h.get("family") or "").strip()
+        species = (h.get("species") or "").strip()
+        if not genus and not family:
+            continue
+        key = (family, genus, species)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append({"family": family, "genus": genus, "species": species})
+    return out
+
+
+def habitat_summary(settings: Settings, station_id: str) -> dict[str, Any]:
+    """Host-plant based "what else might be here" summary for one station.
+
+    Confirmed species' documented host plants (from the Natural History
+    Museum's HOSTS database, vendored locally in mothdash/data/host_plants.json)
+    are cross-referenced against every other Lepidoptera species reported in
+    New York State on iNaturalist to suggest "companion species" that share a
+    host-plant genus with something already confirmed at this station.
+
+    Candidates are split into two grounded groups -- never an arbitrary
+    global HOSTS match with no connection to real data:
+    - "network" candidates have already been recorded at another tracked
+      station in this project.
+    - "regional" candidates have never been tracked by this project, but
+      have been reported somewhere in New York State on iNaturalist.
+
+    Every candidate links to its iNaturalist taxon page (not an observation,
+    since none exists yet at this station).
+    """
+    host_data = _load_host_plants()
+    species_hosts: dict[str, list[dict[str, str]]] = host_data.get("species", {})
+    taxa_lookup: dict[str, dict[str, Any]] = host_data.get("taxa", {})
+    match_level: dict[str, str] = host_data.get("match_level", {})
+    if not species_hosts:
+        return {"has_data": False}
+
+    taxa = station_taxa(settings)
+    confirmed = [t for t in taxa if t["stations"].get(station_id)]
+    if not confirmed:
+        return {"has_data": False}
+
+    network_names = {t.get("taxon_name") for t in taxa if t.get("taxon_name")}
+    confirmed_names = {t.get("taxon_name") for t in confirmed if t.get("taxon_name")}
+
+    genus_index: dict[str, set[str]] = defaultdict(set)
+    for name, hosts in species_hosts.items():
+        for h in _dedupe_hosts(hosts):
+            if h["genus"]:
+                genus_index[h["genus"]].add(name)
+
+    host_plant_rows: list[dict[str, Any]] = []
+    unmatched_count = 0
+    candidate_map: dict[str, dict[str, Any]] = {}
+    for t in confirmed:
+        name = t.get("taxon_name")
+        hosts = _dedupe_hosts(species_hosts.get(name, [])) if name else []
+        if not hosts:
+            unmatched_count += 1
+            continue
+        station_entry = t["stations"][station_id]
+        host_plant_rows.append({
+            "taxon_id": t["taxon_id"],
+            "label": t["label"],
+            "url": station_entry.get("url"),
+            "hosts": hosts[:5],
+            "host_count": len(hosts),
+            "genus_level_only": match_level.get(name) == "genus",
+        })
+        for h in hosts:
+            genus = h["genus"]
+            if not genus:
+                continue
+            for other_name in genus_index.get(genus, ()):
+                if other_name == name or other_name in confirmed_names:
+                    continue
+                other_taxon = taxa_lookup.get(other_name)
+                if not other_taxon or not other_taxon.get("taxon_id"):
+                    continue
+                entry = candidate_map.setdefault(
+                    other_name,
+                    {
+                        "taxon_id": other_taxon["taxon_id"],
+                        "label": (
+                            f"{other_taxon['common_name']} ({other_name})"
+                            if other_taxon.get("common_name")
+                            else other_name
+                        ),
+                        "inat_taxon_url": f"https://www.inaturalist.org/taxa/{other_taxon['taxon_id']}",
+                        "shared_genera": set(),
+                        "source": "network" if other_name in network_names else "regional",
+                    },
+                )
+                entry["shared_genera"].add(genus)
+
+    def finalize(source: str, limit: int) -> list[dict[str, Any]]:
+        items = [c for c in candidate_map.values() if c["source"] == source]
+        items.sort(key=lambda c: (-len(c["shared_genera"]), c["label"]))
+        return [
+            {
+                "taxon_id": c["taxon_id"],
+                "label": c["label"],
+                "inat_taxon_url": c["inat_taxon_url"],
+                "shared_genera": sorted(c["shared_genera"]),
+            }
+            for c in items[:limit]
+        ]
+
+    metadata = host_data.get("metadata", {})
+    return {
+        "has_data": True,
+        "host_plants": sorted(host_plant_rows, key=lambda r: r["label"]),
+        "unmatched_count": unmatched_count,
+        "confirmed_count": len(confirmed),
+        "matched_count": len(host_plant_rows),
+        "network_candidates": finalize("network", 8),
+        "regional_candidates": finalize("regional", 8),
+        "source_label": metadata.get("source"),
+        "source_url": metadata.get("source_url"),
+        "coverage_note": metadata.get("coverage"),
+        "retrieved_at": metadata.get("retrieved_at"),
     }
 
 
