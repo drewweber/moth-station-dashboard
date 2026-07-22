@@ -2436,6 +2436,15 @@ def _dedupe_hosts(hosts: list[dict[str, str]]) -> list[dict[str, str]]:
     return out
 
 
+def _host_species_key(host: dict[str, str]) -> tuple[str, str] | None:
+    """Return a normalized plant-species key when HOSTS is that specific."""
+    genus = " ".join((host.get("genus") or "").split())
+    species = " ".join((host.get("species") or "").split())
+    if not genus or not species:
+        return None
+    return (genus.casefold(), species.casefold())
+
+
 def _add_target_host_matches(
     targets: list[dict[str, Any]],
     taxa: list[dict[str, Any]],
@@ -2443,9 +2452,10 @@ def _add_target_host_matches(
 ) -> None:
     """Attach conservative host-association evidence to seasonal targets.
 
-    A shared host genus does not establish a plant's presence at a station.
-    It is presented only as supporting evidence: the target shares a
-    species-level HOSTS association with moths already documented there.
+    Exact shared host plants are the primary signal. A shared host genus is
+    retained as a clearly weaker fallback when the HOSTS records do not name
+    the same plant species. Neither signal establishes plant presence at a
+    station; both are supporting evidence from documented moth associations.
     """
     host_data = _load_host_plants()
     species_hosts: dict[str, list[dict[str, str]]] = host_data.get("species", {})
@@ -2454,6 +2464,11 @@ def _add_target_host_matches(
     for target in targets:
         target["host_matches"] = []
         target["host_match_score"] = 0.0
+        target["host_evidence"] = {
+            "exact_plant_matches": 0,
+            "genus_overlaps": 0,
+            "station_moth_count": 0,
+        }
         target["prediction_score"] = float(
             target.get("seasonal_score") or target.get("records") or 0
         )
@@ -2461,13 +2476,18 @@ def _add_target_host_matches(
         return
 
     confirmed_by_genus: dict[str, set[str]] = defaultdict(set)
+    confirmed_by_plant: dict[tuple[str, str], set[str]] = defaultdict(set)
     genus_catalog: dict[str, set[str]] = defaultdict(set)
+    plant_catalog: dict[tuple[str, str], set[str]] = defaultdict(set)
     for name, hosts in species_hosts.items():
         if match_level.get(name) != "species":
             continue
         for host in _dedupe_hosts(hosts):
             if host["genus"]:
                 genus_catalog[host["genus"]].add(name)
+            plant_key = _host_species_key(host)
+            if plant_key:
+                plant_catalog[plant_key].add(name)
 
     for taxon in taxa:
         if station_id not in taxon.get("stations", {}):
@@ -2478,6 +2498,9 @@ def _add_target_host_matches(
         for host in _dedupe_hosts(species_hosts.get(name, [])):
             if host["genus"]:
                 confirmed_by_genus[host["genus"]].add(taxon["label"])
+            plant_key = _host_species_key(host)
+            if plant_key:
+                confirmed_by_plant[plant_key].add(taxon["label"])
 
     if not confirmed_by_genus:
         return
@@ -2486,39 +2509,82 @@ def _add_target_host_matches(
         name = target.get("taxon_name")
         if not name or match_level.get(name) != "species":
             continue
-        matches_by_genus: dict[str, dict[str, Any]] = {}
-        for host in _dedupe_hosts(species_hosts.get(name, [])):
-            genus = host["genus"]
-            matching_species = confirmed_by_genus.get(genus, set())
-            if not genus or not matching_species:
+        target_hosts = _dedupe_hosts(species_hosts.get(name, []))
+        exact_matches_by_plant: dict[tuple[str, str], dict[str, Any]] = {}
+        exact_genera: set[str] = set()
+        for host in target_hosts:
+            plant_key = _host_species_key(host)
+            matching_species = (
+                confirmed_by_plant.get(plant_key, set()) if plant_key else set()
+            )
+            if not matching_species:
                 continue
-            matches_by_genus.setdefault(
-                genus,
+            exact_genera.add(host["genus"])
+            exact_matches_by_plant.setdefault(
+                plant_key,
                 {
-                    "genus": genus,
+                    "match_level": "exact-plant",
+                    "genus": host["genus"],
                     "family": host["family"],
+                    "species": host["species"],
                     "matching_species": sorted(matching_species),
-                    "specificity": 1 / max(1, len(genus_catalog[genus])),
+                    "specificity": 1 / max(1, len(plant_catalog[plant_key])),
                 },
             )
-        matches = list(matches_by_genus.values())
+
+        exact_matches = list(exact_matches_by_plant.values())
+        genus_matches: list[dict[str, Any]] = []
+        for genus in sorted({host["genus"] for host in target_hosts if host["genus"]} - exact_genera):
+            matching_species = confirmed_by_genus.get(genus, set())
+            if not matching_species:
+                continue
+            exemplar = next(host for host in target_hosts if host["genus"] == genus)
+            genus_matches.append(
+                {
+                    "match_level": "shared-genus",
+                    "genus": genus,
+                    "family": exemplar["family"],
+                    "species": "",
+                    "matching_species": sorted(matching_species),
+                    "specificity": 1 / max(1, len(genus_catalog[genus])),
+                }
+            )
+
+        matches = exact_matches + genus_matches
         matches.sort(
             key=lambda match: (
-                -len(match["matching_species"]),
+                match["match_level"] != "exact-plant",
                 -match["specificity"],
                 match["genus"],
+                match["species"],
             )
         )
-        target["host_matches"] = matches[:3]
-        target["host_match_score"] = sum(
-            len(match["matching_species"]) * match["specificity"]
+        exact_count = len(exact_matches)
+        genus_count = len(genus_matches)
+        station_moths = {
+            moth
             for match in matches
-        )
+            for moth in match["matching_species"]
+        }
+        # Each distinct exact host plant carries a full point, with a small
+        # bonus for a more specific association. Genus-only overlap is useful
+        # context but deliberately much weaker. This rewards breadth of
+        # independent shared host evidence, not repeated moths on one genus.
+        exact_score = sum(1 + match["specificity"] for match in exact_matches)
+        genus_score = sum(0.2 + (0.2 * match["specificity"]) for match in genus_matches)
+        host_score = exact_score + genus_score
+        target["host_matches"] = matches
+        target["host_evidence"] = {
+            "exact_plant_matches": exact_count,
+            "genus_overlaps": genus_count,
+            "station_moth_count": len(station_moths),
+        }
+        target["host_match_score"] = host_score
         # Nearby seasonal records remain the dominant forecast signal. Host
         # agreement can improve a close ranking, but never overwhelms it.
         base_score = float(target.get("seasonal_score") or target.get("records") or 0)
         target["prediction_score"] = base_score * (
-            1 + min(0.35, target["host_match_score"] * 0.5)
+            1 + min(0.35, host_score * 0.1)
         )
 
 

@@ -6,6 +6,7 @@ from unittest import mock
 from zoneinfo import ZoneInfo
 
 from mothdash.analysis import (
+    _add_target_host_matches,
     _forecast_station_context,
     _historical_target_backtest,
     _published_forecast_validation,
@@ -317,8 +318,62 @@ class SpeciesSemanticsTests(unittest.TestCase):
             regional["host_matches"][0]["matching_species"],
             ["Alpha (Species alpha)"],
         )
-        self.assertGreater(regional["prediction_score"], regional["records"])
+        self.assertGreater(regional["prediction_score"], regional["seasonal_score"])
         self.assertFalse(later["host_matches"])
+
+    def test_host_evidence_scores_all_shared_exact_plants_above_one_or_broader_genus(self) -> None:
+        host_data = {
+            "species": {
+                "Found Oak": [{"family": "Fagaceae", "genus": "Quercus", "species": "alba"}],
+                "Found Maple": [{"family": "Sapindaceae", "genus": "Acer", "species": "rubrum"}],
+                "Found Birch": [{"family": "Betulaceae", "genus": "Betula", "species": "lenta"}],
+                "Found Elm": [{"family": "Ulmaceae", "genus": "Ulmus", "species": "americana"}],
+                "Target diverse": [
+                    {"family": "Fagaceae", "genus": "Quercus", "species": "alba"},
+                    {"family": "Sapindaceae", "genus": "Acer", "species": "rubrum"},
+                    {"family": "Betulaceae", "genus": "Betula", "species": "lenta"},
+                    {"family": "Ulmaceae", "genus": "Ulmus", "species": "americana"},
+                ],
+                "Target single": [{"family": "Fagaceae", "genus": "Quercus", "species": "alba"}],
+                "Target broad": [{"family": "Fagaceae", "genus": "Quercus", "species": "rubra"}],
+            },
+            "match_level": {
+                "Found Oak": "species",
+                "Found Maple": "species",
+                "Found Birch": "species",
+                "Found Elm": "species",
+                "Target diverse": "species",
+                "Target single": "species",
+                "Target broad": "species",
+            },
+        }
+        taxa = [
+            {"taxon_name": name, "label": name, "stations": {"station-a": {}}}
+            for name in ("Found Oak", "Found Maple", "Found Birch", "Found Elm")
+        ]
+        targets = [
+            {"taxon_name": name, "seasonal_score": 10}
+            for name in ("Target diverse", "Target single", "Target broad")
+        ]
+
+        with mock.patch("mothdash.analysis._load_host_plants", return_value=host_data):
+            _add_target_host_matches(targets, taxa, "station-a")
+
+        evidence = {target["taxon_name"]: target for target in targets}
+        diverse = evidence["Target diverse"]
+        single = evidence["Target single"]
+        broad = evidence["Target broad"]
+
+        self.assertEqual(diverse["host_evidence"]["exact_plant_matches"], 4)
+        self.assertEqual(diverse["host_evidence"]["genus_overlaps"], 0)
+        self.assertEqual(diverse["host_evidence"]["station_moth_count"], 4)
+        self.assertEqual(len(diverse["host_matches"]), 4)
+        self.assertTrue(all(match["match_level"] == "exact-plant" for match in diverse["host_matches"]))
+        self.assertGreater(diverse["host_match_score"], single["host_match_score"])
+        self.assertGreater(single["host_match_score"], broad["host_match_score"])
+        self.assertEqual(broad["host_evidence"]["exact_plant_matches"], 0)
+        self.assertEqual(broad["host_evidence"]["genus_overlaps"], 1)
+        self.assertEqual(broad["host_matches"][0]["match_level"], "shared-genus")
 
     def test_distinctive_records_combine_firsts_and_network_rarity(self) -> None:
         # Taxon 102 already qualifies via the setUp fixture's county-first

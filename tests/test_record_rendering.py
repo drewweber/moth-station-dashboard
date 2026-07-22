@@ -194,10 +194,18 @@ class RecordRenderingTests(unittest.TestCase):
                         "inat_taxon_url": "https://www.inaturalist.org/taxa/77",
                         "host_matches": [
                             {
+                                "match_level": "exact-plant",
                                 "genus": "Quercus",
+                                "species": "alba",
                                 "matching_species": ["Known Moth"],
                             }
                         ],
+                        "host_evidence": {
+                            "exact_plant_matches": 1,
+                            "genus_overlaps": 0,
+                            "station_moth_count": 1,
+                        },
+                        "host_match_score": 1.5,
                     }
                 ]
             }
@@ -209,15 +217,15 @@ class RecordRenderingTests(unittest.TestCase):
         self.assertIn("https://www.inaturalist.org/taxa/77", html)
         self.assertIn("seasonal-target-card", html)
         self.assertIn("Host-linked (1)", html)
-        self.assertIn("Documented host overlap: Quercus · Known Moth", html)
+        self.assertIn("Host evidence: 1 exact shared host plant · 1 station moth", html)
         self.assertIn('data-seasonal-target-time="this-week"', html)
         self.assertIn('data-seasonal-target-peak="this-week"', html)
         self.assertIn('data-seasonal-target-host-match="true"', html)
-        self.assertIn('data-seasonal-target-host-overlap="1"', html)
+        self.assertIn('data-seasonal-target-host-score="1.500000"', html)
         self.assertIn('data-seasonal-target-order="0"', html)
         self.assertIn('data-seasonal-target-filter-empty', html)
         self.assertIn("seasonalTargetPeak", DASHBOARD_JS)
-        self.assertIn("seasonalTargetHostOverlap", DASHBOARD_JS)
+        self.assertIn("seasonalTargetHostScore", DASHBOARD_JS)
         self.assertIn("of ${cards.length} targets", DASHBOARD_JS)
         self.assertIn(".seasonal-target-filter-empty[hidden]", CSS)
         self.assertIn("initSeasonalTargetFilters();", DASHBOARD_JS)

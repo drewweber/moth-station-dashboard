@@ -1455,7 +1455,7 @@ def _seasonal_target_list(targets: dict[str, Any]) -> str:
     host_filter_note = (
         "No species-level shared host associations are available for these targets."
         if not host_match_count
-        else "Show only targets with a documented host association shared by moths already recorded at this station."
+        else "Show targets with documented host evidence from moths already recorded at this station. Exact shared host plants rank above broader shared host genera."
     )
     filters = f"""
       <div class="seasonal-target-filters" data-seasonal-target-filters>
@@ -1528,29 +1528,60 @@ def _seasonal_target_list(targets: dict[str, Any]) -> str:
             else:
                 signal = f"{scope} history: {source_names}"
         host_matches = row.get("host_matches") or []
-        host_overlap = sum(
-            len(match.get("matching_species") or []) for match in host_matches
-        )
-        if host_matches:
-            primary_match = host_matches[0]
-            matching_species = primary_match.get("matching_species") or []
-            matching_count = len(matching_species)
-            source_label = (
-                matching_species[0]
-                if matching_count == 1
-                else f"{matching_count} moths found here"
+        host_evidence = row.get("host_evidence") or {}
+        exact_plant_matches = int(
+            host_evidence.get(
+                "exact_plant_matches",
+                sum(match.get("match_level") == "exact-plant" for match in host_matches),
             )
-            all_host_genera = ", ".join(dict.fromkeys(match["genus"] for match in host_matches))
-            source_preview = ", ".join(matching_species[:2])
-            source_tail = f", and {matching_count - 2} more" if matching_count > 2 else ""
+        )
+        genus_overlaps = int(
+            host_evidence.get(
+                "genus_overlaps",
+                sum(match.get("match_level") != "exact-plant" for match in host_matches),
+            )
+        )
+        station_moths = sorted(
+            {
+                moth
+                for match in host_matches
+                for moth in (match.get("matching_species") or [])
+            }
+        )
+        station_moth_count = int(host_evidence.get("station_moth_count", len(station_moths)))
+        host_score = float(row.get("host_match_score") or 0)
+        if host_matches:
+            evidence_parts = []
+            if exact_plant_matches:
+                evidence_parts.append(
+                    f"{exact_plant_matches} exact shared host plant"
+                    f"{'s' if exact_plant_matches != 1 else ''}"
+                )
+            if genus_overlaps:
+                evidence_parts.append(
+                    f"{genus_overlaps} broader shared host "
+                    f"{'genera' if genus_overlaps != 1 else 'genus'}"
+                )
+            evidence_label = " + ".join(evidence_parts) or "documented host overlap"
+            match_labels = [
+                f"{match['genus']} {match['species']}".strip()
+                if match.get("match_level") == "exact-plant"
+                else f"{match['genus']} (genus overlap)"
+                for match in host_matches
+            ]
+            match_preview = ", ".join(match_labels[:5])
+            match_tail = f", and {len(match_labels) - 5} more" if len(match_labels) > 5 else ""
+            moth_preview = ", ".join(station_moths[:3])
+            moth_tail = f", and {station_moth_count - 3} more" if station_moth_count > 3 else ""
             host_title = (
-                f"Shares documented host association: {all_host_genera}. "
-                f"{source_preview}{source_tail} already recorded at this station share {primary_match['genus']}."
+                f"Host evidence: {evidence_label}. Exact shared plant records carry more weight "
+                f"than broader genus overlap. Matching associations: {match_preview}{match_tail}. "
+                f"Station moths contributing evidence: {moth_preview}{moth_tail}."
             )
             host_marker = f"""
                 <span class="target-host-marker" title="{h(host_title)}">
                 <span aria-hidden="true">&#127793;</span>
-                Documented host overlap: {h(primary_match['genus'])} · {h(source_label)}
+                Host evidence: {h(evidence_label)} · {h(station_moth_count)} station moth{'s' if station_moth_count != 1 else ''}
               </span>
             """
         else:
@@ -1561,7 +1592,7 @@ def _seasonal_target_list(targets: dict[str, Any]) -> str:
                 data-seasonal-target-time="{h(time_buckets)}"
                 data-seasonal-target-peak="{h(peak_buckets)}"
                 data-seasonal-target-host-match="{str(bool(host_matches)).lower()}"
-                data-seasonal-target-host-overlap="{host_overlap}"
+                data-seasonal-target-host-score="{host_score:.6f}"
                 data-seasonal-target-order="{order}">
               <div class="watch-image">{media}</div>
               <div class="watch-copy">
@@ -1587,7 +1618,7 @@ def _seasonal_target_intro(station: Station, targets: dict[str, Any]) -> tuple[s
             "Next two weeks",
             "Moths not yet recorded at "
             f"{h(station.name)} that iNaturalist has documented within {radius:g} km "
-            "during the next 14 calendar days. Top 20 are ranked by nearby seasonal record count, with shared host associations as supporting evidence.",
+            "during the next 14 calendar days. Top 20 are ranked by nearby seasonal record count; comprehensive host evidence is supporting context, with exact shared host plants weighted above broader genus overlap.",
         )
     return (
         "Regional watchlist",
@@ -2944,8 +2975,8 @@ function initSeasonalTargetFilters() {
             if (!hostOnly) {
               return Number(left.dataset.seasonalTargetOrder) - Number(right.dataset.seasonalTargetOrder);
             }
-            const overlapDifference = Number(right.dataset.seasonalTargetHostOverlap) - Number(left.dataset.seasonalTargetHostOverlap);
-            return overlapDifference || Number(left.dataset.seasonalTargetOrder) - Number(right.dataset.seasonalTargetOrder);
+            const evidenceDifference = Number(right.dataset.seasonalTargetHostScore) - Number(left.dataset.seasonalTargetHostScore);
+            return evidenceDifference || Number(left.dataset.seasonalTargetOrder) - Number(right.dataset.seasonalTargetOrder);
           })
           .forEach((card) => grid.appendChild(card));
       }
@@ -2973,7 +3004,7 @@ function initSeasonalTargetFilters() {
             ? " · stronger this week"
             : " · stronger next week";
         const hostDetail = hostOnly
-          ? " with a shared documented host association"
+          ? " with documented host evidence · strongest evidence first"
           : "";
         status.textContent = `Showing ${visible} of ${cards.length} targets${hostDetail}${timingDetail}`;
       }
