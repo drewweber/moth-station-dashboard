@@ -422,11 +422,12 @@ def station_taxa(settings: Settings, year: int | None = None) -> list[dict[str, 
     return sorted(results, key=lambda item: (-item["station_count"], item["label"]))
 
 
-def latest_session_taxa(settings: Settings) -> dict[str, Any]:
+def _session_taxa(settings: Settings, target_session: date | None = None) -> dict[str, Any]:
     rows = load_rows(settings)
     session_dates = [row["session_date"] for row in rows if row.get("session_date")]
-    latest = max(session_dates) if session_dates else None
-    if latest is None:
+    latest_synced = max(session_dates) if session_dates else None
+    session = target_session or latest_synced
+    if session is None:
         return {"session_date": None, "taxa": [], "station_counts": {}, "observations": 0}
 
     grouped: dict[tuple[int, str], dict[str, Any]] = {}
@@ -435,7 +436,7 @@ def latest_session_taxa(settings: Settings) -> dict[str, Any]:
 
     for row in rows:
         taxon_id = row.get("taxon_id")
-        if not taxon_id or not is_species(row) or row.get("session_date") != latest:
+        if not taxon_id or not is_species(row) or row.get("session_date") != session:
             continue
         observation_count += 1
         taxon_id = int(taxon_id)
@@ -450,8 +451,8 @@ def latest_session_taxa(settings: Settings) -> dict[str, Any]:
                 "station_id": station_id,
                 "station_name": row["station_name"],
                 "count": 0,
-                "first": latest,
-                "latest": latest,
+                "first": session,
+                "latest": session,
                 "photo_url": None,
                 "url": None,
                 "observer_login": None,
@@ -485,20 +486,39 @@ def latest_session_taxa(settings: Settings) -> dict[str, Any]:
     for item in by_taxon.values():
         item["station_count"] = len(item["stations"])
         item["total_count"] = sum(station["count"] for station in item["stations"].values())
-        item["first_among_tracked_date"] = latest
+        item["first_among_tracked_date"] = session
         item["first_among_tracked_stations"] = []
         taxa.append(dict(item))
 
     return {
-        "session_date": latest,
-        "period_label": latest,
+        "session_date": session,
+        "period_label": session,
         "taxa": sorted(taxa, key=lambda item: (-item["station_count"], -item["total_count"], item["label"])),
         "station_counts": {
             station_id: len(station_taxa)
             for station_id, station_taxa in station_taxa_seen.items()
         },
         "observations": observation_count,
+        "latest_session": latest_synced,
     }
+
+
+def latest_session_taxa(settings: Settings) -> dict[str, Any]:
+    """Return species from the newest synced moth session, including an active one."""
+    return _session_taxa(settings)
+
+
+def last_completed_session_taxa(
+    settings: Settings,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Return the 12pm-to-12pm moth session that ended most recently."""
+    completed_session = current_session_date(
+        settings.session_cutoff_hour,
+        settings.timezone,
+        now,
+    ) - timedelta(days=1)
+    return _session_taxa(settings, completed_session)
 
 
 def recent_days_taxa(

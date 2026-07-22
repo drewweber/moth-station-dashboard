@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 
 from mothdash.analysis import (
     first_of_season,
+    last_completed_session_taxa,
     latest_session_taxa,
     recent_days_taxa,
     record_highlights,
@@ -86,6 +87,37 @@ class SpeciesSemanticsTests(unittest.TestCase):
         self.assertEqual({row["taxon_id"] for row in recent["taxa"]}, {101, 102})
         self.assertEqual(latest["observations"], 4)
         self.assertEqual(recent["observations"], 4)
+
+    def test_last_night_uses_the_last_completed_session_not_the_active_one(self) -> None:
+        with connect(self.settings.database) as conn:
+            conn.execute(
+                """
+                INSERT INTO observations (
+                    station_id, inat_obs_id, observed_on, observed_at,
+                    taxon_id, taxon_name, common_name, rank, url
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "station-a",
+                    8,
+                    "2026-07-11",
+                    "2026-07-11T22:00:00-04:00",
+                    999,
+                    "Current session species",
+                    "Current",
+                    "species",
+                    "https://example.test/8",
+                ),
+            )
+
+        last_night = last_completed_session_taxa(
+            self.settings,
+            now=datetime(2026, 7, 11, 21, 0, tzinfo=ZoneInfo("America/New_York")),
+        )
+
+        self.assertEqual(last_night["session_date"].isoformat(), "2026-07-10")
+        self.assertEqual(last_night["latest_session"].isoformat(), "2026-07-11")
+        self.assertEqual({row["taxon_id"] for row in last_night["taxa"]}, {101, 102})
 
     def test_current_week_does_not_slide_back_to_stale_data(self) -> None:
         recent = recent_days_taxa(

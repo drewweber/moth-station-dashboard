@@ -18,7 +18,7 @@ from .analysis import (
     diversify_by_station,
     habitat_summary,
     hero_photos,
-    latest_session_taxa,
+    last_completed_session_taxa,
     record_highlights,
     recent_days_taxa,
     recent_observations,
@@ -508,8 +508,8 @@ def _last_night_dashboard(payload: dict[str, Any], stations: list[Station]) -> s
     return _taxa_period_dashboard(
         payload,
         stations,
-        "latest moth session",
-        "No latest-session moth observations are available yet.",
+        "completed 12pm-to-12pm moth session",
+        "No species-level moth observations were recorded in the last completed moth session.",
     )
 
 
@@ -6176,7 +6176,7 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
     year = active_year(settings)
     pulses = first_of_season(settings, year)
     all_time_pulses = first_of_season(settings, all_time=True)
-    latest_night = latest_session_taxa(settings)
+    latest_night = last_completed_session_taxa(settings)
     recent_week = recent_days_taxa(settings)
     taxa = station_taxa(settings)
     year_taxa = station_taxa(settings, year) if year else []
@@ -6235,7 +6235,7 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
     <section id="last-night">
       <div class="section-head">
         <h2>Last night</h2>
-        <p>A photo-first scan of the latest synced moth session, grouped by unique species so shared and station-only sightings are easy to compare.</p>
+        <p>A photo-first scan of the previous completed 12pm-to-12pm moth session, grouped by unique species so shared and station-only sightings are easy to compare.</p>
       </div>
       {_last_night_dashboard(latest_night, stations)}
     </section>
