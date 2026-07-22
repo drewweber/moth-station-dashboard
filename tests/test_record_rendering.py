@@ -117,6 +117,13 @@ class RecordRenderingTests(unittest.TestCase):
         self.assertIn("Beta: 4 total, 0 only", html)
         self.assertIn("Shared by 2+ stations", html)
         self.assertIn(".daily-richness-line-chart", DASHBOARD_JS)
+        self.assertIn('data-daily-richness-series="alpha"', html)
+        self.assertIn('aria-pressed="true"', html)
+        self.assertIn('data-daily-richness-height=', html)
+        self.assertIn("initDailyRichnessLegendToggles();", DASHBOARD_JS)
+        self.assertIn("Only shared contributions are shown.", DASHBOARD_JS)
+        self.assertIn('bar.toggleAttribute("hidden", !visible)', DASHBOARD_JS)
+        self.assertIn(".sr-only {", CSS)
 
     def test_insight_feedback_cards_have_stable_rating_hooks(self) -> None:
         insight = {

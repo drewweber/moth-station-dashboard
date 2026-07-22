@@ -989,7 +989,10 @@ def _daily_species_line_chart(rows: list[dict[str, Any]], stations: list[Station
         color = colors[station.id]
         station_series.append((station, values, color))
         legend.append(
-            f'<li style="--series-color: {h(color)}"><i></i><span>{h(_station_short_label(station))} only</span></li>'
+            f'''<li><button type="button" class="daily-richness-legend-toggle"
+                data-daily-richness-series="{h(station.id)}" aria-pressed="true"
+                style="--series-color: {h(color)}"><i aria-hidden="true"></i>
+                <span>{h(_station_short_label(station))} only</span></button></li>'''
         )
 
     if date_count <= 1:
@@ -999,18 +1002,21 @@ def _daily_species_line_chart(rows: list[dict[str, Any]], stations: list[Station
     bar_width = max(4, min(12, group_width * 0.74))
 
     stacked_bars = []
-    for row, row_date in zip(rows, dates):
+    plot_bottom = top + plot_height
+    for index, (row, row_date) in enumerate(zip(rows, dates)):
         x, _ = point(row, row_date, row["total"])
         bar_x = x - bar_width / 2
-        y_cursor = top + plot_height
+        y_cursor = plot_bottom
+        segments = []
         for station, _values, color in station_series:
             count = row.get("station_unique", {}).get(station.id, row["stations"].get(station.id, 0))
             if not count:
                 continue
             bar_height = count / max_species * plot_height
             y_cursor -= bar_height
-            stacked_bars.append(
-                f'<rect class="daily-richness-station-bar" style="--series-color: {h(color)}" '
+            segments.append(
+                f'<rect class="daily-richness-station-bar" data-daily-richness-series="{h(station.id)}" '
+                f'data-daily-richness-height="{bar_height:.3f}" style="--series-color: {h(color)}" '
                 f'x="{bar_x:.1f}" y="{y_cursor:.1f}" '
                 f'width="{bar_width:.1f}" height="{bar_height:.1f}" '
                 f'fill="{h(color)}"></rect>'
@@ -1024,11 +1030,15 @@ def _daily_species_line_chart(rows: list[dict[str, Any]], stations: list[Station
         if shared_count:
             bar_height = shared_count / max_species * plot_height
             y_cursor -= bar_height
-            stacked_bars.append(
-                f'<rect class="daily-richness-shared-bar" '
+            segments.append(
+                f'<rect class="daily-richness-shared-bar" data-daily-richness-height="{bar_height:.3f}" '
                 f'x="{bar_x:.1f}" y="{y_cursor:.1f}" '
                 f'width="{bar_width:.1f}" height="{bar_height:.1f}"></rect>'
             )
+        stacked_bars.append(
+            f'<g class="daily-richness-bar-group" data-daily-richness-day="{index}" '
+            f'data-daily-richness-bottom="{plot_bottom:.3f}">{"".join(segments)}</g>'
+        )
 
     markers = []
     for row, row_date in zip(rows, dates):
@@ -1076,6 +1086,7 @@ def _daily_species_line_chart(rows: list[dict[str, Any]], stations: list[Station
     return f"""
     <figure class="daily-richness-line-chart">
       <ul class="daily-richness-legend" aria-label="Daily richness legend">{''.join(legend)}</ul>
+      <p class="sr-only" data-daily-richness-status aria-live="polite">All station-only contributions are shown.</p>
       <svg viewBox="0 0 {width} {height}" role="img" aria-labelledby="daily-richness-title-{h(mode)} daily-richness-desc-{h(mode)}">
         <title id="daily-richness-title-{h(mode)}">Daily species richness by contribution and overlap</title>
         <desc id="daily-richness-desc-{h(mode)}">Each stacked bar totals the network unique-species union. Station-colored segments show species found only at that station on that date; the neutral segment shows species shared by two or more stations. {h(mode_description)} Focus or point at a bar to see station values.</desc>
@@ -2688,6 +2699,56 @@ function initMonthlyTooltips() {
   });
 }
 
+function initDailyRichnessLegendToggles() {
+  document.querySelectorAll(".daily-richness-line-chart").forEach((figure) => {
+    const buttons = Array.from(figure.querySelectorAll("[data-daily-richness-series]"))
+      .filter((element) => element.matches("button"));
+    const groups = Array.from(figure.querySelectorAll(".daily-richness-bar-group"));
+    const status = figure.querySelector("[data-daily-richness-status]");
+    if (!buttons.length || !groups.length) return;
+
+    const applySelection = () => {
+      const activeSeries = new Set(
+        buttons
+          .filter((button) => button.getAttribute("aria-pressed") === "true")
+          .map((button) => button.dataset.dailyRichnessSeries)
+      );
+      groups.forEach((group) => {
+        let yCursor = Number(group.dataset.dailyRichnessBottom || 0);
+        group.querySelectorAll(".daily-richness-station-bar").forEach((bar) => {
+          const visible = activeSeries.has(bar.dataset.dailyRichnessSeries);
+          bar.toggleAttribute("hidden", !visible);
+          if (!visible) return;
+          yCursor -= Number(bar.dataset.dailyRichnessHeight || 0);
+          bar.setAttribute("y", yCursor.toFixed(1));
+        });
+        const shared = group.querySelector(".daily-richness-shared-bar");
+        if (shared) {
+          yCursor -= Number(shared.dataset.dailyRichnessHeight || 0);
+          shared.setAttribute("y", yCursor.toFixed(1));
+        }
+      });
+      if (status) {
+        const names = buttons
+          .filter((button) => button.getAttribute("aria-pressed") === "true")
+          .map((button) => button.textContent.trim().replace(/ only$/, ""));
+        status.textContent = names.length
+          ? `Showing station-only contributions for ${names.join(", ")}; shared contributions remain shown.`
+          : "Only shared contributions are shown.";
+      }
+    };
+
+    buttons.forEach((button) => {
+      button.addEventListener("click", () => {
+        const pressed = button.getAttribute("aria-pressed") === "true";
+        button.setAttribute("aria-pressed", String(!pressed));
+        applySelection();
+      });
+    });
+    applySelection();
+  });
+}
+
 initSortableTables();
 initViewToggles();
 initNightStationFilters();
@@ -2695,6 +2756,7 @@ initUniqueFilter();
 initRecordFilters();
 initInsightFeedback();
 initMonthlyTooltips();
+initDailyRichnessLegendToggles();
 """
 
 
@@ -3615,6 +3677,17 @@ CSS = """
   --topbar-height: 64px;
 }
 * { box-sizing: border-box; }
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
 html {
   scroll-behavior: smooth;
   scroll-padding-top: calc(var(--topbar-height) + 18px);
@@ -5800,14 +5873,34 @@ a:hover { color: #f2d78e; }
   padding: 0;
   list-style: none;
 }
-.daily-richness-legend li {
+.daily-richness-legend li { display: contents; }
+.daily-richness-legend button,
+.daily-richness-shared-key {
   display: inline-grid;
   grid-template-columns: 18px auto;
   align-items: center;
   gap: 6px;
   color: var(--muted);
+  font: inherit;
   font-size: 0.72rem;
 }
+.daily-richness-legend button {
+  padding: 3px 4px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  cursor: pointer;
+}
+.daily-richness-legend button:hover { color: var(--ink); }
+.daily-richness-legend button:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.daily-richness-legend button[aria-pressed="false"] {
+  color: var(--faint);
+  text-decoration: line-through;
+}
+.daily-richness-legend button[aria-pressed="false"] i { opacity: 0.25; }
 .daily-richness-legend i {
   width: 16px;
   height: 9px;
@@ -5822,6 +5915,7 @@ a:hover { color: #f2d78e; }
   fill: var(--series-color);
   opacity: 0.9;
 }
+.daily-richness-station-bar[hidden] { display: none; }
 .daily-richness-shared-bar {
   fill: color-mix(in srgb, var(--muted) 58%, var(--panel));
   opacity: 0.88;
