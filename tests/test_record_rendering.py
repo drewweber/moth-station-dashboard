@@ -8,6 +8,7 @@ from mothdash.render import (
     RECORD_CARD_PREVIEW_LIMIT,
     RECORD_TABLE_PAGE_SIZE,
     _daily_species_line_chart,
+    _dashboard_section_nav,
     _insight_cards,
     _insight_feedback_id,
     _live_page,
@@ -36,6 +37,16 @@ def records(count: int) -> list[dict]:
 
 
 class RecordRenderingTests(unittest.TestCase):
+    def test_station_pages_can_use_the_full_dashboard_navigation(self) -> None:
+        nav = _dashboard_section_nav("../index.html")
+
+        self.assertIn('aria-label="Dashboard sections"', nav)
+        self.assertIn('href="../index.html#last-night"', nav)
+        self.assertIn('href="../index.html#past-week"', nav)
+        self.assertIn('href="../index.html#stations"', nav)
+        self.assertIn('href="../index.html#feed"', nav)
+        self.assertIn('href="../index.html#species"', nav)
+
     def test_history_live_mode_control_and_immediate_live_check_are_rendered(self) -> None:
         toggle = _mode_toggle("index.html", "live.html", "live")
         page = _live_page(

@@ -65,6 +65,28 @@ def _mode_toggle(history_href: str, live_href: str, active: str) -> str:
     """
 
 
+def _dashboard_section_nav(index_href: str = "index.html") -> str:
+    """Render the dashboard section menu for pages outside the dashboard root."""
+    items = (
+        ("Last night", "last-night"),
+        ("Past week", "past-week"),
+        ("Stations", "stations"),
+        ("Feed", "feed"),
+        ("Recent", "recent"),
+        ("First arrivals", "pulses"),
+        ("Firsts", "records"),
+        ("Unique", "unique"),
+        ("Calendar", "calendar"),
+        ("Trends", "trends"),
+        ("Species", "species"),
+    )
+    links = "".join(
+        f'<a href="{h(index_href)}#{section_id}">{h(label)}</a>'
+        for label, section_id in items
+    )
+    return f'<nav class="section-nav" aria-label="Dashboard sections">{links}</nav>'
+
+
 def _insight_feedback_id(insight: dict[str, Any]) -> str:
     """Create a stable browser-storage key for a generated feed item."""
     source = "\x1f".join(
@@ -2033,11 +2055,7 @@ def _station_profile_page(station: Station, profile: dict[str, Any], recap: dict
         <a class="brand" href="../index.html"><span class="brand-mark" aria-hidden="true"></span><span>Moth stations</span></a>
         {_mode_toggle("../index.html", "../live.html", "history")}
       </div>
-      <nav class="section-nav" aria-label="Station navigation">
-        <a href="../index.html#feed">Feed</a>
-        <a href="../index.html#stations">Stations</a>
-        <a href="../index.html#calendar">Calendar</a>
-      </nav>
+      {_dashboard_section_nav("../index.html")}
     </div>
     <div class="profile-hero" style="--station-color: {h(color)}">
       <p class="eyebrow">station profile</p>
@@ -2162,11 +2180,7 @@ def _station_habitat_page(station: Station, habitat: dict[str, Any], color: str)
         <a class="brand" href="../index.html"><span class="brand-mark" aria-hidden="true"></span><span>Moth stations</span></a>
         {_mode_toggle("../index.html", "../live.html", "history")}
       </div>
-      <nav class="section-nav" aria-label="Station navigation">
-        <a href="{h(station.id)}.html">Station profile</a>
-        <a href="../index.html#stations">Stations</a>
-        <a href="../index.html#feed">Feed</a>
-      </nav>
+      {_dashboard_section_nav("../index.html")}
     </div>
     <div class="profile-hero" style="--station-color: {h(color)}">
       <p class="eyebrow">habitat archive</p>
