@@ -1427,36 +1427,39 @@ def _weekly_recap(data: dict[str, Any]) -> str:
       </div>
     """
 
-def _habitat_summary(data: dict[str, Any]) -> str:
+def _habitat_host_list(rows: list[dict[str, Any]]) -> str:
+    if not rows:
+        return '<p class="habitat-empty">No host-plant matches yet for species confirmed at this station.</p>'
+
+    host_items = []
+    for row in rows:
+        label = h(row["label"])
+        title = f'<a href="{h(row["url"])}">{label}</a>' if row.get("url") else label
+        host_bits = []
+        for hst in row["hosts"]:
+            bit = h(hst["family"])
+            if hst["genus"]:
+                bit = f"{h(hst['genus'])} {h(hst['species'])}".strip() if hst["species"] else h(hst["genus"])
+                if hst["family"]:
+                    bit = f"{bit} ({h(hst['family'])})"
+            host_bits.append(bit)
+        host_text = "; ".join(host_bits)
+        genus_note = (
+            ' <small class="habitat-genus-note">(known at the genus level only)</small>'
+            if row.get("genus_level_only") else ""
+        )
+        host_items.append(
+            f'<li><span class="habitat-species">{title}</span>{genus_note}'
+            f'<p class="habitat-hosts">{host_text}</p></li>'
+        )
+    return f'<ul class="habitat-list">{"".join(host_items)}</ul>'
+
+
+def _habitat_summary(data: dict[str, Any], browse_url: str | None = None, full: bool = False) -> str:
     if not data.get("has_data"):
         return '<p class="empty">No host-plant reference data is available for confirmed species at this station yet.</p>'
 
-    host_rows = data["host_plants"]
-    if host_rows:
-        host_items = []
-        for row in host_rows:
-            label = h(row["label"])
-            title = f'<a href="{h(row["url"])}">{label}</a>' if row.get("url") else label
-            host_bits = []
-            for hst in row["hosts"]:
-                bit = h(hst["family"])
-                if hst["genus"]:
-                    bit = f"{h(hst['genus'])} {h(hst['species'])}".strip() if hst["species"] else h(hst["genus"])
-                    if hst["family"]:
-                        bit = f"{bit} ({h(hst['family'])})"
-                host_bits.append(bit)
-            host_text = "; ".join(host_bits)
-            genus_note = (
-                ' <small class="habitat-genus-note">(known at the genus level only)</small>'
-                if row.get("genus_level_only") else ""
-            )
-            host_items.append(
-                f'<li><span class="habitat-species">{title}</span>{genus_note}'
-                f'<p class="habitat-hosts">{host_text}</p></li>'
-            )
-        host_list_html = f'<ul class="habitat-list">{"".join(host_items)}</ul>'
-    else:
-        host_list_html = '<p class="habitat-empty">No host-plant matches yet for species confirmed at this station.</p>'
+    host_list_html = _habitat_host_list(data["host_plants"] if full else data["host_preview"])
 
     def candidate_list(items: list[dict[str, Any]], empty_copy: str) -> str:
         if not items:
@@ -1464,9 +1467,10 @@ def _habitat_summary(data: dict[str, Any]) -> str:
         rows = []
         for item in items:
             genera = ", ".join(h(g) for g in item["shared_genera"])
+            matches = ", ".join(h(label) for label in item.get("matching_species", []))
             rows.append(
                 f'<li><a href="{h(item["inat_taxon_url"])}">{h(item["label"])}</a>'
-                f'<small>shares a host-plant genus ({genera}) with a confirmed species here</small></li>'
+                f'<small>shares {genera} with {matches}</small></li>'
             )
         return f'<ul class="habitat-list habitat-candidates">{"".join(rows)}</ul>'
 
@@ -1484,13 +1488,20 @@ def _habitat_summary(data: dict[str, Any]) -> str:
     source_label = h(data.get("source_label") or "the HOSTS database")
     source_url = data.get("source_url")
     source_link = f'<a href="{h(source_url)}">{source_label}</a>' if source_url else source_label
+    browse_link = (
+        f'<p class="habitat-browse"><a href="{h(browse_url)}">Browse all documented host associations ({h(data["matched_count"])})</a></p>'
+        if browse_url and not full else ""
+    )
+    preview_note = "Most recently recorded matches are shown here." if not full else "All documented matches are shown here."
 
     return f"""
       <p class="habitat-overview">
         {h(data['matched_count'])} of {h(data['confirmed_count'])} species confirmed at this station have
         documented host plants ({h(data['unmatched_count'])} not yet matched).
       </p>
+      <p class="habitat-preview-note">{preview_note}</p>
       {host_list_html}
+      {browse_link}
       <details class="habitat-info">
         <summary><span aria-hidden="true">?</span> About this data</summary>
         <p>
@@ -2111,9 +2122,9 @@ def _station_profile_page(station: Station, profile: dict[str, Any], recap: dict
     <section>
       <div class="section-head">
         <h2>Habitat summary</h2>
-        <p>Host plants documented for species confirmed here, and companion species that share a host plant -- grounded in real network and New York State records, never an arbitrary global match.</p>
+        <p>Recent documented host associations, with a separate full archive and specificity-weighted companion suggestions.</p>
       </div>
-      {_habitat_summary(habitat)}
+      {_habitat_summary(habitat, f"{station.id}-habitat.html")}
     </section>
 
     <section>
@@ -2126,6 +2137,53 @@ def _station_profile_page(station: Station, profile: dict[str, Any], recap: dict
   </main>
   <footer><div>Generated {h(generated_at())}. Station profiles are generated from the synced iNaturalist observation cache.</div></footer>
   <script>{DASHBOARD_JS}</script>
+</body>
+</html>
+"""
+
+
+def _station_habitat_page(station: Station, habitat: dict[str, Any], color: str) -> str:
+    location = station.public_location or "Configured station"
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Habitat archive · {h(station.name)} · Moth Station Dashboard</title>
+  <meta name="description" content="Documented moth host-plant associations for {h(station.name)}.">
+  <meta name="theme-color" content="#151611">
+  <style>{CSS}</style>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to habitat archive</a>
+  <header>
+    <div class="topbar">
+      <div class="topbar-primary">
+        <a class="brand" href="../index.html"><span class="brand-mark" aria-hidden="true"></span><span>Moth stations</span></a>
+        {_mode_toggle("../index.html", "../live.html", "history")}
+      </div>
+      <nav class="section-nav" aria-label="Station navigation">
+        <a href="{h(station.id)}.html">Station profile</a>
+        <a href="../index.html#stations">Stations</a>
+        <a href="../index.html#feed">Feed</a>
+      </nav>
+    </div>
+    <div class="profile-hero" style="--station-color: {h(color)}">
+      <p class="eyebrow">habitat archive</p>
+      <h1>{h(station.name)}</h1>
+      <p class="subhead">{h(location)}</p>
+    </div>
+  </header>
+  <main id="main" class="site-shell">
+    <section>
+      <div class="section-head">
+        <h2>Documented host associations</h2>
+        <p>Full static archive of host-plant records for moth species confirmed at this station.</p>
+      </div>
+      {_habitat_summary(habitat, full=True)}
+    </section>
+  </main>
+  <footer><div>Generated {h(generated_at())}. Host records come from the HOSTS reference data described above.</div></footer>
 </body>
 </html>
 """
@@ -4454,6 +4512,25 @@ h2 {
   color: var(--muted);
   font-size: 0.9rem;
 }
+.habitat-preview-note {
+  margin: -6px 0 14px;
+  color: var(--faint);
+  font-size: 0.8rem;
+}
+.habitat-browse {
+  margin: 0 0 18px;
+}
+.habitat-browse a {
+  display: inline-block;
+  padding: 9px 12px;
+  color: var(--amber);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font-size: 0.84rem;
+}
+.habitat-browse a:hover {
+  border-color: var(--amber);
+}
 .habitat-list {
   list-style: none;
   margin: 0 0 14px;
@@ -6192,15 +6269,20 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
             continue
         profile = station_profile(settings, station.id)
         recap = weekly_recap(settings, station.id)
-        habitat = habitat_summary(settings, station.id)
+        habitat = habitat_summary(settings, station.id, taxa)
+        color = station_colors.get(station.id, station.color or FALLBACK_COLORS[0])
         (stations_dir / f"{station.id}.html").write_text(
             _station_profile_page(
                 station,
                 profile,
                 recap,
                 habitat,
-                station_colors.get(station.id, station.color or FALLBACK_COLORS[0]),
+                color,
             ),
+            encoding="utf-8",
+        )
+        (stations_dir / f"{station.id}-habitat.html").write_text(
+            _station_habitat_page(station, habitat, color),
             encoding="utf-8",
         )
     if settings.custom_domain:

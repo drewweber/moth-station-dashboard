@@ -1,6 +1,7 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import mock
+import copy
 import unittest
 
 from mothdash.analysis import habitat_summary
@@ -137,6 +138,45 @@ class HabitatSummaryTests(unittest.TestCase):
         self.assertIn("https://example.test/obs/1", html)
         self.assertIn('<details class="habitat-info">', html)
         self.assertIn("About this data", html)
+
+    def test_profile_renders_a_bounded_preview_and_full_archive_link(self) -> None:
+        self._seed()
+        with mock.patch("mothdash.analysis._load_host_plants", return_value=FAKE_HOST_DATA):
+            result = habitat_summary(self.settings, "station-a")
+        second_row = dict(result["host_plants"][0])
+        second_row["label"] = "Later Host Moth"
+        result["host_plants"].append(second_row)
+        result["host_preview"] = [result["host_plants"][0]]
+
+        preview_html = _habitat_summary(result, "station-a-habitat.html")
+        archive_html = _habitat_summary(result, full=True)
+
+        self.assertIn('href="station-a-habitat.html"', preview_html)
+        self.assertNotIn("Later Host Moth", preview_html)
+        self.assertIn("Later Host Moth", archive_html)
+
+    def test_specific_host_links_rank_above_generalist_overlap(self) -> None:
+        self._seed()
+        host_data = copy.deepcopy(FAKE_HOST_DATA)
+        host_data["species"]["Catocala confirmed"].append(
+            {"family": "Betulaceae", "genus": "Betula", "species": "alleghaniensis"}
+        )
+        host_data["species"]["Specific regional"] = [
+            {"family": "Betulaceae", "genus": "Betula", "species": "papyrifera"},
+        ]
+        host_data["match_level"]["Specific regional"] = "species"
+        host_data["taxa"]["Specific regional"] = {"taxon_id": 1005, "common_name": "Specific Moth"}
+        for index in range(8):
+            host_data["species"][f"Quercus noise {index}"] = [
+                {"family": "Fagaceae", "genus": "Quercus", "species": "alba"},
+            ]
+            host_data["match_level"][f"Quercus noise {index}"] = "species"
+
+        with mock.patch("mothdash.analysis._load_host_plants", return_value=host_data):
+            result = habitat_summary(self.settings, "station-a")
+
+        self.assertEqual(result["regional_candidates"][0]["taxon_id"], 1005)
+        self.assertEqual(result["regional_candidates"][0]["shared_genera"], ["Betula"])
 
     def test_render_reports_quiet_state(self) -> None:
         html = _habitat_summary({"has_data": False})

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import date, datetime, timedelta
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 import json
@@ -1634,6 +1635,7 @@ def weekly_recap(settings: Settings, station_id: str, today: date | None = None)
 _HOST_PLANTS_PATH = Path(__file__).resolve().parent / "data" / "host_plants.json"
 
 
+@lru_cache(maxsize=1)
 def _load_host_plants() -> dict[str, Any]:
     if not _HOST_PLANTS_PATH.exists():
         return {"species": {}, "taxa": {}, "match_level": {}, "metadata": {}}
@@ -1658,7 +1660,11 @@ def _dedupe_hosts(hosts: list[dict[str, str]]) -> list[dict[str, str]]:
     return out
 
 
-def habitat_summary(settings: Settings, station_id: str) -> dict[str, Any]:
+def habitat_summary(
+    settings: Settings,
+    station_id: str,
+    taxa: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     """Host-plant based "what else might be here" summary for one station.
 
     Confirmed species' documented host plants (from the Natural History
@@ -1684,7 +1690,7 @@ def habitat_summary(settings: Settings, station_id: str) -> dict[str, Any]:
     if not species_hosts:
         return {"has_data": False}
 
-    taxa = station_taxa(settings)
+    taxa = taxa if taxa is not None else station_taxa(settings)
     confirmed = [t for t in taxa if t["stations"].get(station_id)]
     if not confirmed:
         return {"has_data": False}
@@ -1712,16 +1718,23 @@ def habitat_summary(settings: Settings, station_id: str) -> dict[str, Any]:
             "taxon_id": t["taxon_id"],
             "label": t["label"],
             "url": station_entry.get("url"),
+            "latest": station_entry.get("latest"),
             "hosts": hosts[:5],
             "host_count": len(hosts),
             "genus_level_only": match_level.get(name) == "genus",
         })
+        # Genus-level HOSTS matches are useful context, but too broad to use
+        # as a recommendation signal for a particular station.
+        if match_level.get(name) != "species":
+            continue
         for h in hosts:
             genus = h["genus"]
             if not genus:
                 continue
             for other_name in genus_index.get(genus, ()):
                 if other_name == name or other_name in confirmed_names:
+                    continue
+                if match_level.get(other_name) != "species":
                     continue
                 other_taxon = taxa_lookup.get(other_name)
                 if not other_taxon or not other_taxon.get("taxon_id"):
@@ -1737,20 +1750,34 @@ def habitat_summary(settings: Settings, station_id: str) -> dict[str, Any]:
                         ),
                         "inat_taxon_url": f"https://www.inaturalist.org/taxa/{other_taxon['taxon_id']}",
                         "shared_genera": set(),
+                        "matching_species": defaultdict(set),
                         "source": "network" if other_name in network_names else "regional",
                     },
                 )
                 entry["shared_genera"].add(genus)
+                entry["matching_species"][genus].add(t["label"])
 
     def finalize(source: str, limit: int) -> list[dict[str, Any]]:
         items = [c for c in candidate_map.values() if c["source"] == source]
-        items.sort(key=lambda c: (-len(c["shared_genera"]), c["label"]))
+        # A genus shared by a handful of moths is stronger evidence than a
+        # long list of ubiquitous, generalist host associations.
+        def score(candidate: dict[str, Any]) -> float:
+            return sum(1 / len(genus_index[genus]) for genus in candidate["shared_genera"])
+
+        items.sort(key=lambda c: (-score(c), c["label"]))
         return [
             {
                 "taxon_id": c["taxon_id"],
                 "label": c["label"],
                 "inat_taxon_url": c["inat_taxon_url"],
-                "shared_genera": sorted(c["shared_genera"]),
+                "shared_genera": sorted(c["shared_genera"], key=lambda genus: (len(genus_index[genus]), genus))[:3],
+                "matching_species": sorted(
+                    {
+                        label
+                        for labels in c["matching_species"].values()
+                        for label in labels
+                    }
+                )[:2],
             }
             for c in items[:limit]
         ]
@@ -1759,6 +1786,11 @@ def habitat_summary(settings: Settings, station_id: str) -> dict[str, Any]:
     return {
         "has_data": True,
         "host_plants": sorted(host_plant_rows, key=lambda r: r["label"]),
+        "host_preview": sorted(
+            host_plant_rows,
+            key=lambda r: (r["latest"] or date.min, r["label"]),
+            reverse=True,
+        )[:8],
         "unmatched_count": unmatched_count,
         "confirmed_count": len(confirmed),
         "matched_count": len(host_plant_rows),
