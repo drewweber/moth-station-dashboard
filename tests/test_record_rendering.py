@@ -125,6 +125,11 @@ class RecordRenderingTests(unittest.TestCase):
         self.assertIn('bar.toggleAttribute("hidden", !visible)', DASHBOARD_JS)
         self.assertIn(".sr-only {", CSS)
 
+    def test_dashboard_navigation_has_current_section_state(self) -> None:
+        self.assertIn("data-dashboard-section-nav", DASHBOARD_JS)
+        self.assertIn("initDashboardSectionNavigation();", DASHBOARD_JS)
+        self.assertIn('aria-current", "location"', DASHBOARD_JS)
+
     def test_insight_feedback_cards_have_stable_rating_hooks(self) -> None:
         insight = {
             "category": "Early emergence",

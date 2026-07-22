@@ -2281,6 +2281,33 @@ function initViewToggles() {
   });
 }
 
+function initDashboardSectionNavigation() {
+  const nav = document.querySelector("[data-dashboard-section-nav]");
+  if (!nav) return;
+  const links = Array.from(nav.querySelectorAll('a[href^="#"]'));
+  const sections = links
+    .map((link) => document.querySelector(link.getAttribute("href")))
+    .filter(Boolean);
+  if (!links.length || !sections.length) return;
+
+  const setActive = (id) => {
+    links.forEach((link) => {
+      const active = link.getAttribute("href") === `#${id}`;
+      link.classList.toggle("is-active", active);
+      if (active) {
+        link.setAttribute("aria-current", "location");
+      } else {
+        link.removeAttribute("aria-current");
+      }
+    });
+  };
+
+  const initialId = window.location.hash.slice(1);
+  setActive(sections.some((section) => section.id === initialId) ? initialId : sections[0].id);
+  links.forEach((link) => link.addEventListener("click", () => setActive(link.getAttribute("href").slice(1))));
+
+}
+
 function initNightStationFilters() {
   document.querySelectorAll("[data-night-period-filter]").forEach((filter) => {
     const section = filter.closest("section");
@@ -2751,6 +2778,7 @@ function initDailyRichnessLegendToggles() {
 
 initSortableTables();
 initViewToggles();
+initDashboardSectionNavigation();
 initNightStationFilters();
 initUniqueFilter();
 initRecordFilters();
@@ -3802,9 +3830,38 @@ header {
   gap: 14px;
 }
 .section-nav a {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
   color: var(--muted);
   text-decoration: none;
   font-size: 0.9rem;
+  transition: color 160ms ease-out;
+}
+.section-nav a::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: 1px;
+  left: 0;
+  height: 1px;
+  background: var(--amber);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 160ms ease-out;
+}
+.section-nav a:hover,
+.section-nav a.is-active {
+  color: var(--ink);
+}
+.section-nav a:hover::after,
+.section-nav a.is-active::after {
+  transform: scaleX(1);
+}
+.section-nav a:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 3px;
 }
 .hero {
   width: min(var(--max), calc(100% - 32px));
@@ -5023,6 +5080,7 @@ h2 {
   border: 1px solid var(--line);
   border-radius: 6px;
   background: linear-gradient(135deg, rgba(215, 181, 109, 0.08), rgba(255, 255, 255, 0.015) 46%), var(--panel);
+  transition: border-color 180ms ease-out, background-color 180ms ease-out;
 }
 .insight-card p,
 .insight-card small {
@@ -5138,6 +5196,7 @@ h2 {
   border: 1px solid var(--line);
   border-radius: 6px;
   padding: 16px;
+  transition: border-color 180ms ease-out, background-color 180ms ease-out;
 }
 .station-card::before {
   content: "";
@@ -5151,6 +5210,19 @@ h2 {
   margin: 8px 0 8px;
   font-size: 1.25rem;
   line-height: 1.1;
+}
+@media (hover: hover) {
+  .station-card:hover,
+  .sighting-card:hover,
+  .night-card:hover,
+  .pulse-card:hover,
+  .insight-card:hover {
+    border-color: color-mix(in srgb, var(--amber) 48%, var(--line));
+    background-color: color-mix(in srgb, var(--amber) 5%, var(--panel));
+  }
+  .station-card:hover::before {
+    box-shadow: 0 0 14px color-mix(in srgb, var(--station-color) 38%, transparent);
+  }
 }
 .station-card p {
   margin: 0;
@@ -5198,6 +5270,7 @@ h2 {
   border: 1px solid var(--line);
   border-radius: 6px;
   overflow: hidden;
+  transition: border-color 180ms ease-out, background-color 180ms ease-out;
 }
 .sighting-image {
   background: var(--panel-2);
@@ -5342,6 +5415,7 @@ h2 {
   border: 1px solid var(--line);
   border-radius: 6px;
   background: var(--panel);
+  transition: border-color 180ms ease-out, background-color 180ms ease-out;
 }
 .night-card[hidden] {
   display: none;
@@ -5394,6 +5468,7 @@ h2 {
   background: var(--panel-2);
   border-left: 4px solid var(--amber);
   border-radius: 4px;
+  transition: border-color 180ms ease-out, background-color 180ms ease-out;
 }
 .pulse-card p {
   margin: 0 0 10px;
@@ -6086,6 +6161,8 @@ footer div {
     scrollbar-width: none;
     overscroll-behavior-inline: contain;
     touch-action: pan-x;
+    -webkit-mask-image: linear-gradient(to right, #000 0 calc(100% - 22px), transparent 100%);
+    mask-image: linear-gradient(to right, #000 0 calc(100% - 22px), transparent 100%);
   }
   .photo-rail::-webkit-scrollbar {
     display: none;
@@ -6096,6 +6173,7 @@ footer div {
     grid-column: auto;
     grid-row: 1;
     scroll-snap-align: start;
+    scroll-snap-stop: always;
   }
   .sighting-card {
     grid-template-columns: 92px minmax(0, 1fr);
@@ -6207,7 +6285,7 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
         <a class="brand" href="#main"><span class="brand-mark" aria-hidden="true"></span><span>Moth stations</span></a>
         {_mode_toggle("#main", "live.html", "history")}
       </div>
-      <nav class="section-nav" aria-label="Dashboard sections">
+      <nav class="section-nav" aria-label="Dashboard sections" data-dashboard-section-nav>
         <a href="#last-night">Last night</a>
         <a href="#past-week">Past week</a>
         <a href="#stations">Stations</a>
