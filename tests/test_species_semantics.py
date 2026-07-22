@@ -259,6 +259,41 @@ class SpeciesSemanticsTests(unittest.TestCase):
         self.assertEqual(recap["top_shared_station_name"], "Station B")
         self.assertEqual(recap["top_shared_count"], 1)
 
+        # Only 3 species were seen this week, so all 3 surface as "moths of
+        # the week", ordered rarest-first by network record count: 803 (1
+        # network record), 801 (2), 802 (5, plus the station-b sighting).
+        moth_ids = [item["taxon_id"] for item in recap["moths_of_the_week"]]
+        self.assertEqual(moth_ids, [803, 801, 802])
+        self.assertEqual(recap["new_in_town_count"], len(recap["new_in_town"]))
+
+    def test_weekly_recap_caps_moths_of_the_week_at_three(self) -> None:
+        with connect(self.settings.database) as conn:
+            conn.executemany(
+                """
+                INSERT INTO observations (
+                    station_id, inat_obs_id, observed_on, observed_at,
+                    taxon_id, taxon_name, common_name, rank, url
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    ("station-a", 950, "2026-08-03", "2026-08-03T21:00:00-04:00",
+                     811, "Species one", "One", "species", "https://example.test/950"),
+                    ("station-a", 951, "2026-08-03", "2026-08-03T21:00:00-04:00",
+                     812, "Species two", "Two", "species", "https://example.test/951"),
+                    ("station-a", 952, "2026-08-03", "2026-08-03T21:00:00-04:00",
+                     813, "Species three", "Three", "species", "https://example.test/952"),
+                    ("station-a", 953, "2026-08-03", "2026-08-03T21:00:00-04:00",
+                     814, "Species four", "Four", "species", "https://example.test/953"),
+                    ("station-a", 954, "2026-08-03", "2026-08-03T21:00:00-04:00",
+                     815, "Species five", "Five", "species", "https://example.test/954"),
+                ],
+            )
+
+        recap = weekly_recap(self.settings, "station-a", today=date(2026, 8, 12))
+
+        self.assertTrue(recap["has_data"])
+        self.assertEqual(len(recap["moths_of_the_week"]), 3)
+
     def test_station_profile_exposes_night_coverage_and_upload_lag(self) -> None:
         with connect(self.settings.database) as conn:
             conn.executemany(

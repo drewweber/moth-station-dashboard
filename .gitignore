@@ -11,3 +11,4 @@ public/insights.json
 public/trends.json
 public/stations/
 logs/
+.cache/
