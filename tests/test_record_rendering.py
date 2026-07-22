@@ -166,6 +166,28 @@ class RecordRenderingTests(unittest.TestCase):
         self.assertIn("https://www.inaturalist.org/taxa/77", html)
         self.assertIn("seasonal-target-card", html)
 
+    def test_seasonal_target_list_explains_nearby_inaturalist_evidence(self) -> None:
+        html = _seasonal_target_list(
+            {
+                "source": "nearby-inaturalist",
+                "window": "Jul 22 to Aug 4",
+                "radius_km": 100,
+                "items": [
+                    {
+                        "taxon_id": 88,
+                        "label": "Regional Moth (Mothus regionalis)",
+                        "records": 14,
+                        "photo_url": "https://example.test/regional.jpg",
+                        "inat_taxon_url": "https://www.inaturalist.org/taxa/88",
+                    }
+                ],
+            }
+        )
+
+        self.assertIn("Jul 22 to Aug 4 · 14 nearby iNaturalist records", html)
+        self.assertIn("within 100 km · historical seasonal evidence", html)
+        self.assertIn("Regional Moth", html)
+
     def test_insight_feedback_cards_have_stable_rating_hooks(self) -> None:
         insight = {
             "category": "Early emergence",

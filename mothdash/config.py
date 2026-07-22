@@ -28,6 +28,9 @@ STATION_META_KEYS = {
     "live_project_id",
     "live_user_login",
     "public_live_precise_query",
+    "regional_watch_lat",
+    "regional_watch_lng",
+    "regional_watch_radius_km",
 }
 
 ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
@@ -54,6 +57,9 @@ class Settings:
     user_agent: str = "moth-station-dashboard/0.1"
     custom_domain: str = ""
     stats_refresh_limit: int = 80
+    regional_watch_radius_km: float = 100.0
+    regional_watch_days: int = 14
+    regional_watch_cache_hours: int = 168
 
     def taxon_params(self) -> dict[str, int]:
         try:
@@ -84,6 +90,9 @@ class Station:
     station_history: str = ""
     live_query: dict[str, Any] | None = None
     public_live_precise_query: bool = False
+    regional_watch_lat: float | None = None
+    regional_watch_lng: float | None = None
+    regional_watch_radius_km: float | None = None
 
     def api_params(self, settings: Settings) -> dict[str, Any]:
         params = dict(self.query)
@@ -131,8 +140,17 @@ def load_config(path: str | Path = "stations.toml") -> tuple[Settings, list[Stat
         user_agent=str(raw_settings.get("user_agent", "moth-station-dashboard/0.1")),
         custom_domain=str(raw_settings.get("custom_domain", "")),
         stats_refresh_limit=int(raw_settings.get("stats_refresh_limit", 80)),
+        regional_watch_radius_km=float(raw_settings.get("regional_watch_radius_km", 100)),
+        regional_watch_days=int(raw_settings.get("regional_watch_days", 14)),
+        regional_watch_cache_hours=int(raw_settings.get("regional_watch_cache_hours", 168)),
     )
     settings.taxon_params()
+    if settings.regional_watch_radius_km <= 0:
+        raise ValueError("regional_watch_radius_km must be greater than zero")
+    if settings.regional_watch_days <= 0:
+        raise ValueError("regional_watch_days must be greater than zero")
+    if settings.regional_watch_cache_hours <= 0:
+        raise ValueError("regional_watch_cache_hours must be greater than zero")
 
     stations = []
     seen = set()
@@ -143,6 +161,21 @@ def load_config(path: str | Path = "stations.toml") -> tuple[Settings, list[Stat
         if station_id in seen:
             raise ValueError(f"Duplicate station id: {station_id}")
         seen.add(station_id)
+
+        anchor_values = (
+            raw_station.get("regional_watch_lat"),
+            raw_station.get("regional_watch_lng"),
+        )
+        if (anchor_values[0] is None) != (anchor_values[1] is None):
+            raise ValueError(
+                f"Station {station_id} must define both regional_watch_lat and regional_watch_lng"
+            )
+        if raw_station.get("regional_watch_radius_km") is not None and float(
+            raw_station["regional_watch_radius_km"]
+        ) <= 0:
+            raise ValueError(
+                f"Station {station_id} regional_watch_radius_km must be greater than zero"
+            )
 
         query = {
             k: v
@@ -173,6 +206,9 @@ def load_config(path: str | Path = "stations.toml") -> tuple[Settings, list[Stat
                 station_history=str(raw_station.get("station_history", "")),
                 live_query=live_query or None,
                 public_live_precise_query=bool(raw_station.get("public_live_precise_query", False)),
+                regional_watch_lat=raw_station.get("regional_watch_lat"),
+                regional_watch_lng=raw_station.get("regional_watch_lng"),
+                regional_watch_radius_km=raw_station.get("regional_watch_radius_km"),
             )
         )
 

@@ -9,6 +9,9 @@ taxon_scope = "moths"
 user_agent = "moth-station-dashboard/0.1"
 custom_domain = "moth-stations.kingfisher-hollow.com"
 stats_refresh_limit = 80
+regional_watch_radius_km = 100
+regional_watch_days = 14
+regional_watch_cache_hours = 168
 
 [[stations]]
 id = "kingfisher"
@@ -20,6 +23,8 @@ state_place_id = 48
 color = "#e5bd4e"
 timezone = "America/New_York"
 public_location = "Tioga County, NY"
+regional_watch_lat = 42.2754988111
+regional_watch_lng = -76.4900674308
 notes = "Seed station from the Kingfisher Hollow Biodiversity Survey."
 
 [[stations]]
@@ -32,6 +37,8 @@ state_place_id = 48
 color = "#21a5a0"
 timezone = "America/New_York"
 public_location = "Tompkins County, NY"
+regional_watch_lat = 42.5060786746
+regional_watch_lng = -76.4242173891
 website = "https://www.inaturalist.org/projects/bosque-neimi"
 notes = "iNaturalist project station."
 
@@ -45,6 +52,8 @@ state_place_id = 48
 color = "#dc6689"
 timezone = "America/New_York"
 public_location = "Tompkins County, NY"
+regional_watch_lat = 42.3909717983
+regional_watch_lng = -76.3739675701
 website = "https://www.inaturalist.org/projects/dombroskie-homestead-inventory"
 notes = "iNaturalist project station."
 
@@ -59,6 +68,8 @@ state_place_id = 48
 color = "#836fc5"
 timezone = "America/New_York"
 public_location = "Monkey Run, Tompkins County, NY"
+regional_watch_lat = 42.4659299981
+regional_watch_lng = -76.430064759
 website = "https://www.inaturalist.org/people/zeledonia"
 notes = "Moth observations by zeledonia at Monkey Run."
 
@@ -76,6 +87,8 @@ state_place_id = 48
 color = "#438fca"
 timezone = "America/New_York"
 public_location = "Dove Dr area, Tompkins County, NY"
+regional_watch_lat = 42.4263383333
+regional_watch_lng = -76.45073
 website = "https://www.inaturalist.org/people/iandavies"
 notes = "Moth observations by iandavies within 100 m of Dove Dr."
 
@@ -89,6 +102,8 @@ state_place_id = 48
 color = "#35ad6b"
 timezone = "America/New_York"
 public_location = "Second St area, Monroe County, NY"
+regional_watch_lat = 43.3233056913
+regional_watch_lng = -77.7173089959
 website = "https://www.inaturalist.org/projects/second-street"
 notes = "Moth observations from the Second Street iNaturalist project."
 
@@ -103,6 +118,8 @@ state_place_id = 48
 color = "#a4bd49"
 timezone = "America/New_York"
 public_location = "Durfee Hill, Tompkins County, NY"
+regional_watch_lat = 42.3619645862
+regional_watch_lng = -76.4548541319
 website = "https://www.inaturalist.org/places/durfee-hill"
 notes = "Moth observations from the iNaturalist Durfee Hill place. No longer actively surveyed; historical records are kept."
 
@@ -119,4 +136,6 @@ state_place_id = 48
 color = "#df7542"
 timezone = "America/New_York"
 public_location = "Woodlawn, Tompkins County, NY"
+regional_watch_lat = 42.3915526885
+regional_watch_lng = -76.41202373
 notes = "Moth observations from the supplied iNaturalist map bounding box."

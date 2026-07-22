@@ -117,3 +117,26 @@ def iter_observations(
             return
         if max_pages is not None and page_count >= max_pages:
             return
+
+
+def iter_species_counts(
+    params: dict[str, Any],
+    user_agent: str,
+) -> Iterator[dict[str, Any]]:
+    """Yield every taxon count returned by a bounded iNaturalist search."""
+    page = 1
+    while True:
+        data = get_json(
+            "observations/species_counts",
+            user_agent=user_agent,
+            per_page=PER_PAGE,
+            page=page,
+            **params,
+        )
+        results = data.get("results") or []
+        for item in results:
+            yield item
+        total = int(data.get("total_results") or 0)
+        if not results or page * PER_PAGE >= total:
+            return
+        page += 1

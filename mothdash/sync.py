@@ -7,6 +7,7 @@ from typing import Any
 from .config import Settings, Station, active_stations
 from .db import connect, init_db
 from .inat_api import first_observed_date, iter_observations, latest_observation_id
+from .regional import refresh_regional_watchlists
 
 
 SPECIES_RANKS = {
@@ -326,3 +327,4 @@ def sync_all(settings: Settings, stations: list[Station], full: bool = False) ->
         added, seen = sync_station(settings, station, full=full)
         print(f"[{station.id}] seen {seen}, stored {added}")
     refresh_station_stats(settings, active_stations(stations))
+    refresh_regional_watchlists(settings, stations)

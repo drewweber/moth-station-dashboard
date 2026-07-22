@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 
 from .config import Settings
 from .db import connect
+from .regional import cached_regional_watchlist
 
 
 def parse_date(value: str | None) -> date | None:
@@ -1340,6 +1341,54 @@ def _station_seasonal_targets(
     return {
         "reference_day": reference_day,
         "location_label": location_label,
+        "source": "tracked-network",
+        "items": items[:limit],
+    }
+
+
+def _regional_seasonal_targets(
+    settings: Settings,
+    station_id: str,
+    taxa_seen: set[int],
+    reference_day: date,
+    *,
+    limit: int = 18,
+) -> dict[str, Any] | None:
+    """Convert the cached nearby-iNat seasonal census into station targets."""
+    cached = cached_regional_watchlist(settings, station_id, reference_day)
+    if cached is None:
+        return None
+
+    run = cached["run"]
+    window_start = parse_date(run.get("window_start")) or reference_day
+    window_end = parse_date(run.get("window_end")) or window_start
+    window = (
+        f"{window_start:%b} {window_start.day}"
+        if window_start == window_end
+        else f"{window_start:%b} {window_start.day} to {window_end:%b} {window_end.day}"
+    )
+    items = []
+    for row in cached["rows"]:
+        taxon_id = row.get("taxon_id")
+        if taxon_id is None or int(taxon_id) in taxa_seen:
+            continue
+        label = _label(row)
+        items.append(
+            {
+                "taxon_id": int(taxon_id),
+                "label": label,
+                "records": int(row.get("record_count") or 0),
+                "photo_url": row.get("photo_url"),
+                "inat_taxon_url": f"https://www.inaturalist.org/taxa/{taxon_id}",
+            }
+        )
+    items.sort(key=lambda item: (-item["records"], item["label"]))
+    return {
+        "reference_day": reference_day,
+        "source": "nearby-inaturalist",
+        "window": window,
+        "radius_km": float(run["radius_km"]),
+        "cached_at": run.get("cached_at"),
         "items": items[:limit],
     }
 
@@ -1613,13 +1662,23 @@ def station_profile(
             """
         ).fetchall()
     station_context = {row["id"]: dict(row) for row in context_rows}
-    seasonal_targets = _station_seasonal_targets(
-        all_rows,
+    reference_day = today or date.today()
+    seasonal_targets = _regional_seasonal_targets(
+        settings,
         station_id,
         taxa_seen,
-        station_context,
-        today or date.today(),
+        reference_day,
     )
+    if seasonal_targets is None:
+        # A build remains useful if iNaturalist's regional endpoint is down.
+        # This is deliberately a visible fallback, not the normal evidence set.
+        seasonal_targets = _station_seasonal_targets(
+            all_rows,
+            station_id,
+            taxa_seen,
+            station_context,
+            reference_day,
+        )
 
     active_sessions = len({row["session_date"] for row in species_rows if row.get("session_date")})
     observations = len(rows)

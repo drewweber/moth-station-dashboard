@@ -70,6 +70,55 @@ CREATE TABLE IF NOT EXISTS station_taxon_stats (
 CREATE INDEX IF NOT EXISTS idx_station_taxon_stats_flags
     ON station_taxon_stats(is_county_first, is_state_first);
 
+CREATE TABLE IF NOT EXISTS regional_watch_runs (
+    station_id   TEXT NOT NULL,
+    window_start TEXT NOT NULL,
+    window_end   TEXT NOT NULL,
+    latitude     REAL NOT NULL,
+    longitude    REAL NOT NULL,
+    radius_km    REAL NOT NULL,
+    cached_at    TEXT DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (station_id, window_start)
+);
+
+CREATE TABLE IF NOT EXISTS regional_watch_taxa (
+    station_id   TEXT NOT NULL,
+    window_start TEXT NOT NULL,
+    taxon_id     INTEGER NOT NULL,
+    taxon_name   TEXT,
+    common_name  TEXT,
+    photo_url    TEXT,
+    record_count INTEGER NOT NULL,
+    PRIMARY KEY (station_id, window_start, taxon_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_regional_watch_taxa_window
+    ON regional_watch_taxa(station_id, window_start);
+
+CREATE TABLE IF NOT EXISTS regional_watch_day_runs (
+    station_id   TEXT NOT NULL,
+    calendar_day TEXT NOT NULL,
+    latitude     REAL NOT NULL,
+    longitude    REAL NOT NULL,
+    radius_km    REAL NOT NULL,
+    cached_at    TEXT DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (station_id, calendar_day)
+);
+
+CREATE TABLE IF NOT EXISTS regional_watch_day_taxa (
+    station_id   TEXT NOT NULL,
+    calendar_day TEXT NOT NULL,
+    taxon_id     INTEGER NOT NULL,
+    taxon_name   TEXT,
+    common_name  TEXT,
+    photo_url    TEXT,
+    record_count INTEGER NOT NULL,
+    PRIMARY KEY (station_id, calendar_day, taxon_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_regional_watch_day_taxa_day
+    ON regional_watch_day_taxa(station_id, calendar_day);
+
 CREATE TABLE IF NOT EXISTS sync_log (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
     station_id     TEXT NOT NULL,

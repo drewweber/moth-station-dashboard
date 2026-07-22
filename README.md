@@ -62,6 +62,30 @@ After pushing this repo to GitHub:
 If the Cloudflare Pages project uses a different name, update
 `.github/workflows/build.yml`.
 
+## Upcoming-Moth Watchlists
+
+Every station profile includes a **Next two weeks** list. It is intentionally
+separate from the station's host-plant targets and its own historical
+`Watch next` list:
+
+- it excludes moth species already recorded at that station;
+- it uses all public iNaturalist moth observations within the station's
+  configured 100 km reference radius, not only the tracked stations;
+- it counts records occurring on the next 14 recurring calendar days across
+  iNaturalist history, then ranks the unrecorded species by local seasonal
+  record count.
+
+The initial cache fill is deliberately comprehensive. It stores counts by
+calendar day, so later daily builds reuse the overlapping 13 days and fetch
+only the newly entering day. This keeps routine GitHub Actions and iNaturalist
+API usage within the project's free-tier design constraints.
+
+Each station needs `regional_watch_lat` and `regional_watch_lng` in
+`stations.toml`. These are metadata-only reference points; they do not alter
+the station's source observation query. Use the project/place centroid or a
+known station coordinate, and override `regional_watch_radius_km` only when a
+station needs a different regional reference radius.
+
 ## Configure Stations
 
 Edit `stations.toml`. A station is any iNaturalist query representing one moth

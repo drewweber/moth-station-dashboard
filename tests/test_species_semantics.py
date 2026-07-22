@@ -208,6 +208,43 @@ class SpeciesSemanticsTests(unittest.TestCase):
         self.assertEqual(local_target["stations"], ["Station B"])
         self.assertEqual(local_target["window"], "Jul 20 to Jul 26")
 
+    def test_station_profile_prefers_cached_nearby_inaturalist_targets(self) -> None:
+        with connect(self.settings.database) as conn:
+            conn.execute(
+                """
+                INSERT INTO regional_watch_runs (
+                    station_id, window_start, window_end, latitude, longitude, radius_km
+                ) VALUES ('station-a', '2026-07-22', '2026-08-04', 42.4, -76.4, 100)
+                """
+            )
+            conn.executemany(
+                """
+                INSERT INTO regional_watch_taxa (
+                    station_id, window_start, taxon_id, taxon_name, common_name,
+                    photo_url, record_count
+                ) VALUES (?, '2026-07-22', ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        "station-a", 101, "Species alpha", "Alpha",
+                        "https://example.test/alpha.jpg", 99,
+                    ),
+                    (
+                        "station-a", 404, "Targetus regionalis", "Regional Target",
+                        "https://example.test/regional.jpg", 12,
+                    ),
+                ],
+            )
+
+        profile = station_profile(self.settings, "station-a", today=date(2026, 7, 22))
+        targets = profile["seasonal_targets"]
+
+        self.assertEqual(targets["source"], "nearby-inaturalist")
+        self.assertEqual(targets["window"], "Jul 22 to Aug 4")
+        self.assertEqual(targets["radius_km"], 100.0)
+        self.assertEqual([item["taxon_id"] for item in targets["items"]], [404])
+        self.assertEqual(targets["items"][0]["records"], 12)
+
     def test_distinctive_records_combine_firsts_and_network_rarity(self) -> None:
         # Taxon 102 already qualifies via the setUp fixture's county-first
         # flag and has exactly one tracked observation network-wide, so it

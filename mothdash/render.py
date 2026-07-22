@@ -1323,7 +1323,7 @@ def _expected_next_list(rows: list[dict[str, Any]]) -> str:
 def _seasonal_target_list(targets: dict[str, Any]) -> str:
     rows = targets.get("items") or []
     if not rows:
-        return '<p class="empty">No new-to-station seasonal targets are available from nearby tracked-station records yet.</p>'
+        return '<p class="empty">No new-to-station moth targets are available for this seasonal window yet.</p>'
 
     items = []
     for row in rows:
@@ -1334,34 +1334,62 @@ def _seasonal_target_list(targets: dict[str, Any]) -> str:
             else '<div class="watch-placeholder" aria-hidden="true">No photo</div>'
         )
         title = f'<a href="{h(row["inat_taxon_url"])}">{label}</a>'
-        station_names = row.get("stations") or []
-        if len(station_names) > 2:
-            source_names = f"{station_names[0]}, {station_names[1]}, and {len(station_names) - 2} more"
+        if targets.get("source") == "nearby-inaturalist":
+            radius = targets.get("radius_km", 100)
+            radius_label = f"{radius:g} km"
+            detail = (
+                f"{targets['window']} · {row['records']} nearby iNaturalist record"
+                f"{'s' if row['records'] != 1 else ''}"
+            )
+            signal = f"within {radius_label} · historical seasonal evidence"
         else:
-            source_names = " and ".join(station_names)
-        scope = {
-            "county": "same county",
-            "state": "same state",
-            "network": "tracked network",
-        }.get(row.get("scope"), "tracked network")
-        year_word = "year" if row["years"] == 1 else "years"
-        if row.get("current_year_records"):
-            signal = f"seen this season at {source_names}"
-        else:
-            signal = f"{scope} history: {source_names}"
+            station_names = row.get("stations") or []
+            if len(station_names) > 2:
+                source_names = f"{station_names[0]}, {station_names[1]}, and {len(station_names) - 2} more"
+            else:
+                source_names = " and ".join(station_names)
+            scope = {
+                "county": "same county",
+                "state": "same state",
+                "network": "tracked network",
+            }.get(row.get("scope"), "tracked network")
+            year_word = "year" if row["years"] == 1 else "years"
+            detail = f"{row['window']} · {row['records']} tracked records across {row['years']} {year_word}"
+            if row.get("current_year_records"):
+                signal = f"seen this season at {source_names}"
+            else:
+                signal = f"{scope} history: {source_names}"
         items.append(
             f"""
             <li class="watch-card seasonal-target-card">
               <div class="watch-image">{media}</div>
               <div class="watch-copy">
                 <span>{title}</span>
-                <small>{h(row['window'])} · {h(row['records'])} tracked records across {h(row['years'])} {year_word}</small>
+                <small>{h(detail)}</small>
                 <em>{h(signal)}</em>
               </div>
             </li>
             """
         )
     return f'<ul class="watch-grid seasonal-target-grid">{"".join(items)}</ul>'
+
+
+def _seasonal_target_intro(station: Station, targets: dict[str, Any]) -> tuple[str, str]:
+    if targets.get("source") == "nearby-inaturalist":
+        radius = float(targets.get("radius_km", 100))
+        return (
+            "Next two weeks",
+            "Moths not yet recorded at "
+            f"{h(station.name)} that iNaturalist has documented within {radius:g} km "
+            "during the next 14 calendar days. Ranked by nearby seasonal record count.",
+        )
+    return (
+        "Regional watchlist",
+        "New-to-"
+        f"{h(station.name)} species for the current seasonal window, using other "
+        "tracked-station records. This fallback appears only while nearby "
+        "iNaturalist evidence is unavailable.",
+    )
 
 
 def _signature_species_gallery(rows: list[dict[str, Any]]) -> str:
@@ -2092,6 +2120,9 @@ def _station_profile_page(station: Station, profile: dict[str, Any], recap: dict
             _profile_metric("latest session", profile["latest_session"] or "waiting"),
         ]
     )
+    seasonal_target_title, seasonal_target_intro = _seasonal_target_intro(
+        station, profile["seasonal_targets"]
+    )
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -2210,8 +2241,8 @@ def _station_profile_page(station: Station, profile: dict[str, Any], recap: dict
 
     <section>
       <div class="section-head">
-        <h2>Regional watchlist</h2>
-        <p>New-to-{h(station.name)} species for the current seasonal window, using other tracked-station records relevant to {h(profile["seasonal_targets"]["location_label"])}. Same-county records are prioritized; state records fill gaps.</p>
+        <h2>{seasonal_target_title}</h2>
+        <p>{seasonal_target_intro}</p>
       </div>
       {_seasonal_target_list(profile["seasonal_targets"])}
     </section>
