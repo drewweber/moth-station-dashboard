@@ -6022,13 +6022,23 @@ a:hover { color: #f2d78e; }
   font-size: 0.72rem;
 }
 .daily-richness-legend button {
-  padding: 3px 4px;
-  border: 0;
-  border-radius: 3px;
+  min-height: 28px;
+  padding: 4px 6px;
+  border: 1px solid transparent;
+  border-radius: 4px;
   background: transparent;
   cursor: pointer;
+  transition: color 160ms ease-out, background-color 160ms ease-out, border-color 160ms ease-out;
 }
-.daily-richness-legend button:hover { color: var(--ink); }
+.daily-richness-legend button[aria-pressed="true"] {
+  color: var(--ink);
+  border-color: color-mix(in srgb, var(--series-color) 42%, var(--line));
+  background: color-mix(in srgb, var(--series-color) 10%, transparent);
+}
+.daily-richness-legend button:hover {
+  color: var(--ink);
+  border-color: color-mix(in srgb, var(--series-color) 48%, var(--line));
+}
 .daily-richness-legend button:focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
@@ -6036,6 +6046,7 @@ a:hover { color: #f2d78e; }
 .daily-richness-legend button[aria-pressed="false"] {
   color: var(--faint);
   text-decoration: line-through;
+  opacity: 0.72;
 }
 .daily-richness-legend button[aria-pressed="false"] i { opacity: 0.25; }
 .daily-richness-legend i {
