@@ -5911,11 +5911,25 @@ a:hover { color: #f2d78e; }
   white-space: nowrap;
 }
 .empty {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
   color: var(--muted);
   margin: 0;
   padding: 18px;
   border: 1px dashed var(--line);
   border-radius: 6px;
+  background: rgba(215, 181, 109, 0.025);
+}
+.empty::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  margin: 6px 2px 0 1px;
+  background: var(--amber);
+  opacity: 0.75;
+  transform: rotate(45deg);
 }
 .view-toggle {
   display: inline-flex;

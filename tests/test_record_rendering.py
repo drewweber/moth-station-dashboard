@@ -132,6 +132,7 @@ class RecordRenderingTests(unittest.TestCase):
         self.assertIn("min-height: 28px", CSS)
         self.assertIn("tbody tr:nth-child(even)", CSS)
         self.assertIn("tbody tr:hover", CSS)
+        self.assertIn(".empty::before", CSS)
 
     def test_dashboard_navigation_has_current_section_state(self) -> None:
         self.assertIn("data-dashboard-section-nav", DASHBOARD_JS)
