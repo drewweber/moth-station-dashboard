@@ -167,6 +167,7 @@ class RecordRenderingTests(unittest.TestCase):
                         "years": 2,
                         "window": "Jul 20 to Aug 4",
                         "time_buckets": ["this-week"],
+                        "peak_buckets": ["this-week"],
                         "stations": ["Nearby Station"],
                         "current_year_records": 1,
                         "photo_url": "https://example.test/target.jpg",
@@ -190,8 +191,10 @@ class RecordRenderingTests(unittest.TestCase):
         self.assertIn("Shared host association", html)
         self.assertIn("Shares Quercus association with Known Moth", html)
         self.assertIn('data-seasonal-target-time="this-week"', html)
+        self.assertIn('data-seasonal-target-peak="this-week"', html)
         self.assertIn('data-seasonal-target-host-match="true"', html)
         self.assertIn('data-seasonal-target-filter-empty', html)
+        self.assertIn("seasonalTargetPeak", DASHBOARD_JS)
         self.assertIn("initSeasonalTargetFilters();", DASHBOARD_JS)
 
     def test_seasonal_target_list_explains_nearby_inaturalist_evidence(self) -> None:
@@ -205,6 +208,10 @@ class RecordRenderingTests(unittest.TestCase):
                         "taxon_id": 88,
                         "label": "Regional Moth (Mothus regionalis)",
                         "records": 14,
+                        "this_week_records": 9,
+                        "next_week_records": 5,
+                        "timing_label": "Stronger this week",
+                        "peak_buckets": ["this-week"],
                         "photo_url": "https://example.test/regional.jpg",
                         "inat_taxon_url": "https://www.inaturalist.org/taxa/88",
                     }
@@ -212,7 +219,8 @@ class RecordRenderingTests(unittest.TestCase):
             }
         )
 
-        self.assertIn("Jul 22 to Aug 4 · 14 nearby iNaturalist records", html)
+        self.assertIn("Stronger this week · This week 9 · next week 5 · 14 nearby iNaturalist records", html)
+        self.assertIn('data-seasonal-target-peak="this-week"', html)
         self.assertIn("within 100 km · historical seasonal evidence", html)
         self.assertIn("Regional Moth", html)
 

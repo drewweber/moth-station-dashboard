@@ -1364,8 +1364,13 @@ def _fallback_target_time_buckets(offsets: list[int]) -> list[str]:
 
 def _regional_target_time_metadata(
     day_counts: dict[date, int], reference_day: date
-) -> tuple[list[str], str]:
-    """Summarize nearby seasonal evidence for the two filterable forecast weeks."""
+) -> tuple[list[str], list[str], str, int, int]:
+    """Summarize nearby seasonal evidence for the forecast weeks.
+
+    ``time_buckets`` preserves every week with local evidence. ``peak_buckets``
+    identifies the week with the stronger signal, so the UI can make a useful
+    timing choice even for species observed in both halves of the fortnight.
+    """
     this_week_end = reference_day + timedelta(days=6)
     next_week_end = reference_day + timedelta(days=13)
     this_week_records = sum(
@@ -1380,15 +1385,30 @@ def _regional_target_time_metadata(
     if next_week_records:
         buckets.append("next-week")
     if not buckets:
-        buckets = ["this-week", "next-week"]
-        label = "Across the next two weeks"
+        return (
+            ["this-week", "next-week"],
+            ["this-week", "next-week"],
+            "Across the next two weeks",
+            0,
+            0,
+        )
     elif len(buckets) == 2:
-        label = "This week and next"
+        if this_week_records > next_week_records:
+            peak_buckets = ["this-week"]
+            label = "Stronger this week"
+        elif next_week_records > this_week_records:
+            peak_buckets = ["next-week"]
+            label = "Stronger next week"
+        else:
+            peak_buckets = ["this-week", "next-week"]
+            label = "Comparable across both weeks"
     elif buckets[0] == "this-week":
+        peak_buckets = ["this-week"]
         label = "This week"
     else:
+        peak_buckets = ["next-week"]
         label = "Next week"
-    return buckets, label
+    return buckets, peak_buckets, label, this_week_records, next_week_records
 
 
 def _regional_seasonal_targets(
@@ -1427,19 +1447,47 @@ def _regional_seasonal_targets(
         if taxon_id is None or int(taxon_id) in taxa_seen:
             continue
         label = _label(row)
-        time_buckets, timing_label = _regional_target_time_metadata(
-            daily_counts.get(int(taxon_id), {}), reference_day
+        total_records = int(row.get("record_count") or 0)
+        taxon_day_counts = daily_counts.get(int(taxon_id), {})
+        if taxon_day_counts:
+            (
+                time_buckets,
+                peak_buckets,
+                timing_label,
+                this_week_records,
+                next_week_records,
+            ) = _regional_target_time_metadata(taxon_day_counts, reference_day)
+        else:
+            # A legacy aggregate cache still makes a useful broad forecast,
+            # but it cannot support a fabricated week-by-week split.
+            time_buckets = ["this-week", "next-week"]
+            peak_buckets = ["this-week", "next-week"]
+            timing_label = "Across the next two weeks"
+            this_week_records = None
+            next_week_records = None
+        # The nearer week better answers "what is likely next", while the
+        # following week remains substantially represented in a 14-day view.
+        seasonal_score = (
+            this_week_records + (next_week_records * 0.75)
+            if this_week_records is not None and next_week_records is not None
+            else 0
         )
+        if not seasonal_score:
+            seasonal_score = total_records
         items.append(
             {
                 "taxon_id": int(taxon_id),
                 "label": label,
                 "taxon_name": row.get("taxon_name"),
-                "records": int(row.get("record_count") or 0),
+                "records": total_records,
                 "photo_url": row.get("photo_url"),
                 "inat_taxon_url": f"https://www.inaturalist.org/taxa/{taxon_id}",
                 "time_buckets": time_buckets,
+                "peak_buckets": peak_buckets,
                 "timing_label": timing_label,
+                "this_week_records": this_week_records,
+                "next_week_records": next_week_records,
+                "seasonal_score": seasonal_score,
             }
         )
     _add_target_host_matches(items, taxa, station_id)
@@ -2005,7 +2053,9 @@ def _add_target_host_matches(
     for target in targets:
         target["host_matches"] = []
         target["host_match_score"] = 0.0
-        target["prediction_score"] = float(target.get("records") or 0)
+        target["prediction_score"] = float(
+            target.get("seasonal_score") or target.get("records") or 0
+        )
     if not species_hosts:
         return
 
@@ -2065,7 +2115,8 @@ def _add_target_host_matches(
         )
         # Nearby seasonal records remain the dominant forecast signal. Host
         # agreement can improve a close ranking, but never overwhelms it.
-        target["prediction_score"] = float(target.get("records") or 0) * (
+        base_score = float(target.get("seasonal_score") or target.get("records") or 0)
+        target["prediction_score"] = base_score * (
             1 + min(0.35, target["host_match_score"] * 0.5)
         )
 

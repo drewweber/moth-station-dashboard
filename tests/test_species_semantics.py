@@ -301,7 +301,12 @@ class SpeciesSemanticsTests(unittest.TestCase):
         later = targets[405]
 
         self.assertEqual(regional["time_buckets"], ["this-week", "next-week"])
+        self.assertEqual(regional["peak_buckets"], ["this-week"])
+        self.assertEqual(regional["this_week_records"], 7)
+        self.assertEqual(regional["next_week_records"], 5)
+        self.assertEqual(regional["seasonal_score"], 10.75)
         self.assertEqual(later["time_buckets"], ["next-week"])
+        self.assertEqual(later["peak_buckets"], ["next-week"])
         self.assertEqual(regional["host_matches"][0]["genus"], "Quercus")
         self.assertEqual(
             regional["host_matches"][0]["matching_species"],

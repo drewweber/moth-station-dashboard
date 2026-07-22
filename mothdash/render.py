@@ -1400,8 +1400,8 @@ def _seasonal_target_list(targets: dict[str, Any]) -> str:
         <div class="seasonal-target-filter-group" role="group" aria-label="Filter targets by seasonal timing">
           <span class="seasonal-target-filter-label">When</span>
           <button type="button" class="seasonal-target-filter is-active" data-seasonal-target-time-filter="all" aria-pressed="true">All 14 days</button>
-          <button type="button" class="seasonal-target-filter" data-seasonal-target-time-filter="this-week" aria-pressed="false">This week</button>
-          <button type="button" class="seasonal-target-filter" data-seasonal-target-time-filter="next-week" aria-pressed="false">Next week</button>
+          <button type="button" class="seasonal-target-filter" data-seasonal-target-time-filter="this-week" aria-pressed="false">Stronger this week</button>
+          <button type="button" class="seasonal-target-filter" data-seasonal-target-time-filter="next-week" aria-pressed="false">Stronger next week</button>
         </div>
         <button type="button" class="seasonal-target-filter seasonal-target-host-filter" data-seasonal-target-host-filter aria-pressed="false"{host_filter_disabled} title="{h(host_filter_note)}">
           <span aria-hidden="true">&#127793;</span> Shared host association
@@ -1419,6 +1419,11 @@ def _seasonal_target_list(targets: dict[str, Any]) -> str:
         )
         title = f'<a href="{h(row["inat_taxon_url"])}">{label}</a>'
         time_buckets = " ".join(row.get("time_buckets") or ["this-week", "next-week"])
+        peak_buckets = " ".join(
+            row.get("peak_buckets")
+            or row.get("time_buckets")
+            or ["this-week", "next-week"]
+        )
         if row.get("timing_label"):
             timing_label = row["timing_label"]
         elif time_buckets == "this-week":
@@ -1430,8 +1435,16 @@ def _seasonal_target_list(targets: dict[str, Any]) -> str:
         if targets.get("source") == "nearby-inaturalist":
             radius = targets.get("radius_km", 100)
             radius_label = f"{radius:g} km"
+            this_week_records = row.get("this_week_records")
+            next_week_records = row.get("next_week_records")
+            split = ""
+            if this_week_records is not None and next_week_records is not None:
+                split = (
+                    f"This week {int(this_week_records)} · "
+                    f"next week {int(next_week_records)} · "
+                )
             detail = (
-                f"{timing_label} · {targets['window']} · {row['records']} nearby iNaturalist record"
+                f"{timing_label} · {split}{row['records']} nearby iNaturalist record"
                 f"{'s' if row['records'] != 1 else ''}"
             )
             signal = f"within {radius_label} · historical seasonal evidence"
@@ -1481,6 +1494,7 @@ def _seasonal_target_list(targets: dict[str, Any]) -> str:
             f"""
             <li class="watch-card seasonal-target-card" data-seasonal-target-card
                 data-seasonal-target-time="{h(time_buckets)}"
+                data-seasonal-target-peak="{h(peak_buckets)}"
                 data-seasonal-target-host-match="{str(bool(host_matches)).lower()}">
               <div class="watch-image">{media}</div>
               <div class="watch-copy">
@@ -2649,7 +2663,7 @@ function initSeasonalTargetFilters() {
     const applyFilters = () => {
       let visible = 0;
       cards.forEach((card) => {
-        const buckets = (card.dataset.seasonalTargetTime || "").split(" ").filter(Boolean);
+        const buckets = (card.dataset.seasonalTargetPeak || "").split(" ").filter(Boolean);
         const timeMatches = timeFilter === "all" || buckets.includes(timeFilter);
         const hostMatches = !hostOnly || card.dataset.seasonalTargetHostMatch === "true";
         const show = timeMatches && hostMatches;
@@ -2666,7 +2680,11 @@ function initSeasonalTargetFilters() {
       }
       if (status) {
         const filtersApplied = [
-          timeFilter === "all" ? "" : timeFilter === "this-week" ? "this week" : "next week",
+          timeFilter === "all"
+            ? ""
+            : timeFilter === "this-week"
+              ? "stronger this week"
+              : "stronger next week",
           hostOnly ? "shared host association" : "",
         ].filter(Boolean);
         status.textContent = filtersApplied.length
