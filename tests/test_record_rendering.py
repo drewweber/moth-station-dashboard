@@ -8,6 +8,8 @@ from mothdash.render import (
     RECORD_CARD_PREVIEW_LIMIT,
     RECORD_TABLE_PAGE_SIZE,
     _daily_species_line_chart,
+    _forecast_validation,
+    _forecast_validation_page,
     _history_section_nav,
     _insight_cards,
     _insight_feedback_id,
@@ -60,6 +62,7 @@ class RecordRenderingTests(unittest.TestCase):
         self.assertIn('href="#station-story"', station_nav)
         self.assertIn('href="#station-watch-next"', station_nav)
         self.assertIn('href="#station-targets"', station_nav)
+        self.assertNotIn('station-forecast-check', station_nav)
         self.assertNotIn("last-night", station_nav)
         self.assertIn('aria-label="Look ahead"', station_nav)
         self.assertIn('aria-label="Evidence"', station_nav)
@@ -290,6 +293,54 @@ class RecordRenderingTests(unittest.TestCase):
         self.assertIn("147 species", html)
         self.assertIn("median upload lag", html)
         self.assertIn("3h 30m", html)
+
+    def test_forecast_validation_separates_historical_and_published_evidence(self) -> None:
+        html = _forecast_validation(
+            {
+                "historical": {
+                    "checked_windows": 2,
+                    "quiet_windows": 1,
+                    "target_count": 40,
+                    "target_hits": 5,
+                    "new_species": 12,
+                    "active_nights": 9,
+                    "median_hit_rank": 4,
+                    "windows": [
+                        {
+                            "anchor": "2026-06-01",
+                            "window_end": "2026-06-14",
+                            "active_nights": 4,
+                            "target_count": 20,
+                            "target_hits": 2,
+                            "new_species": 5,
+                            "caught_new_species": 2,
+                        }
+                    ],
+                },
+                "published": {"available_snapshots": 3, "checked_windows": 0},
+            }
+        )
+
+        self.assertIn("Historical network backtest", html)
+        self.assertIn("Published forecast check", html)
+        self.assertIn("5 / 40", html)
+        self.assertIn("42% of new finds", html)
+        self.assertIn("3 published forecasts still need", html)
+        self.assertIn("View scored forecast windows (1)", html)
+
+    def test_forecast_validation_page_is_separate_from_station_profiles(self) -> None:
+        page = _forecast_validation_page(
+            {
+                "historical": {"checked_windows": 0},
+                "published": {"checked_windows": 0},
+                "stations": [],
+            }
+        )
+
+        self.assertIn("internal model check", page)
+        self.assertIn("Forecast validation", page)
+        self.assertIn("Method notes", page)
+        self.assertIn('href="index.html"', page)
 
     def test_period_station_chips_filter_station_only_species(self) -> None:
         stations = [

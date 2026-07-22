@@ -6,6 +6,7 @@ data/*.db
 data/*.db-*
 public/index.html
 public/live.html
+public/forecast-validation.html
 public/live-snapshot.json
 public/insights.json
 public/trends.json

@@ -119,6 +119,33 @@ CREATE TABLE IF NOT EXISTS regional_watch_day_taxa (
 CREATE INDEX IF NOT EXISTS idx_regional_watch_day_taxa_day
     ON regional_watch_day_taxa(station_id, calendar_day);
 
+-- The target list shown to a station is retained at build time so future
+-- scorecards can evaluate the exact published forecast without re-querying
+-- iNaturalist or reconstructing a moving regional dataset.
+CREATE TABLE IF NOT EXISTS forecast_runs (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    snapshot_at    TEXT NOT NULL,
+    station_id     TEXT NOT NULL,
+    reference_day  TEXT NOT NULL,
+    window_end     TEXT NOT NULL,
+    source         TEXT NOT NULL,
+    target_count   INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_forecast_runs_station_window
+    ON forecast_runs(station_id, window_end, snapshot_at);
+
+CREATE TABLE IF NOT EXISTS forecast_targets (
+    forecast_run_id INTEGER NOT NULL,
+    taxon_id        INTEGER NOT NULL,
+    target_rank     INTEGER NOT NULL,
+    label           TEXT,
+    PRIMARY KEY (forecast_run_id, taxon_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_forecast_targets_run_rank
+    ON forecast_targets(forecast_run_id, target_rank);
+
 CREATE TABLE IF NOT EXISTS sync_log (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
     station_id     TEXT NOT NULL,

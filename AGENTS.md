@@ -12,6 +12,11 @@ queries.
 - Do not commit SQLite databases, logs, or generated HTML.
 - Preserve the distinction between observed date, upload date, and ID update
   date.
+- Keep forecast validation temporally honest: a retrospective target may use
+  only records available at its historical cutoff. Label tracked-network
+  reconstructions separately from exact published forecasts, and retain
+  build-time target snapshots rather than recreating past regional iNaturalist
+  evidence with new queries.
 - For moth sessions, records before noon belong to the previous evening.
 - Use cautious record language: "iNaturalist county first" unless an external
   source confirms a broader claim.

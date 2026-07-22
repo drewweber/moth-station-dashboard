@@ -6,14 +6,19 @@ from unittest import mock
 from zoneinfo import ZoneInfo
 
 from mothdash.analysis import (
+    _forecast_station_context,
+    _historical_target_backtest,
+    _published_forecast_validation,
     first_of_season,
     last_completed_session_taxa,
+    load_rows,
     latest_session_taxa,
     recent_days_taxa,
     record_highlights,
     station_profile,
     station_summaries,
     station_taxa,
+    store_forecast_snapshot,
     trend_summary,
     unique_station_taxa,
     weekly_recap,
@@ -524,6 +529,129 @@ class SpeciesSemanticsTests(unittest.TestCase):
         self.assertEqual(profile["upload_timing"]["timestamped_records"], 2)
         self.assertEqual(profile["upload_timing"]["median_lag_minutes"], 180)
         self.assertEqual(profile["accumulation"][-1]["nights"], 3)
+
+    def test_historical_target_backtest_excludes_records_uploaded_after_checkpoint(self) -> None:
+        with connect(self.settings.database) as conn:
+            conn.execute(
+                "UPDATE stations SET county_place_id = 1082, state_place_id = 48"
+            )
+            conn.executemany(
+                """
+                INSERT INTO observations (
+                    station_id, inat_obs_id, observed_on, observed_at, created_at,
+                    taxon_id, taxon_name, common_name, rank, url
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        "station-a", 1000, "2026-06-01", "2026-06-01T22:00:00-04:00",
+                        "2026-06-02T02:00:00Z", 101, "Species alpha", "Alpha", "species",
+                        "https://example.test/1000",
+                    ),
+                    (
+                        "station-b", 1001, "2025-07-10", "2025-07-10T22:00:00-04:00",
+                        "2025-07-11T02:00:00Z", 404, "Targetus historicalis", "Historical Target", "species",
+                        "https://example.test/1001",
+                    ),
+                    # This evidence appears after the Jul 6 checkpoint and must
+                    # not become a retroactive target.
+                    (
+                        "station-b", 1002, "2026-07-10", "2026-07-10T22:00:00-04:00",
+                        "2026-07-10T02:00:00Z", 405, "Targetus futureus", "Future Target", "species",
+                        "https://example.test/1002",
+                    ),
+                    (
+                        "station-a", 1003, "2026-07-12", "2026-07-12T22:00:00-04:00",
+                        "2026-07-13T02:00:00Z", 404, "Targetus historicalis", "Historical Target", "species",
+                        "https://example.test/1003",
+                    ),
+                    (
+                        "station-a", 1004, "2026-07-12", "2026-07-12T22:00:00-04:00",
+                        "2026-07-13T02:00:00Z", 405, "Targetus futureus", "Future Target", "species",
+                        "https://example.test/1004",
+                    ),
+                ],
+            )
+
+        backtest = _historical_target_backtest(
+            load_rows(self.settings),
+            "station-a",
+            _forecast_station_context(self.settings),
+            date(2026, 7, 21),
+            cutoff_hour=12,
+            timezone="America/New_York",
+            weeks=1,
+        )
+
+        self.assertEqual(backtest["checked_windows"], 1)
+        self.assertEqual(backtest["target_count"], 1)
+        self.assertEqual(backtest["target_hits"], 1)
+        self.assertEqual(backtest["caught_new_species"], 1)
+        self.assertEqual(backtest["median_hit_rank"], 1)
+
+    def test_published_forecast_validation_uses_first_snapshot_per_day(self) -> None:
+        with connect(self.settings.database) as conn:
+            conn.executemany(
+                """
+                INSERT INTO observations (
+                    station_id, inat_obs_id, observed_on, observed_at, created_at,
+                    taxon_id, taxon_name, common_name, rank, url
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        "station-a", 1100, "2026-06-01", "2026-06-01T22:00:00-04:00",
+                        "2026-06-02T02:00:00Z", 101, "Species alpha", "Alpha", "species",
+                        "https://example.test/1100",
+                    ),
+                    (
+                        "station-a", 1101, "2026-07-12", "2026-07-12T22:00:00-04:00",
+                        "2026-07-13T02:00:00Z", 404, "Targetus published", "Published Target", "species",
+                        "https://example.test/1101",
+                    ),
+                    (
+                        "station-a", 1102, "2026-07-12", "2026-07-12T22:00:00-04:00",
+                        "2026-07-13T02:00:00Z", 405, "Targetus later", "Later Target", "species",
+                        "https://example.test/1102",
+                    ),
+                ],
+            )
+
+        first_targets = {
+            "reference_day": date(2026, 7, 6),
+            "source": "nearby-inaturalist",
+            "items": [{"taxon_id": 404, "label": "Published Target"}],
+        }
+        later_targets = {
+            "reference_day": date(2026, 7, 6),
+            "source": "nearby-inaturalist",
+            "items": [{"taxon_id": 405, "label": "Later Target"}],
+        }
+        store_forecast_snapshot(
+            self.settings,
+            "station-a",
+            first_targets,
+            snapshot_at=datetime(2026, 7, 6, 12, tzinfo=ZoneInfo("America/New_York")),
+        )
+        store_forecast_snapshot(
+            self.settings,
+            "station-a",
+            later_targets,
+            snapshot_at=datetime(2026, 7, 6, 18, tzinfo=ZoneInfo("America/New_York")),
+        )
+
+        validation = _published_forecast_validation(
+            self.settings,
+            load_rows(self.settings),
+            "station-a",
+            date(2026, 7, 22),
+        )
+
+        self.assertEqual(validation["available_snapshots"], 1)
+        self.assertEqual(validation["checked_windows"], 1)
+        self.assertEqual(validation["target_count"], 1)
+        self.assertEqual(validation["target_hits"], 1)
+        self.assertEqual(validation["caught_new_species"], 1)
 
 
 if __name__ == "__main__":

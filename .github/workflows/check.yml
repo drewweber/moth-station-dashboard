@@ -32,4 +32,5 @@ jobs:
           python -m mothdash render
           test -s public/index.html
           test -s public/live.html
+          test -s public/forecast-validation.html
           test -s public/live-snapshot.json

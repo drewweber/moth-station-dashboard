@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 
 from .config import Settings
 from .db import connect
-from .regional import cached_regional_watchlist
+from .regional import cached_regional_watchlist, regional_reference_date
 
 
 def parse_date(value: str | None) -> date | None:
@@ -1508,6 +1508,415 @@ def _regional_seasonal_targets(
     }
 
 
+FORECAST_BACKTEST_WEEKS = 14
+
+
+def _forecast_station_context(settings: Settings) -> dict[str, dict[str, Any]]:
+    with connect(settings.database) as conn:
+        rows = conn.execute(
+            """
+            SELECT id, county_place_id, state_place_id, public_location
+            FROM stations
+            WHERE enabled = 1
+            """
+        ).fetchall()
+    return {row["id"]: dict(row) for row in rows}
+
+
+def _historical_target_backtest(
+    all_rows: list[dict[str, Any]],
+    station_id: str,
+    station_context: dict[str, dict[str, Any]],
+    reference_day: date,
+    *,
+    cutoff_hour: int,
+    timezone: str,
+    weeks: int = FORECAST_BACKTEST_WEEKS,
+) -> dict[str, Any]:
+    """Test seasonal targets against later station records without leakage.
+
+    This deliberately uses the tracked-network target model, not the current
+    nearby-iNaturalist census. Earlier regional cache snapshots were not
+    retained, and rebuilding them would introduce an expensive, mutable
+    external data dependency. At each checkpoint, only observations uploaded
+    by local noon are available to the predictor; field outcomes remain the
+    species observed during the following 14 moth sessions.
+    """
+    species_rows = [
+        row for row in all_rows if row.get("taxon_id") and is_species(row)
+    ]
+    if not species_rows:
+        return {
+            "method": "tracked-network",
+            "windows": [],
+            "checked_windows": 0,
+            "quiet_windows": 0,
+            "target_count": 0,
+            "target_hits": 0,
+            "new_species": 0,
+            "caught_new_species": 0,
+            "active_nights": 0,
+            "median_hit_rank": None,
+            "hit_ranks": [],
+        }
+
+    # A checkpoint is set on Monday at the start of a full 14-night interval.
+    # The latest one must finish before the active forecast day begins.
+    latest_start = reference_day - timedelta(days=14)
+    latest_anchor = latest_start - timedelta(days=latest_start.weekday())
+    anchors = [latest_anchor - timedelta(days=7 * offset) for offset in range(weeks)]
+    anchors.reverse()
+    zone = ZoneInfo(timezone)
+    windows = []
+    quiet_windows = 0
+    no_history_windows = 0
+    hit_ranks: list[int] = []
+
+    for anchor in anchors:
+        cutoff = datetime.combine(anchor, time(cutoff_hour), tzinfo=zone)
+        known_rows = []
+        for row in all_rows:
+            uploaded_at = parse_timestamp(row.get("created_at"))
+            if uploaded_at is not None and uploaded_at <= cutoff:
+                known_rows.append(row)
+
+        known_taxa = {
+            int(row["taxon_id"])
+            for row in known_rows
+            if row.get("station_id") == station_id
+            and row.get("taxon_id")
+            and is_species(row)
+        }
+        if not known_taxa:
+            no_history_windows += 1
+            continue
+
+        targets = _station_seasonal_targets(
+            known_rows,
+            station_id,
+            known_taxa,
+            [],
+            station_context,
+            anchor,
+        ).get("items", [])
+        window_end = anchor + timedelta(days=13)
+        outcome_rows = [
+            row for row in species_rows
+            if row.get("station_id") == station_id
+            and row.get("session_date")
+            and anchor <= row["session_date"] <= window_end
+        ]
+        active_nights = {row["session_date"] for row in outcome_rows}
+        if not active_nights:
+            quiet_windows += 1
+            continue
+
+        outcome_taxa = {int(row["taxon_id"]) for row in outcome_rows}
+        new_taxa = outcome_taxa - known_taxa
+        target_ids = {int(item["taxon_id"]) for item in targets}
+        hits = target_ids & new_taxa
+        rank_by_taxon = {
+            int(item["taxon_id"]): rank
+            for rank, item in enumerate(targets, start=1)
+        }
+        hit_ranks.extend(rank_by_taxon[taxon_id] for taxon_id in hits)
+        windows.append(
+            {
+                "anchor": anchor,
+                "window_end": window_end,
+                "active_nights": len(active_nights),
+                "target_count": len(target_ids),
+                "target_hits": len(hits),
+                "new_species": len(new_taxa),
+                "caught_new_species": len(hits),
+            }
+        )
+
+    target_count = sum(row["target_count"] for row in windows)
+    target_hits = sum(row["target_hits"] for row in windows)
+    new_species = sum(row["new_species"] for row in windows)
+    median_hit_rank = None
+    if hit_ranks:
+        hit_ranks.sort()
+        middle = len(hit_ranks) // 2
+        median_hit_rank = hit_ranks[middle]
+        if len(hit_ranks) % 2 == 0:
+            median_hit_rank = (median_hit_rank + hit_ranks[middle - 1]) / 2
+
+    return {
+        "method": "tracked-network",
+        "windows": windows,
+        "checked_windows": len(windows),
+        "quiet_windows": quiet_windows,
+        "no_history_windows": no_history_windows,
+        "target_count": target_count,
+        "target_hits": target_hits,
+        "new_species": new_species,
+        "caught_new_species": target_hits,
+        "active_nights": sum(row["active_nights"] for row in windows),
+        "median_hit_rank": median_hit_rank,
+        "hit_ranks": hit_ranks,
+    }
+
+
+def store_forecast_snapshot(
+    settings: Settings,
+    station_id: str,
+    targets: dict[str, Any],
+    *,
+    snapshot_at: datetime | None = None,
+) -> None:
+    """Persist the exact target list rendered for a station at build time."""
+    reference_day = targets.get("reference_day")
+    if not isinstance(reference_day, date):
+        return
+    if snapshot_at is None:
+        snapshot_at = datetime.now(ZoneInfo(settings.timezone))
+    elif snapshot_at.tzinfo is None:
+        snapshot_at = snapshot_at.replace(tzinfo=ZoneInfo(settings.timezone))
+    snapshot_text = snapshot_at.isoformat(timespec="seconds")
+    items = targets.get("items") or []
+    window_end = reference_day + timedelta(days=settings.regional_watch_days - 1)
+
+    with connect(settings.database) as conn:
+        cursor = conn.execute(
+            """
+            INSERT INTO forecast_runs (
+                snapshot_at, station_id, reference_day, window_end, source, target_count
+            ) VALUES (?,?,?,?,?,?)
+            """,
+            (
+                snapshot_text,
+                station_id,
+                reference_day.isoformat(),
+                window_end.isoformat(),
+                str(targets.get("source") or "unknown"),
+                len(items),
+            ),
+        )
+        forecast_run_id = int(cursor.lastrowid)
+        conn.executemany(
+            """
+            INSERT INTO forecast_targets (forecast_run_id, taxon_id, target_rank, label)
+            VALUES (?,?,?,?)
+            """,
+            [
+                (
+                    forecast_run_id,
+                    int(item["taxon_id"]),
+                    rank,
+                    item.get("label"),
+                )
+                for rank, item in enumerate(items, start=1)
+                if item.get("taxon_id") is not None
+            ],
+        )
+
+
+def _published_forecast_validation(
+    settings: Settings,
+    all_rows: list[dict[str, Any]],
+    station_id: str,
+    reference_day: date,
+) -> dict[str, Any]:
+    """Score mature, first-published target lists against actual outcomes."""
+    with connect(settings.database) as conn:
+        run_rows = conn.execute(
+            """
+            SELECT id, snapshot_at, reference_day, window_end, source, target_count
+            FROM forecast_runs
+            WHERE station_id = ?
+              AND window_end < ?
+            ORDER BY reference_day, snapshot_at
+            """,
+            (station_id, reference_day.isoformat()),
+        ).fetchall()
+
+        # Several builds can occur in a day. Keep the first published list for
+        # each 14-day forecast window so repeated deploys do not over-weight it.
+        selected_runs = []
+        seen_days = set()
+        for row in run_rows:
+            if row["reference_day"] in seen_days:
+                continue
+            seen_days.add(row["reference_day"])
+            selected_runs.append(dict(row))
+
+        target_rows = {}
+        for run in selected_runs:
+            rows = conn.execute(
+                """
+                SELECT taxon_id, target_rank
+                FROM forecast_targets
+                WHERE forecast_run_id = ?
+                ORDER BY target_rank
+                """,
+                (run["id"],),
+            ).fetchall()
+            target_rows[run["id"]] = [dict(row) for row in rows]
+
+    species_rows = [
+        row for row in all_rows if row.get("taxon_id") and is_species(row)
+    ]
+    windows = []
+    quiet_windows = 0
+    hit_ranks: list[int] = []
+    for run in selected_runs:
+        snapshot_at = parse_timestamp(run["snapshot_at"])
+        start = parse_date(run["reference_day"])
+        end = parse_date(run["window_end"])
+        if snapshot_at is None or start is None or end is None:
+            continue
+        known_taxa = {
+            int(row["taxon_id"])
+            for row in species_rows
+            if row.get("station_id") == station_id
+            and (created_at := parse_timestamp(row.get("created_at"))) is not None
+            and created_at <= snapshot_at
+        }
+        outcome_rows = [
+            row for row in species_rows
+            if row.get("station_id") == station_id
+            and row.get("session_date")
+            and start <= row["session_date"] <= end
+        ]
+        active_nights = {row["session_date"] for row in outcome_rows}
+        if not active_nights:
+            quiet_windows += 1
+            continue
+        outcome_taxa = {int(row["taxon_id"]) for row in outcome_rows}
+        new_taxa = outcome_taxa - known_taxa
+        target_rank = {
+            int(row["taxon_id"]): int(row["target_rank"])
+            for row in target_rows.get(run["id"], [])
+        }
+        hits = set(target_rank) & new_taxa
+        hit_ranks.extend(target_rank[taxon_id] for taxon_id in hits)
+        windows.append(
+            {
+                "anchor": start,
+                "window_end": end,
+                "active_nights": len(active_nights),
+                "target_count": len(target_rank),
+                "target_hits": len(hits),
+                "new_species": len(new_taxa),
+                "caught_new_species": len(hits),
+                "source": run["source"],
+            }
+        )
+
+    target_count = sum(row["target_count"] for row in windows)
+    target_hits = sum(row["target_hits"] for row in windows)
+    new_species = sum(row["new_species"] for row in windows)
+    median_hit_rank = None
+    if hit_ranks:
+        hit_ranks.sort()
+        middle = len(hit_ranks) // 2
+        median_hit_rank = hit_ranks[middle]
+        if len(hit_ranks) % 2 == 0:
+            median_hit_rank = (median_hit_rank + hit_ranks[middle - 1]) / 2
+
+    return {
+        "method": "published",
+        "windows": windows,
+        "available_snapshots": len(selected_runs),
+        "checked_windows": len(windows),
+        "quiet_windows": quiet_windows,
+        "target_count": target_count,
+        "target_hits": target_hits,
+        "new_species": new_species,
+        "caught_new_species": target_hits,
+        "active_nights": sum(row["active_nights"] for row in windows),
+        "median_hit_rank": median_hit_rank,
+        "hit_ranks": hit_ranks,
+    }
+
+
+def _combine_forecast_results(results: list[dict[str, Any]], method: str) -> dict[str, Any]:
+    """Combine station scorecards without treating stations as equal effort."""
+    hit_ranks = sorted(
+        rank for result in results for rank in result.get("hit_ranks") or []
+    )
+    median_hit_rank = None
+    if hit_ranks:
+        middle = len(hit_ranks) // 2
+        median_hit_rank = hit_ranks[middle]
+        if len(hit_ranks) % 2 == 0:
+            median_hit_rank = (median_hit_rank + hit_ranks[middle - 1]) / 2
+    return {
+        "method": method,
+        "windows": [],
+        "available_snapshots": sum(
+            int(result.get("available_snapshots") or 0) for result in results
+        ),
+        "checked_windows": sum(
+            int(result.get("checked_windows") or 0) for result in results
+        ),
+        "quiet_windows": sum(
+            int(result.get("quiet_windows") or 0) for result in results
+        ),
+        "no_history_windows": sum(
+            int(result.get("no_history_windows") or 0) for result in results
+        ),
+        "target_count": sum(int(result.get("target_count") or 0) for result in results),
+        "target_hits": sum(int(result.get("target_hits") or 0) for result in results),
+        "new_species": sum(int(result.get("new_species") or 0) for result in results),
+        "caught_new_species": sum(
+            int(result.get("caught_new_species") or 0) for result in results
+        ),
+        "active_nights": sum(int(result.get("active_nights") or 0) for result in results),
+        "median_hit_rank": median_hit_rank,
+        "hit_ranks": hit_ranks,
+    }
+
+
+def forecast_validation_summary(
+    settings: Settings,
+    stations: list[Any],
+    today: date | None = None,
+) -> dict[str, Any]:
+    """Return internal two-week-target validation across configured stations."""
+    reference_day = today or regional_reference_date(settings)
+    all_rows = load_rows(settings)
+    station_context = _forecast_station_context(settings)
+    station_rows = []
+    for station in stations:
+        if not station.enabled:
+            continue
+        historical = _historical_target_backtest(
+            all_rows,
+            station.id,
+            station_context,
+            reference_day,
+            cutoff_hour=settings.session_cutoff_hour,
+            timezone=station.timezone or settings.timezone,
+        )
+        published = _published_forecast_validation(
+            settings,
+            all_rows,
+            station.id,
+            reference_day,
+        )
+        station_rows.append(
+            {
+                "station_id": station.id,
+                "station_name": station.name,
+                "historical": historical,
+                "published": published,
+            }
+        )
+    return {
+        "reference_day": reference_day,
+        "historical": _combine_forecast_results(
+            [row["historical"] for row in station_rows], "tracked-network"
+        ),
+        "published": _combine_forecast_results(
+            [row["published"] for row in station_rows], "published"
+        ),
+        "stations": station_rows,
+    }
+
+
 def station_profile(
     settings: Settings,
     station_id: str,
@@ -1768,16 +2177,8 @@ def station_profile(
             key=lambda item: (item["seen_this_year"], -item["records"], item["label"]),
         )[:12]
 
-    with connect(settings.database) as conn:
-        context_rows = conn.execute(
-            """
-            SELECT id, county_place_id, state_place_id, public_location
-            FROM stations
-            WHERE enabled = 1
-            """
-        ).fetchall()
-    station_context = {row["id"]: dict(row) for row in context_rows}
-    reference_day = today or date.today()
+    station_context = _forecast_station_context(settings)
+    reference_day = today or regional_reference_date(settings)
     seasonal_targets = _regional_seasonal_targets(
         settings,
         station_id,

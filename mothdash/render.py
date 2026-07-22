@@ -4,16 +4,18 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import date
+from datetime import date, datetime
 from html import escape
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from .analysis import (
     active_year,
     daily_species_counts,
     dashboard_insights,
     first_of_season,
+    forecast_validation_summary,
     generated_at,
     diversify_by_station,
     habitat_summary,
@@ -25,12 +27,14 @@ from .analysis import (
     station_profile,
     station_summaries,
     station_taxa,
+    store_forecast_snapshot,
     trend_summary,
     unique_station_taxa,
     weekly_recap,
 )
 from .config import Settings, Station, active_stations
 from .db import connect, init_db
+from .regional import regional_reference_date
 
 
 FALLBACK_COLORS = [
@@ -1586,6 +1590,192 @@ def _seasonal_target_intro(station: Station, targets: dict[str, Any]) -> tuple[s
         "tracked-station records. This fallback appears only while nearby "
         "iNaturalist evidence is unavailable.",
     )
+
+
+def _forecast_percent(numerator: int, denominator: int) -> str:
+    if not denominator:
+        return "--"
+    return f"{numerator / denominator:.0%}"
+
+
+def _forecast_window_table(rows: list[dict[str, Any]], label: str) -> str:
+    if not rows:
+        return ""
+    table_rows = "".join(
+        f"""
+        <tr>
+          <td>{h(row['anchor'])} to {h(row['window_end'])}</td>
+          <td>{h(row['active_nights'])}</td>
+          <td>{h(row['target_hits'])} / {h(row['target_count'])}</td>
+          <td>{h(row['caught_new_species'])} / {h(row['new_species'])}</td>
+        </tr>
+        """
+        for row in reversed(rows)
+    )
+    return f"""
+    <details class="forecast-window-details">
+      <summary>View {h(label)} ({h(len(rows))})</summary>
+      <div class="table-wrap forecast-window-table-wrap">
+        <table>
+          <thead><tr><th>Forecast window</th><th>Active nights</th><th>Targets found</th><th>New species caught</th></tr></thead>
+          <tbody>{table_rows}</tbody>
+        </table>
+      </div>
+    </details>
+    """
+
+
+def _forecast_scorecard(data: dict[str, Any], *, title: str, detail: str, empty: str) -> str:
+    checked = int(data.get("checked_windows") or 0)
+    if not checked:
+        available = int(data.get("available_snapshots") or 0)
+        waiting = (
+            f" {available} published forecast{'s' if available != 1 else ''} still need a complete 14-night outcome window."
+            if available else ""
+        )
+        return f"""
+        <article class="forecast-scorecard">
+          <h3>{h(title)}</h3>
+          <p>{h(empty)}{h(waiting)}</p>
+        </article>
+        """
+    targets = int(data.get("target_count") or 0)
+    hits = int(data.get("target_hits") or 0)
+    new_species = int(data.get("new_species") or 0)
+    active_nights = int(data.get("active_nights") or 0)
+    median_rank = data.get("median_hit_rank")
+    rank_label = "--" if median_rank is None else f"#{median_rank:g}"
+    quiet = int(data.get("quiet_windows") or 0)
+    quiet_detail = (
+        f" {quiet} window{'s' if quiet != 1 else ''} with no species-level station activity were not scored."
+        if quiet else ""
+    )
+    return f"""
+    <article class="forecast-scorecard">
+      <h3>{h(title)}</h3>
+      <p>{h(detail)}{h(quiet_detail)}</p>
+      <dl class="forecast-metrics">
+        <div><dt>targets found</dt><dd>{h(hits)} / {h(targets)}</dd><small>{h(_forecast_percent(hits, targets))} target yield</small></div>
+        <div><dt>new species caught</dt><dd>{h(hits)} / {h(new_species)}</dd><small>{h(_forecast_percent(hits, new_species))} of new finds</small></div>
+        <div><dt>active station-nights</dt><dd>{h(active_nights)}</dd><small>across {h(checked)} scored windows</small></div>
+        <div><dt>median successful rank</dt><dd>{h(rank_label)}</dd><small>among targets that appeared</small></div>
+      </dl>
+      {_forecast_window_table(data.get('windows') or [], 'scored forecast windows')}
+    </article>
+    """
+
+
+def _forecast_validation(validation: dict[str, Any]) -> str:
+    historical = validation.get("historical") or {}
+    published = validation.get("published") or {}
+    return f"""
+    <div class="forecast-validation">
+      {_forecast_scorecard(
+          historical,
+          title="Historical network backtest",
+          detail="Weekly 14-night checkpoints use only tracked-station records uploaded by local noon on the forecast date.",
+          empty="Not enough station history and later moth-night activity are available for a conservative backtest yet.",
+      )}
+      {_forecast_scorecard(
+          published,
+          title="Published forecast check",
+          detail="This uses the first exact target list published for each forecast day, including nearby-iNaturalist evidence when it was available.",
+          empty="Exact checks begin after a published target list has a complete 14-night outcome window.",
+      )}
+    </div>
+    """
+
+
+def _forecast_station_table(rows: list[dict[str, Any]]) -> str:
+    if not rows:
+        return '<p class="empty">No enabled station forecasts are available yet.</p>'
+
+    def result_cell(result: dict[str, Any]) -> str:
+        checked = int(result.get("checked_windows") or 0)
+        if not checked:
+            snapshots = int(result.get("available_snapshots") or 0)
+            return "awaiting outcome" if snapshots else "not available"
+        hits = int(result.get("target_hits") or 0)
+        targets = int(result.get("target_count") or 0)
+        return f"{hits} / {targets} ({_forecast_percent(hits, targets)})"
+
+    table_rows = "".join(
+        f"""
+        <tr>
+          <th scope="row"><a href="stations/{h(row['station_id'])}.html">{h(row['station_name'])}</a></th>
+          <td>{h(result_cell(row['historical']))}</td>
+          <td>{h(row['historical'].get('target_hits', 0))} / {h(row['historical'].get('new_species', 0))}</td>
+          <td>{h(row['historical'].get('active_nights', 0))}</td>
+          <td>{h(result_cell(row['published']))}</td>
+        </tr>
+        """
+        for row in rows
+    )
+    return f"""
+    <div class="table-wrap forecast-station-table">
+      <table>
+        <thead><tr><th>Station</th><th>Backtest targets found</th><th>Backtest new species caught</th><th>Active station-nights</th><th>Exact published targets found</th></tr></thead>
+        <tbody>{table_rows}</tbody>
+      </table>
+    </div>
+    """
+
+
+def _forecast_validation_page(validation: dict[str, Any]) -> str:
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Forecast validation · Moth Station Dashboard</title>
+  <meta name="description" content="Internal validation of two-week moth-station targets.">
+  <meta name="theme-color" content="#151611">
+  <style>{CSS}</style>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to forecast validation</a>
+  <header>
+    <div class="topbar topbar-mode-only">
+      <div class="topbar-primary">
+        <a class="brand" href="index.html"><span class="brand-mark" aria-hidden="true"></span><span>Moth stations</span></a>
+        {_mode_toggle("index.html", "live.html", "history")}
+      </div>
+    </div>
+  </header>
+  <main id="main" class="site-shell">
+    <section class="validation-intro">
+      <p class="eyebrow">internal model check</p>
+      <h1>Forecast validation</h1>
+      <p>Does the next-two-weeks target method surface moths that actually arrive? This page evaluates the method without presenting it as a station-facing feature.</p>
+    </section>
+    <section>
+      <div class="section-head">
+        <h2>Network summary</h2>
+        <p>Aggregate results are weighted by forecast opportunities and active station-nights, not by giving each station equal weight.</p>
+      </div>
+      {_forecast_validation(validation)}
+    </section>
+    <section>
+      <div class="section-head">
+        <h2>By station</h2>
+        <p>Stations with few moth nights have less evidence. The exact column will fill after the first saved 14-night windows complete.</p>
+      </div>
+      {_forecast_station_table(validation.get("stations") or [])}
+    </section>
+    <section class="forecast-method">
+      <div class="section-head">
+        <h2>Method notes</h2>
+      </div>
+      <div class="forecast-method-copy">
+        <p><strong>Historical network backtest:</strong> fourteen overlapping Monday checkpoints freeze the tracked-station records uploaded by local noon, then check which new station species appear during the next fourteen moth nights. It is a conservative reconstruction, not a test of the full nearby-iNaturalist forecast.</p>
+        <p><strong>Published forecast check:</strong> each build saves the exact rendered target list in the existing SQLite cache. Once its full fourteen-night outcome window closes, the first published list for that day is scored without new iNaturalist queries.</p>
+      </div>
+    </section>
+  </main>
+  <footer><div>Generated {h(generated_at())}. <a class="footer-utility-link" href="index.html">Back to history</a></div></footer>
+</body>
+</html>
+"""
 
 
 def _signature_species_gallery(rows: list[dict[str, Any]]) -> str:
@@ -4733,6 +4923,72 @@ h2 {
   height: 100%;
   background: var(--amber);
 }
+.forecast-validation {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.forecast-scorecard {
+  min-width: 0;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+}
+.forecast-scorecard h3 {
+  margin: 0 0 8px;
+  color: var(--ink);
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 1rem;
+  font-weight: 720;
+}
+.forecast-scorecard > p {
+  min-height: 3.8em;
+  margin: 0 0 16px;
+  color: var(--muted);
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+.forecast-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+  border-top: 1px solid var(--line);
+  border-left: 1px solid var(--line);
+}
+.forecast-metrics > div {
+  min-width: 0;
+  padding: 11px;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+.forecast-metrics dt,
+.forecast-metrics small {
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.64rem;
+  line-height: 1.25;
+}
+.forecast-metrics dd {
+  margin: 5px 0 2px;
+  color: var(--ink);
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 1.1rem;
+  font-weight: 720;
+  font-variant-numeric: tabular-nums;
+}
+.forecast-window-details {
+  margin-top: 16px;
+}
+.forecast-window-details summary {
+  color: var(--amber);
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+.forecast-window-table-wrap {
+  margin-top: 10px;
+}
 .accumulation-line-chart {
   margin: 0;
   position: relative;
@@ -6648,6 +6904,43 @@ footer div {
   width: min(var(--max), calc(100% - 32px));
   margin: 0 auto;
 }
+.footer-utility-link {
+  margin-left: 10px;
+  color: var(--faint);
+  font-size: 0.78rem;
+}
+.validation-intro {
+  max-width: 760px;
+  padding: 46px 0 8px;
+}
+.validation-intro h1 {
+  font-size: clamp(2.4rem, 6vw, 4.2rem);
+}
+.validation-intro > p:last-child {
+  max-width: 680px;
+  margin: 14px 0 0;
+  color: var(--muted);
+  font-size: 1.05rem;
+  line-height: 1.5;
+}
+.forecast-method-copy {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.forecast-method-copy p {
+  margin: 0;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+.forecast-method-copy strong {
+  color: var(--ink);
+}
 @media (max-width: 980px) {
   .hero {
     grid-template-columns: 1fr;
@@ -6715,6 +7008,9 @@ footer div {
   .insight-card:nth-child(1),
   .insight-card:nth-child(2) {
     grid-column: span 1;
+  }
+  .forecast-method-copy {
+    grid-template-columns: 1fr;
   }
 }
 @media (min-width: 621px) and (max-width: 1180px) {
@@ -6903,6 +7199,9 @@ footer div {
     grid-column: 1 / -1;
     border-right: 0;
   }
+  .forecast-validation {
+    grid-template-columns: 1fr;
+  }
 }
 @media (prefers-reduced-motion: reduce) {
   html {
@@ -6943,6 +7242,10 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
     uniques = unique_station_taxa(settings)
     insights = dashboard_insights(settings)
     trends = trend_summary(settings)
+    forecast_reference_day = regional_reference_date(settings)
+    forecast_validation = forecast_validation_summary(
+        settings, stations, today=forecast_reference_day
+    )
 
     html = f"""<!doctype html>
 <html lang="en">
@@ -7094,7 +7397,7 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
       <div class="view-panel" id="species-last-night" hidden><div class="table-wrap">{_comparison_table(latest_night_taxa, stations)}</div></div>
     </section>
   </main>
-  <footer><div>Generated {h(generated_at())}. First-of-season dates use moth session dates, with records before noon assigned to the previous evening.</div></footer>
+  <footer><div>Generated {h(generated_at())}. First-of-season dates use moth session dates, with records before noon assigned to the previous evening. <a class="footer-utility-link" href="forecast-validation.html">Forecast validation</a></div></footer>
   <script>{DASHBOARD_JS}</script>
 </body>
 </html>
@@ -7117,13 +7420,24 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
         _live_page(snapshot),
         encoding="utf-8",
     )
+    (settings.public_dir / "forecast-validation.html").write_text(
+        _forecast_validation_page(forecast_validation),
+        encoding="utf-8",
+    )
     stations_dir = settings.public_dir / "stations"
     stations_dir.mkdir(parents=True, exist_ok=True)
     station_colors = _station_color_map(stations)
+    forecast_snapshot_at = datetime.now(ZoneInfo(settings.timezone))
     for station in stations:
         if not station.enabled:
             continue
-        profile = station_profile(settings, station.id)
+        profile = station_profile(settings, station.id, today=forecast_reference_day)
+        store_forecast_snapshot(
+            settings,
+            station.id,
+            profile["seasonal_targets"],
+            snapshot_at=forecast_snapshot_at,
+        )
         recap = weekly_recap(settings, station.id)
         habitat = habitat_summary(settings, station.id, taxa)
         color = station_colors.get(station.id, station.color or FALLBACK_COLORS[0])
