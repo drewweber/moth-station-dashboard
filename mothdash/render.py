@@ -361,6 +361,30 @@ def _taxa_period_dashboard(
         if station.enabled and station_counts.get(station.id, 0)
     ]
     shared_taxa = sum(1 for row in taxa if row.get("station_count", 0) > 1)
+    station_only_totals = {
+        station_id: sum(
+            1
+            for row in taxa
+            if row.get("station_count", 0) == 1 and station_id in row.get("stations", {})
+        )
+        for station_id in active_station_ids
+    }
+
+    # Keep shared flights first by default, while reserving a small real
+    # preview for every station-only filter.
+    preview_taxa = list(taxa[:PERIOD_CARD_PREVIEW_LIMIT])
+    preview_taxon_ids = {row.get("taxon_id") for row in preview_taxa}
+    for station_id in active_station_ids:
+        station_only_rows = [
+            row
+            for row in taxa
+            if row.get("station_count", 0) == 1 and station_id in row.get("stations", {})
+        ]
+        for row in station_only_rows[:PERIOD_STATION_ONLY_PREVIEW_LIMIT]:
+            if row.get("taxon_id") not in preview_taxon_ids:
+                preview_taxa.append(row)
+                preview_taxon_ids.add(row.get("taxon_id"))
+
     station_chips = []
     if shared_taxa:
         station_chips.append(
@@ -368,6 +392,7 @@ def _taxa_period_dashboard(
             <button type="button" class="night-station-chip night-filter-chip night-shared-chip"
                     style="--station-color: var(--amber)"
                     data-night-shared-filter
+                    data-night-shared-total="{h(shared_taxa)}"
                     aria-pressed="false"
                     aria-label="Show species shared by multiple stations in this period">
               Shared
@@ -382,6 +407,7 @@ def _taxa_period_dashboard(
                     style="--station-color: {h(colors[station_id])}"
                     data-night-station-filter="{h(station_id)}"
                     data-station-name="{h(station.name)}"
+                    data-night-station-total="{h(station_only_totals[station_id])}"
                     aria-pressed="false"
                     aria-label="Show species only seen at {h(station.name)} in this period">
               {h(_station_short_label(station))}
@@ -391,7 +417,7 @@ def _taxa_period_dashboard(
         )
 
     cards = []
-    for row in taxa[:36]:
+    for row in preview_taxa:
         label = h(row["label"])
         photo_url = row.get("photo_url")
         if photo_url:
@@ -502,6 +528,8 @@ def _flag_list(flags: list[str]) -> str:
 RECORD_FLAG_TYPES = ("state iNat first", "county iNat first", "first among tracked")
 RECORD_CARD_PREVIEW_LIMIT = 12
 RECORD_TABLE_PAGE_SIZE = 100
+PERIOD_CARD_PREVIEW_LIMIT = 36
+PERIOD_STATION_ONLY_PREVIEW_LIMIT = 12
 
 
 def _record_cards(rows: list[dict[str, Any]]) -> str:
@@ -2202,7 +2230,7 @@ function initNightStationFilters() {
         .forEach((card) => grid.appendChild(card));
     };
 
-    const applyFilter = (mode, stationId, stationName) => {
+    const applyFilter = (mode, stationId, stationName, total) => {
       let visible = 0;
       cards.forEach((card) => {
         const stationCount = Number(card.dataset.stationCount || 0);
@@ -2227,20 +2255,21 @@ function initNightStationFilters() {
       });
       if (status) {
         status.hidden = !mode;
+        const previewNote = total > visible ? ` · showing ${visible}` : "";
         status.textContent =
           mode === "shared"
-            ? `Shared species: ${visible}, sorted by station coverage`
+            ? `Shared species: ${total}${previewNote}, sorted by station coverage`
             : stationId
-              ? `${stationName}-only species: ${visible}`
+              ? `${stationName}-only species: ${total}${previewNote}`
               : "";
       }
       if (empty) {
-        empty.hidden = !mode || visible > 0;
+        empty.hidden = !mode || total > 0;
         empty.textContent =
           mode === "shared"
-            ? "No preview species were shared by multiple stations in this period."
+            ? "No species were shared by multiple stations in this period."
             : stationId
-              ? `No preview species are unique to ${stationName} in this period.`
+              ? `No species are unique to ${stationName} in this period.`
               : "";
       }
     };
@@ -2250,7 +2279,17 @@ function initNightStationFilters() {
         const mode = button.hasAttribute("data-night-shared-filter") ? "shared" : "station";
         const stationId = button.dataset.nightStationFilter || "";
         const isActive = button.getAttribute("aria-pressed") === "true";
-        applyFilter(isActive ? "" : mode, isActive ? "" : stationId, button.dataset.stationName || button.textContent.trim());
+        const total = Number(
+          mode === "shared"
+            ? button.dataset.nightSharedTotal || 0
+            : button.dataset.nightStationTotal || 0
+        );
+        applyFilter(
+          isActive ? "" : mode,
+          isActive ? "" : stationId,
+          button.dataset.stationName || button.textContent.trim(),
+          isActive ? 0 : total,
+        );
       });
     });
   });

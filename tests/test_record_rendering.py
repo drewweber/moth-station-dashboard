@@ -3,6 +3,7 @@ import unittest
 from mothdash.render import (
     DASHBOARD_JS,
     LIVE_JS,
+    PERIOD_CARD_PREVIEW_LIMIT,
     RECORD_CARD_PREVIEW_LIMIT,
     RECORD_TABLE_PAGE_SIZE,
     _daily_species_line_chart,
@@ -184,7 +185,9 @@ class RecordRenderingTests(unittest.TestCase):
         html = _taxa_period_dashboard(payload, stations, "past 7 nights", "No moths.")
 
         self.assertIn('data-night-station-filter="alpha"', html)
+        self.assertIn('data-night-station-total="1"', html)
         self.assertIn("data-night-shared-filter", html)
+        self.assertIn('data-night-shared-total="1"', html)
         self.assertIn('aria-pressed="false"', html)
         self.assertIn('data-night-card', html)
         self.assertIn('data-single-station-id="alpha"', html)
@@ -197,6 +200,49 @@ class RecordRenderingTests(unittest.TestCase):
         self.assertIn('mode === "shared"', DASHBOARD_JS)
         self.assertIn("sortSharedCards();", DASHBOARD_JS)
         self.assertIn("Number(b.dataset.stationCount || 0)", DASHBOARD_JS)
+        self.assertIn("button.dataset.nightStationTotal", DASHBOARD_JS)
+        self.assertIn("showing ${visible}", DASHBOARD_JS)
+
+    def test_period_preview_includes_station_only_cards_beyond_shared_default(self) -> None:
+        stations = [
+            Station(id="alpha", name="Alpha Station", enabled=True, active=True, query={}, color="#123456"),
+            Station(id="beta", name="Beta Station", enabled=True, active=True, query={}, color="#abcdef"),
+        ]
+        shared_taxa = [
+            {
+                "taxon_id": index,
+                "label": f"Shared {index}",
+                "station_count": 2,
+                "total_count": 2,
+                "stations": {
+                    "alpha": {"station_name": "Alpha Station"},
+                    "beta": {"station_name": "Beta Station"},
+                },
+            }
+            for index in range(PERIOD_CARD_PREVIEW_LIMIT + 1)
+        ]
+        alpha_only = {
+            "taxon_id": 999,
+            "label": "Alpha-only Moth",
+            "station_count": 1,
+            "total_count": 1,
+            "stations": {"alpha": {"station_name": "Alpha Station"}},
+        }
+        html = _taxa_period_dashboard(
+            {
+                "period_label": "2026-07-12 to 2026-07-18",
+                "observations": 75,
+                "station_counts": {"alpha": 38, "beta": 37},
+                "taxa": [*shared_taxa, alpha_only],
+            },
+            stations,
+            "past 7 nights",
+            "No moths.",
+        )
+
+        self.assertIn("Alpha-only Moth", html)
+        self.assertIn('data-single-station-id="alpha"', html)
+        self.assertIn('data-night-station-total="1"', html)
 
     def test_archive_contains_every_record_without_server_hidden_rows(self) -> None:
         html = _record_table(records(150))
