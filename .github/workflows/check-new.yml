@@ -7,8 +7,9 @@ name: Check for new moth observations
 on:
   schedule:
     # Offset from the top of the hour to avoid GitHub's busiest cron window.
-    # Four checks match the previous four daily full-build opportunities.
-    - cron: "15 4,6,13,16 * * *"
+    # A scheduled full build runs shortly after the noon Eastern session
+    # boundary, so this checker covers only the remaining update windows.
+    - cron: "15 4,6,13 * * *"
   workflow_dispatch: {}
 
 permissions:
