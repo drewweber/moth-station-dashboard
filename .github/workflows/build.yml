@@ -22,7 +22,35 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  test-and-render:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Compile Python
+        run: python -m compileall -q mothdash
+
+      - name: Validate configuration and empty-data render
+        run: |
+          python -m mothdash init-db
+          python -m mothdash render
+          test -s public/index.html
+          test -s public/live.html
+          test -s public/forecast-validation.html
+          test -s public/live-snapshot.json
+
   build-and-deploy:
+    # Forks receive the validation job above, but never receive our iNaturalist
+    # sync, Cloudflare credentials, or a Pages deployment attempt.
+    if: github.repository == 'drewweber/moth-station-dashboard' && github.ref == 'refs/heads/main'
+    needs: test-and-render
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6

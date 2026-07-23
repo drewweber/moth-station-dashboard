@@ -33,6 +33,18 @@ changes reviewable:
 The repository includes `AGENTS.md` and `CLAUDE.md` so different tools can read
 the same project guidance.
 
+## Forks and Deployment
+
+Forks are encouraged for feature work. Pushes to a fork run the same unit-test,
+compile, and empty-data render checks used for the project, but they do not
+poll iNaturalist or deploy to Cloudflare Pages. Production credentials remain
+only in `drewweber/moth-station-dashboard`; contributors should never add
+Cloudflare secrets to a fork.
+
+Open a pull request from the fork when the change is ready. The pull request
+check gives the maintainer the relevant validation before merging, and a merge
+to the canonical `main` branch triggers the production build and deployment.
+
 ## Keeping Long-Running Pull Requests Current
 
 Open large or uncertain work as a draft pull request early. Draft PRs make it

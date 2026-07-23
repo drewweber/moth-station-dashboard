@@ -21,6 +21,9 @@ concurrency:
 
 jobs:
   check:
+    # A fork can validate code through PR checks, but must not poll iNaturalist
+    # or trigger the canonical repository's Cloudflare deployment workflow.
+    if: github.repository == 'drewweber/moth-station-dashboard'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6

@@ -44,6 +44,11 @@ The dashboard is configured for Cloudflare Pages at:
 The GitHub Actions workflow builds the dashboard and deploys `public/` to the
 Cloudflare Pages project named `moth-stations`.
 
+Forks run validation only. iNaturalist polling, Cloudflare credentials, and
+production deploys are restricted to the canonical
+`drewweber/moth-station-dashboard` repository, so contributors do not need to
+configure secrets or a Cloudflare Pages project in their forks.
+
 Scheduled builds use a two-stage workflow to stay within the free tiers: a
 small cursor check asks iNaturalist whether an active station has new records,
 then dispatches the sync/render/deploy workflow only when data changed. A daily
