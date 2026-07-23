@@ -9,7 +9,8 @@ on:
     # advances promptly even when no new records arrive after the morning check.
     # The overlapping transition-day run is intentional: GitHub cron is UTC.
     - cron: "20 16 * 3-10 *" # 12:20 PM EDT, March through October
-    - cron: "20 17 * 11-2 *" # 12:20 PM EST, November through February
+    - cron: "20 17 * 11,12 *" # 12:20 PM EST, November and December
+    - cron: "20 17 * 1,2 *" # 12:20 PM EST, January and February
   push:
     branches: [main]
     paths:
