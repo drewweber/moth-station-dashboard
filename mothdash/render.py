@@ -6320,6 +6320,9 @@ h2 {
 .night-filter-empty {
   margin-top: 14px;
 }
+.night-filter-empty[hidden] {
+  display: none;
+}
 .network-total-chip {
   background: color-mix(in srgb, var(--amber) 12%, var(--panel));
   color: var(--ink);

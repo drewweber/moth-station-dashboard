@@ -409,6 +409,7 @@ class RecordRenderingTests(unittest.TestCase):
         self.assertIn("button.dataset.nightStationTotal", DASHBOARD_JS)
         self.assertIn("showing ${visible}", DASHBOARD_JS)
         self.assertIn(".night-card[hidden]", CSS)
+        self.assertIn(".night-filter-empty[hidden]", CSS)
 
     def test_period_preview_includes_station_only_cards_beyond_shared_default(self) -> None:
         stations = [
