@@ -3431,6 +3431,7 @@ const state = {
   snapshot: null,
   timer: null,
   stopAt: 0,
+  isChecking: false,
   known: new Map(),
   seenThisSession: new Set(),
   seenObservations: new Set(),
@@ -3835,29 +3836,43 @@ async function fetchStation(station, createdAfter) {
 }
 
 async function runCheck() {
+  if (state.isChecking || !state.snapshot) return;
+  state.isChecking = true;
+  if (els.update) {
+    els.update.disabled = true;
+    els.update.textContent = "Updating...";
+  }
   const now = new Date();
   const eventWindow = currentEventWindow(now);
   const createdAfter = eventWindow.start.toISOString();
   setStatus(`Checking iNaturalist at ${now.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`);
-  let found = 0;
-  let activeUploads = 0;
-  for (const station of state.snapshot.stations) {
-    if (!station.live_supported) continue;
-    const data = await fetchStation(station, createdAfter);
-    const result = updateStationSummary(station, data.results || [], now, eventWindow);
-    found += result.stationFirsts;
-    activeUploads += result.currentObs;
+  try {
+    let found = 0;
+    let activeUploads = 0;
+    for (const station of state.snapshot.stations) {
+      if (!station.live_supported) continue;
+      const data = await fetchStation(station, createdAfter);
+      const result = updateStationSummary(station, data.results || [], now, eventWindow);
+      found += result.stationFirsts;
+      activeUploads += result.currentObs;
+    }
+    els.lastCheck.textContent = fmtMinuteStamp(now);
+    renderStationSummaries();
+    const activeStations = Array.from(state.stationSummaries.values()).filter((summary) => summary.active).length;
+    setStatus(found
+      ? `Found ${found} new station species in the current moth event.`
+      : activeUploads
+        ? `Found ${activeUploads} current-event species-level uploads; no new station species in this check.`
+        : activeStations
+          ? "No additional current-event species-level uploads since the previous check."
+          : "No current-event station species-level uploads found in this check.");
+  } finally {
+    state.isChecking = false;
+    if (els.update) {
+      els.update.disabled = false;
+      els.update.textContent = "Update";
+    }
   }
-  els.lastCheck.textContent = fmtMinuteStamp(now);
-  renderStationSummaries();
-  const activeStations = Array.from(state.stationSummaries.values()).filter((summary) => summary.active).length;
-  setStatus(found
-    ? `Found ${found} new station species in the current moth event.`
-    : activeUploads
-      ? `Found ${activeUploads} current-event species-level uploads; no new station species in this check.`
-      : activeStations
-        ? "No additional current-event species-level uploads since the previous check."
-        : "No current-event station species-level uploads found in this check.");
 }
 
 function stopScan(message) {
@@ -3965,6 +3980,7 @@ function initLiveSectionNavigation() {
 async function init() {
   initLiveSectionNavigation();
   els.toggle = document.querySelector("#live-toggle");
+  els.update = document.querySelector("#live-update");
   els.status = document.querySelector("#live-status");
   els.lastCheck = document.querySelector("#last-check");
   els.latestObservation = document.querySelector("#latest-observation");
@@ -3992,6 +4008,14 @@ async function init() {
       localStorage.removeItem(LIVE_KEY);
       updateToggleState();
       stopScan("Live mode off.");
+    }
+  });
+
+  els.update.addEventListener("click", async () => {
+    try {
+      await runCheck();
+    } catch (error) {
+      setStatus(error.message || "Live check failed.");
     }
   });
 
@@ -4037,6 +4061,36 @@ def _live_page(live_snapshot: dict) -> str:
     justify-content: space-between;
     gap: 18px;
     flex-wrap: wrap;
+  }}
+  .live-actions {{
+    display: inline-flex;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: wrap;
+  }}
+  .live-update-button {{
+    min-height: 34px;
+    padding: 6px 12px;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    background: var(--panel-2);
+    color: var(--ink);
+    font: inherit;
+    font-size: 0.86rem;
+    font-weight: 700;
+    cursor: pointer;
+  }}
+  .live-update-button:hover:not(:disabled) {{
+    border-color: var(--amber);
+    background: color-mix(in srgb, var(--amber) 14%, var(--panel-2));
+  }}
+  .live-update-button:focus-visible {{
+    outline: 3px solid var(--focus);
+    outline-offset: 3px;
+  }}
+  .live-update-button:disabled {{
+    cursor: wait;
+    opacity: 0.62;
   }}
   .switch {{
     display: inline-flex;
@@ -4091,20 +4145,24 @@ def _live_page(live_snapshot: dict) -> str:
     color: var(--ink);
   }}
   .live-freshness {{
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px 14px;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0;
     margin: 12px 0 0;
     color: var(--faint);
     font-size: 0.78rem;
   }}
   .live-freshness span {{
-    white-space: nowrap;
+    display: grid;
+    gap: 3px;
+    min-width: 0;
+    padding: 0 12px;
   }}
-  .live-freshness span + span::before {{
-    content: "·";
-    margin-right: 14px;
-    color: var(--line);
+  .live-freshness span:first-child {{
+    padding-left: 0;
+  }}
+  .live-freshness span + span {{
+    border-left: 1px solid var(--line);
   }}
   .live-freshness strong {{
     color: var(--muted);
@@ -4112,6 +4170,21 @@ def _live_page(live_snapshot: dict) -> str:
     font-size: inherit;
     font-variant-numeric: tabular-nums;
     font-weight: 600;
+  }}
+  @media (max-width: 620px) {{
+    .live-freshness {{
+      grid-template-columns: 1fr;
+      gap: 8px;
+    }}
+    .live-freshness span,
+    .live-freshness span:first-child {{
+      padding: 0;
+    }}
+    .live-freshness span + span {{
+      padding-top: 8px;
+      border-top: 1px solid var(--line);
+      border-left: 0;
+    }}
   }}
   .live-log {{
     display: grid;
@@ -4371,7 +4444,6 @@ def _live_page(live_snapshot: dict) -> str:
   <script id="live-snapshot-data" type="application/json">{json.dumps(live_snapshot, sort_keys=True)}</script>
   <main id="live-main" class="live-shell">
     <div id="live-overview">
-      <p class="eyebrow">10-minute iNaturalist check</p>
       <h1>Live station summary.</h1>
       <p class="subhead">Opening Live checks iNaturalist once for the current 12pm-to-12pm moth event. Turn on updates to refresh every 10 minutes for 2 hours.</p>
       <div id="live-new-species-counter" class="night-stations live-new-station-counter"
@@ -4384,11 +4456,14 @@ def _live_page(live_snapshot: dict) -> str:
           <h2 id="live-controls">Live updates</h2>
           <p id="live-status">Preparing live check.</p>
         </div>
-        <label class="switch">
-          <input id="live-toggle" type="checkbox">
-          <span class="switch-track" aria-hidden="true"></span>
-          <span>Keep checking</span>
-        </label>
+        <div class="live-actions">
+          <button id="live-update" class="live-update-button" type="button">Update</button>
+          <label class="switch">
+            <input id="live-toggle" type="checkbox">
+            <span class="switch-track" aria-hidden="true"></span>
+            <span>Keep checking</span>
+          </label>
+        </div>
       </div>
       <p class="live-freshness" aria-label="Live update timing">
         <span>Checked <strong id="last-check">not yet</strong></span>
