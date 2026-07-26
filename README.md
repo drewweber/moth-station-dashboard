@@ -54,6 +54,28 @@ small cursor check asks iNaturalist whether an active station has new records,
 then dispatches the sync/render/deploy workflow only when data changed. A daily
 build remains as a backstop for older records newly added to a station query.
 
+### Public previews
+
+Visible work should be reviewed on a public Cloudflare Pages preview before it
+is promoted to production. The `Build dashboard preview` workflow runs only for
+maintainer-owned branches named `preview/<short-topic>` in the canonical
+repository. It validates the change, uses the existing database cache when
+available, builds once, and deploys a Pages preview. The workflow summary
+contains the exact public preview URL, including a stable alias for that branch.
+
+For a preview branch:
+
+```sh
+git switch -c preview/<short-topic>
+git push -u origin preview/<short-topic>
+```
+
+Keep iterating on that branch until the maintainer approves the preview, then
+rebase it on current `origin/main` and merge or fast-forward the approved work
+to `main`. Do not configure Cloudflare credentials in a fork: forks and pull
+requests still run validation only, so contributor work must be moved to a
+maintainer-owned preview branch when a public preview is needed.
+
 After pushing this repo to GitHub:
 
 1. Create a Cloudflare Pages project named `moth-stations`.

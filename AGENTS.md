@@ -38,6 +38,12 @@ queries.
   results in the pull request description.
 - For visible changes, include before/after screenshots at relevant desktop
   and mobile widths.
+- Before asking the maintainer to approve a visible change for production,
+  publish a public Cloudflare Pages preview from a canonical
+  `preview/<short-topic>` branch and give the exact URL. A localhost server is
+  useful for engineering checks but does not count as a maintainer preview.
+  Make one preview deployment per cohesive change, update that same branch
+  while iterating, and keep previews out of contributor forks.
 - Keep the main page fast and simple. Treat homepage sections as bounded
   previews, not complete archives.
 - When adding, removing, renaming, or reordering a visible page section, update

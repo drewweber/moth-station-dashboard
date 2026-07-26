@@ -1,0 +1,86 @@
+name: Build dashboard preview
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches:
+      - "preview/**"
+    paths:
+      - "mothdash/**"
+      - "stations.toml"
+      - ".github/workflows/preview.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: moth-station-preview-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-and-render:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Compile Python
+        run: python -m compileall -q mothdash
+
+      - name: Validate configuration and empty-data render
+        run: |
+          python -m mothdash init-db
+          python -m mothdash render
+          test -s public/index.html
+          test -s public/live.html
+          test -s public/forecast-validation.html
+          test -s public/live-snapshot.json
+
+  build-and-preview:
+    # Previews run only from the canonical repository. Forks continue to run
+    # pull-request validation without receiving iNaturalist or Pages access.
+    if: github.repository == 'drewweber/moth-station-dashboard' && startsWith(github.ref, 'refs/heads/preview/')
+    needs: test-and-render
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Restore database cache
+        uses: actions/cache/restore@v5
+        with:
+          path: data/mothdash.db
+          key: mothdash-db-preview-${{ github.run_id }}
+          restore-keys: |
+            mothdash-db-
+
+      - name: Build dashboard preview
+        run: python -m mothdash build
+
+      - name: Deploy preview to Cloudflare Pages
+        id: deploy
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy public --project-name=moth-stations --branch=${{ github.ref_name }} --commit-dirty=true
+
+      - name: Write preview link
+        env:
+          PREVIEW_URL: ${{ steps.deploy.outputs.pages-deployment-alias-url }}
+          DEPLOYMENT_URL: ${{ steps.deploy.outputs.deployment-url }}
+        run: |
+          {
+            echo "## Dashboard preview"
+            echo
+            echo "Preview: ${PREVIEW_URL:-$DEPLOYMENT_URL}"
+          } >> "$GITHUB_STEP_SUMMARY"
