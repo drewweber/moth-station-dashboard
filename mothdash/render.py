@@ -1702,54 +1702,149 @@ def _forecast_scorecard(data: dict[str, Any], *, title: str, detail: str, empty:
     """
 
 
+_FORECAST_COMPARISON_METHODS = (
+    (
+        "seasonal-only",
+        "Seasonal-only",
+        "Seasonal station records",
+    ),
+    (
+        "host-only",
+        "Host-only",
+        "Shared host associations",
+    ),
+    (
+        "host-evidence",
+        "Seasonal + host",
+        "Seasonal records + host associations",
+    ),
+)
+
+
+def _forecast_three_way_summary(
+    variants: dict[str, dict[str, Any]],
+    *,
+    empty: str,
+    window_label: str,
+) -> str:
+    """Render one shared test base with the three ranking outcomes."""
+    ordered = [
+        (variant, variants.get(variant) or {})
+        for variant, _, _ in _FORECAST_COMPARISON_METHODS
+    ]
+    scored = [data for _, data in ordered if int(data.get("checked_windows") or 0)]
+    if not scored:
+        available = max(
+            (int(data.get("available_snapshots") or 0) for _, data in ordered),
+            default=0,
+        )
+        waiting = (
+            f" {available} saved forecast{'s' if available != 1 else ''} still need a complete 14-night outcome window."
+            if available
+            else ""
+        )
+        return f"""
+        <article class="forecast-scorecard forecast-summary-empty">
+          <p>{h(empty)}{h(waiting)}</p>
+        </article>
+        """
+
+    shared_data = scored[0]
+    shared_fields = ("checked_windows", "target_count", "new_species", "active_nights")
+    if not all(
+        all(
+            int(data.get(field) or 0) == int(shared_data.get(field) or 0)
+            for field in shared_fields
+        )
+        for _, data in ordered
+    ):
+        # This should not occur: all three rankings use the same candidates and
+        # outcome windows. Keep the individual results legible if that contract
+        # is ever broken instead of incorrectly presenting a shared denominator.
+        return "".join(
+            _forecast_scorecard(
+                data,
+                title=title,
+                detail=detail,
+                empty=empty,
+            )
+            for (variant, title, detail), (_, data) in zip(
+                _FORECAST_COMPARISON_METHODS, ordered
+            )
+        )
+
+    checked = int(shared_data.get("checked_windows") or 0)
+    targets = int(shared_data.get("target_count") or 0)
+    new_species = int(shared_data.get("new_species") or 0)
+    active_nights = int(shared_data.get("active_nights") or 0)
+    quiet = int(shared_data.get("quiet_windows") or 0)
+    quiet_detail = (
+        f"{quiet} window{'s' if quiet != 1 else ''} with no species-level station activity {'was' if quiet == 1 else 'were'} not scored."
+        if quiet
+        else ""
+    )
+    method_rows = "".join(
+        f"""
+        <article class="forecast-method-result">
+          <div class="forecast-method-name">
+            <h4>{h(title)}</h4>
+            <p>{h(detail)}</p>
+          </div>
+          <div class="forecast-method-value" data-label="Targets found">
+            <strong>{h(int(data.get('target_hits') or 0))}</strong>
+            <small>{h(_forecast_percent(int(data.get('target_hits') or 0), targets))} of target predictions</small>
+          </div>
+          <div class="forecast-method-value" data-label="Target coverage">
+            <strong>{h(_forecast_percent(int(data.get('target_hits') or 0), new_species))}</strong>
+            <small>of station-first species</small>
+          </div>
+          <div class="forecast-method-value" data-label="Typical useful rank">
+            <strong>{h('--' if data.get('median_hit_rank') is None else f"#{data['median_hit_rank']:g}")}</strong>
+            <small>among targets that appeared</small>
+          </div>
+        </article>
+        """
+        for (_, title, detail), (_, data) in zip(_FORECAST_COMPARISON_METHODS, ordered)
+    )
+    return f"""
+    <article class="forecast-summary">
+      <p class="forecast-summary-lede">All three methods use the same target predictions and the same 14-night outcome periods. Only the target order changes, so the comparison below shows what that ranking changed.</p>
+      <dl class="forecast-shared-metrics">
+        <div><dt>targets predicted</dt><dd>{h(targets)}</dd><small>across all stations</small></div>
+        <div><dt>species first recorded</dt><dd>{h(new_species)}</dd><small>at a station in the following two weeks</small></div>
+        <div><dt>test windows</dt><dd>{h(checked)}</dd><small>14 nights each</small></div>
+        <div><dt>active station-nights</dt><dd>{h(active_nights)}</dd><small>with species-level activity</small></div>
+      </dl>
+      <div class="forecast-method-results">
+        <div class="forecast-method-header" aria-hidden="true">
+          <span>Ranking method</span><span>Targets found</span><span>Target coverage</span><span>Typical useful rank</span>
+        </div>
+        {method_rows}
+      </div>
+      {f'<p class="forecast-summary-note">{h(quiet_detail)}</p>' if quiet_detail else ''}
+      {_forecast_window_table(shared_data.get('windows') or [], window_label)}
+    </article>
+    """
+
+
 def _forecast_validation(validation: dict[str, Any]) -> str:
     historical = validation.get("historical") or {}
     published = validation.get("published") or {}
-    historical_cards = f"""
-      {_forecast_scorecard(
-          historical.get("seasonal-only") or {},
-          title="Seasonal-only baseline",
-          detail="Ranks targets using only the frozen seasonal station-record evidence available at each checkpoint.",
-          empty="Not enough station history and later moth-night activity are available for a conservative backtest yet.",
-      )}
-      {_forecast_scorecard(
-          historical.get("host-only") or {},
-          title="Host-only ranking",
-          detail="Uses the same seasonal candidate pool, but ranks it only by documented shared-host strength. Targets without a host match trail at the end.",
-          empty="Not enough station history and later moth-night activity are available for a conservative backtest yet.",
-      )}
-      {_forecast_scorecard(
-          historical.get("host-evidence") or {},
-          title="Seasonal + host evidence",
-          detail="Uses the same checkpoint, target pool, and outcome window, with comprehensive host evidence used only to change ranking.",
-          empty="Not enough station history and later moth-night activity are available for a conservative backtest yet.",
-      )}
-    """
+    historical_summary = _forecast_three_way_summary(
+        historical,
+        empty="Not enough station history and later moth-night activity are available for a conservative backtest yet.",
+        window_label="scored forecast windows",
+    )
     paired_published = published.get("seasonal-only") or {}
     paired_available = int(paired_published.get("available_snapshots") or 0)
     if paired_available:
-        published_cards = f"""
-          {_forecast_scorecard(
-              paired_published,
-              title="Seasonal-only baseline",
-              detail="The saved baseline list for each published forecast window.",
-              empty="Paired published checks begin after a saved baseline has a complete 14-night outcome window.",
-          )}
-          {_forecast_scorecard(
-              published.get("host-only") or {},
-              title="Host-only ranking",
-              detail="The saved host-only ranking from each published forecast window.",
-              empty="Three-way published checks begin after saved rankings have a complete 14-night outcome window.",
-          )}
-          {_forecast_scorecard(
-              published.get("host-evidence") or {},
-              title="Seasonal + host evidence",
-              detail="The saved host-evidence ranking for those same published forecast windows.",
-              empty="Three-way published checks begin after saved rankings have a complete 14-night outcome window.",
-          )}
-        """
+        published_summary = _forecast_three_way_summary(
+            published,
+            empty="Three-way published checks begin after saved rankings have a complete 14-night outcome window.",
+            window_label="scored published forecast windows",
+        )
     else:
-        published_cards = _forecast_scorecard(
+        published_summary = _forecast_scorecard(
             published.get("legacy") or {},
             title="Legacy published target lists",
             detail="These earlier published lists were saved as one ranking, before the paired comparison began.",
@@ -1761,12 +1856,12 @@ def _forecast_validation(validation: dict[str, Any]) -> str:
         <h3>Historical three-way backtest</h3>
         <p>Imagine writing a Next two weeks list on a past Monday, then checking what became newly recorded at that station over the following 14 nights. We repeat that test across the network. These are forecast results, not moth or observation totals.</p>
       </div>
-      <div class="forecast-validation">{historical_cards}</div>
+      <div class="forecast-validation">{historical_summary}</div>
       <div class="forecast-comparison-head">
         <h3>Published three-way forecast check</h3>
         <p>Each new build saves all three rankings from the same candidate pool. Mature windows will provide the exact nearby-iNaturalist comparison.</p>
       </div>
-      <div class="forecast-validation">{published_cards}</div>
+      <div class="forecast-validation">{published_summary}</div>
     </div>
     """
 
@@ -5140,6 +5235,108 @@ h2 {
   font-size: 0.84rem;
   line-height: 1.45;
 }
+.forecast-summary {
+  min-width: 0;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+}
+.forecast-summary-empty > p {
+  min-height: 0;
+  margin: 0;
+}
+.forecast-summary-lede,
+.forecast-summary-note {
+  max-width: 76ch;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+.forecast-summary-note {
+  margin-top: 12px;
+  font-size: 0.8rem;
+}
+.forecast-shared-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 16px 0;
+  border-top: 1px solid var(--line);
+  border-left: 1px solid var(--line);
+}
+.forecast-shared-metrics > div {
+  min-width: 0;
+  padding: 11px;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+.forecast-shared-metrics dt,
+.forecast-shared-metrics small,
+.forecast-method-value small {
+  display: block;
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.64rem;
+  line-height: 1.25;
+}
+.forecast-shared-metrics dd {
+  margin: 5px 0 2px;
+  color: var(--ink);
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 1.1rem;
+  font-weight: 720;
+  font-variant-numeric: tabular-nums;
+}
+.forecast-method-results {
+  border-top: 1px solid var(--line);
+  border-left: 1px solid var(--line);
+}
+.forecast-method-header,
+.forecast-method-result {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.5fr) repeat(3, minmax(0, 1fr));
+}
+.forecast-method-header {
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.025);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.64rem;
+  line-height: 1.25;
+}
+.forecast-method-header span,
+.forecast-method-name,
+.forecast-method-value {
+  min-width: 0;
+  padding: 10px 11px;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+.forecast-method-name h4 {
+  margin: 0;
+  color: var(--ink);
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 0.88rem;
+  font-weight: 720;
+}
+.forecast-method-name p {
+  margin: 3px 0 0;
+  color: var(--muted);
+  font-size: 0.74rem;
+  line-height: 1.3;
+}
+.forecast-method-value strong {
+  display: block;
+  color: var(--ink);
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 1rem;
+  font-weight: 720;
+  font-variant-numeric: tabular-nums;
+}
+.forecast-method-value::before {
+  content: attr(data-label);
+  display: none;
+}
 .forecast-metrics {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -7398,6 +7595,29 @@ footer div {
   }
   .forecast-validation {
     grid-template-columns: 1fr;
+  }
+  .forecast-shared-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .forecast-shared-metrics > div:nth-child(2n) {
+    border-right: 0;
+  }
+  .forecast-method-header {
+    display: none;
+  }
+  .forecast-method-result {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .forecast-method-name {
+    grid-column: 1 / -1;
+  }
+  .forecast-method-value::before {
+    display: block;
+    margin-bottom: 4px;
+    color: var(--muted);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.6rem;
+    line-height: 1.2;
   }
 }
 @media (prefers-reduced-motion: reduce) {
