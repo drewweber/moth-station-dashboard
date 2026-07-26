@@ -344,14 +344,15 @@ class RecordRenderingTests(unittest.TestCase):
             }
         )
 
-        self.assertIn("Historical paired backtest", html)
+        self.assertIn("Historical three-way backtest", html)
         self.assertIn("Seasonal-only baseline", html)
         self.assertIn("Host-only ranking", html)
         self.assertIn("Seasonal + host evidence", html)
         self.assertIn("Legacy published target lists", html)
-        self.assertIn("5 / 40", html)
-        self.assertIn("42% of later new-to-station species", html)
-        self.assertIn("not a count of moths at any one station", html)
+        self.assertIn("12%", html)
+        self.assertIn("40 targets predicted across all stations; 5 found for the first time in the following two weeks", html)
+        self.assertIn("target coverage", html)
+        self.assertIn("forecast results, not moth or observation totals", html)
         self.assertIn("Targets that appeared", html)
         self.assertIn("3 published forecasts still need", html)
         self.assertIn("View scored forecast windows (1)", html)
@@ -368,7 +369,7 @@ class RecordRenderingTests(unittest.TestCase):
         self.assertIn("internal model check", page)
         self.assertIn("Forecast validation", page)
         self.assertIn("Method notes", page)
-        self.assertIn("not a count of moths or observations", page)
+        self.assertIn("scorecard, not a count of moths or observations", page)
         self.assertIn("Use this table for one station", page)
         self.assertIn('href="index.html"', page)
 

@@ -1692,10 +1692,10 @@ def _forecast_scorecard(data: dict[str, Any], *, title: str, detail: str, empty:
       <h3>{h(title)}</h3>
       <p>{h(detail)}{h(quiet_detail)}</p>
       <dl class="forecast-metrics">
-        <div><dt>targets that appeared</dt><dd>{h(hits)} / {h(targets)}</dd><small>{h(_forecast_percent(hits, targets))} of target-list slots</small></div>
-        <div><dt>new species predicted</dt><dd>{h(hits)} / {h(new_species)}</dd><small>{h(_forecast_percent(hits, new_species))} of later new-to-station species</small></div>
-        <div><dt>active station-nights</dt><dd>{h(active_nights)}</dd><small>across {h(checked)} station-window tests</small></div>
-        <div><dt>typical matching rank</dt><dd>{h(rank_label)}</dd><small>position in its original target list</small></div>
+        <div><dt>targets found</dt><dd>{h(_forecast_percent(hits, targets))}</dd><small>{h(targets)} targets predicted across all stations; {h(hits)} found for the first time in the following two weeks</small></div>
+        <div><dt>target coverage</dt><dd>{h(_forecast_percent(hits, new_species))}</dd><small>{h(new_species)} species first recorded at a station in that period; {h(hits)} were predicted on the target list</small></div>
+        <div><dt>evidence</dt><dd>{h(checked)} tests</dd><small>{h(active_nights)} active station-nights across 14-night test windows</small></div>
+        <div><dt>typical useful rank</dt><dd>{h(rank_label)}</dd><small>where a matching species sat in its original target list</small></div>
       </dl>
       {_forecast_window_table(data.get('windows') or [], 'scored forecast windows')}
     </article>
@@ -1758,13 +1758,13 @@ def _forecast_validation(validation: dict[str, Any]) -> str:
     return f"""
     <div class="forecast-comparison">
       <div class="forecast-comparison-head">
-        <h3>Historical paired backtest</h3>
-        <p>This is a multi-station backtest, not a count of moths at any one station. At each 14-night checkpoint, the target list is frozen using records available then and compared with species newly recorded at that station afterward. A species can count again in a different station-window.</p>
+        <h3>Historical three-way backtest</h3>
+        <p>Imagine writing a Next two weeks list on a past Monday, then checking what became newly recorded at that station over the following 14 nights. We repeat that test across the network. These are forecast results, not moth or observation totals.</p>
       </div>
       <div class="forecast-validation">{historical_cards}</div>
       <div class="forecast-comparison-head">
-        <h3>Published paired forecast check</h3>
-        <p>Each new build saves both rankings from the same candidate pool. Mature windows will provide the exact nearby-iNaturalist comparison.</p>
+        <h3>Published three-way forecast check</h3>
+        <p>Each new build saves all three rankings from the same candidate pool. Mature windows will provide the exact nearby-iNaturalist comparison.</p>
       </div>
       <div class="forecast-validation">{published_cards}</div>
     </div>
@@ -1834,19 +1834,19 @@ def _forecast_validation_page(validation: dict[str, Any]) -> str:
     <section class="validation-intro">
       <p class="eyebrow">internal model check</p>
       <h1>Forecast validation</h1>
-      <p>An internal check of whether Next two weeks target lists surface later new-to-station species. It is not a count of moths or observations at Kingfisher Hollow or any other single station.</p>
+      <p>Did the Next two weeks list help us anticipate species that were new at a station? This is the scorecard, not a count of moths or observations.</p>
     </section>
     <section>
       <div class="section-head">
-        <h2>Network summary</h2>
-        <p>These figures combine all stations and repeated 14-night test windows. They count target-list results and new-to-station species outcomes, not individual moth observations. Use the table below for one station.</p>
+        <h2>Network forecast accuracy</h2>
+        <p><strong>Targets found</strong> shows how many predicted targets were first recorded in the following two weeks. <strong>Target coverage</strong> shows how many of the first-time station records had been predicted. The repeated number is the overlap between those two groups. Results combine stations and repeated 14-night tests; use the table below for Kingfisher Hollow alone.</p>
       </div>
       {_forecast_validation(validation)}
     </section>
     <section>
       <div class="section-head">
         <h2>By station</h2>
-        <p>Use this table for one station, such as Kingfisher Hollow. Stations with few moth nights have less evidence. Published paired columns begin filling after the first saved 14-night windows complete.</p>
+        <p>Use this table for one station, such as Kingfisher Hollow. Stations with few moth nights have less evidence. Published columns begin filling after the first saved 14-night windows complete.</p>
       </div>
       {_forecast_station_table(validation.get("stations") or [])}
     </section>
