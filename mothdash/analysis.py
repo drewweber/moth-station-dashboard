@@ -1343,6 +1343,16 @@ def _station_seasonal_targets(
             item["label"],
         ),
     )
+    # Keep the same seasonal candidate pool and target-list length for all
+    # variants. This ranking deliberately ignores seasonal abundance after a
+    # species enters the pool, letting the validation isolate host evidence.
+    host_only_items = sorted(
+        items,
+        key=lambda item: (
+            -item["host_match_score"],
+            item["label"],
+        ),
+    )
     host_evidence_items = sorted(
         items,
         key=lambda item: (
@@ -1363,6 +1373,7 @@ def _station_seasonal_targets(
         "items": host_evidence_items[:limit],
         "ranking_variants": {
             "seasonal-only": seasonal_only_items[:limit],
+            "host-only": host_only_items[:limit],
             "host-evidence": host_evidence_items[:limit],
         },
     }
@@ -1515,6 +1526,13 @@ def _regional_seasonal_targets(
             item["label"],
         ),
     )
+    host_only_items = sorted(
+        items,
+        key=lambda item: (
+            -item["host_match_score"],
+            item["label"],
+        ),
+    )
     host_evidence_items = sorted(
         items,
         key=lambda item: (
@@ -1532,13 +1550,14 @@ def _regional_seasonal_targets(
         "items": host_evidence_items[:limit],
         "ranking_variants": {
             "seasonal-only": seasonal_only_items[:limit],
+            "host-only": host_only_items[:limit],
             "host-evidence": host_evidence_items[:limit],
         },
     }
 
 
 FORECAST_BACKTEST_WEEKS = 14
-FORECAST_RANKING_VARIANTS = ("seasonal-only", "host-evidence")
+FORECAST_RANKING_VARIANTS = ("seasonal-only", "host-only", "host-evidence")
 
 
 def _forecast_station_context(settings: Settings) -> dict[str, dict[str, Any]]:
@@ -1593,7 +1612,7 @@ def _forecast_result(
 def _historical_station_taxa(
     known_rows: list[dict[str, Any]], station_id: str
 ) -> list[dict[str, Any]]:
-    """Rebuild just enough station taxa for a leak-free host-evidence check."""
+    """Rebuild just enough station taxa for leak-free host-based rankings."""
     taxa: dict[int, dict[str, Any]] = {}
     for row in known_rows:
         if row.get("station_id") != station_id or not row.get("taxon_id"):

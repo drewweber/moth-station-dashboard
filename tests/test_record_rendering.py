@@ -338,6 +338,7 @@ class RecordRenderingTests(unittest.TestCase):
                         ],
                     },
                     "host-evidence": {"checked_windows": 2, "target_count": 40, "target_hits": 6, "new_species": 12, "active_nights": 9},
+                    "host-only": {"checked_windows": 2, "target_count": 40, "target_hits": 4, "new_species": 12, "active_nights": 9},
                 },
                 "published": {"legacy": {"available_snapshots": 3, "checked_windows": 0}},
             }
@@ -345,10 +346,13 @@ class RecordRenderingTests(unittest.TestCase):
 
         self.assertIn("Historical paired backtest", html)
         self.assertIn("Seasonal-only baseline", html)
+        self.assertIn("Host-only ranking", html)
         self.assertIn("Seasonal + host evidence", html)
         self.assertIn("Legacy published target lists", html)
         self.assertIn("5 / 40", html)
-        self.assertIn("42% of new finds", html)
+        self.assertIn("42% of later new-to-station species", html)
+        self.assertIn("not a count of moths at any one station", html)
+        self.assertIn("Targets that appeared", html)
         self.assertIn("3 published forecasts still need", html)
         self.assertIn("View scored forecast windows (1)", html)
 
@@ -364,6 +368,8 @@ class RecordRenderingTests(unittest.TestCase):
         self.assertIn("internal model check", page)
         self.assertIn("Forecast validation", page)
         self.assertIn("Method notes", page)
+        self.assertIn("not a count of moths or observations", page)
+        self.assertIn("Use this table for one station", page)
         self.assertIn('href="index.html"', page)
 
     def test_period_station_chips_filter_station_only_species(self) -> None:

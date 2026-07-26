@@ -320,6 +320,8 @@ class SpeciesSemanticsTests(unittest.TestCase):
         )
         self.assertGreater(regional["prediction_score"], regional["seasonal_score"])
         self.assertFalse(later["host_matches"])
+        host_only = profile["seasonal_targets"]["ranking_variants"]["host-only"]
+        self.assertEqual(host_only[0]["taxon_id"], 404)
 
     def test_host_evidence_scores_all_shared_exact_plants_above_one_or_broader_genus(self) -> None:
         host_data = {
@@ -638,7 +640,7 @@ class SpeciesSemanticsTests(unittest.TestCase):
             weeks=1,
         )
 
-        for variant in ("seasonal-only", "host-evidence"):
+        for variant in ("seasonal-only", "host-only", "host-evidence"):
             result = backtest[variant]
             self.assertEqual(result["checked_windows"], 1)
             self.assertEqual(result["target_count"], 1)
@@ -741,6 +743,7 @@ class SpeciesSemanticsTests(unittest.TestCase):
             "items": [{"taxon_id": 404, "label": "Host Target"}],
             "ranking_variants": {
                 "seasonal-only": [{"taxon_id": 405, "label": "Baseline Target"}],
+                "host-only": [{"taxon_id": 404, "label": "Host Target"}],
                 "host-evidence": [{"taxon_id": 404, "label": "Host Target"}],
             },
         }
@@ -760,6 +763,7 @@ class SpeciesSemanticsTests(unittest.TestCase):
 
         self.assertEqual(validation["seasonal-only"]["available_snapshots"], 1)
         self.assertEqual(validation["seasonal-only"]["target_hits"], 0)
+        self.assertEqual(validation["host-only"]["target_hits"], 1)
         self.assertEqual(validation["host-evidence"]["target_hits"], 1)
 
 

@@ -1654,7 +1654,7 @@ def _forecast_window_table(rows: list[dict[str, Any]], label: str) -> str:
       <summary>View {h(label)} ({h(len(rows))})</summary>
       <div class="table-wrap forecast-window-table-wrap">
         <table>
-          <thead><tr><th>Forecast window</th><th>Active nights</th><th>Targets found</th><th>New species caught</th></tr></thead>
+          <thead><tr><th>Forecast window</th><th>Active nights</th><th>Targets that appeared</th><th>New species predicted</th></tr></thead>
           <tbody>{table_rows}</tbody>
         </table>
       </div>
@@ -1692,10 +1692,10 @@ def _forecast_scorecard(data: dict[str, Any], *, title: str, detail: str, empty:
       <h3>{h(title)}</h3>
       <p>{h(detail)}{h(quiet_detail)}</p>
       <dl class="forecast-metrics">
-        <div><dt>targets found</dt><dd>{h(hits)} / {h(targets)}</dd><small>{h(_forecast_percent(hits, targets))} target yield</small></div>
-        <div><dt>new species caught</dt><dd>{h(hits)} / {h(new_species)}</dd><small>{h(_forecast_percent(hits, new_species))} of new finds</small></div>
-        <div><dt>active station-nights</dt><dd>{h(active_nights)}</dd><small>across {h(checked)} scored windows</small></div>
-        <div><dt>median successful rank</dt><dd>{h(rank_label)}</dd><small>among targets that appeared</small></div>
+        <div><dt>targets that appeared</dt><dd>{h(hits)} / {h(targets)}</dd><small>{h(_forecast_percent(hits, targets))} of target-list slots</small></div>
+        <div><dt>new species predicted</dt><dd>{h(hits)} / {h(new_species)}</dd><small>{h(_forecast_percent(hits, new_species))} of later new-to-station species</small></div>
+        <div><dt>active station-nights</dt><dd>{h(active_nights)}</dd><small>across {h(checked)} station-window tests</small></div>
+        <div><dt>typical matching rank</dt><dd>{h(rank_label)}</dd><small>position in its original target list</small></div>
       </dl>
       {_forecast_window_table(data.get('windows') or [], 'scored forecast windows')}
     </article>
@@ -1710,6 +1710,12 @@ def _forecast_validation(validation: dict[str, Any]) -> str:
           historical.get("seasonal-only") or {},
           title="Seasonal-only baseline",
           detail="Ranks targets using only the frozen seasonal station-record evidence available at each checkpoint.",
+          empty="Not enough station history and later moth-night activity are available for a conservative backtest yet.",
+      )}
+      {_forecast_scorecard(
+          historical.get("host-only") or {},
+          title="Host-only ranking",
+          detail="Uses the same seasonal candidate pool, but ranks it only by documented shared-host strength. Targets without a host match trail at the end.",
           empty="Not enough station history and later moth-night activity are available for a conservative backtest yet.",
       )}
       {_forecast_scorecard(
@@ -1730,10 +1736,16 @@ def _forecast_validation(validation: dict[str, Any]) -> str:
               empty="Paired published checks begin after a saved baseline has a complete 14-night outcome window.",
           )}
           {_forecast_scorecard(
+              published.get("host-only") or {},
+              title="Host-only ranking",
+              detail="The saved host-only ranking from each published forecast window.",
+              empty="Three-way published checks begin after saved rankings have a complete 14-night outcome window.",
+          )}
+          {_forecast_scorecard(
               published.get("host-evidence") or {},
               title="Seasonal + host evidence",
               detail="The saved host-evidence ranking for those same published forecast windows.",
-              empty="Paired published checks begin after a saved host-evidence ranking has a complete 14-night outcome window.",
+              empty="Three-way published checks begin after saved rankings have a complete 14-night outcome window.",
           )}
         """
     else:
@@ -1741,13 +1753,13 @@ def _forecast_validation(validation: dict[str, Any]) -> str:
             published.get("legacy") or {},
             title="Legacy published target lists",
             detail="These earlier published lists were saved as one ranking, before the paired comparison began.",
-            empty="Paired published checks begin after a saved baseline and host-evidence ranking have a complete 14-night outcome window.",
+            empty="Three-way published checks begin after saved seasonal-only, host-only, and combined rankings have a complete 14-night outcome window.",
         )
     return f"""
     <div class="forecast-comparison">
       <div class="forecast-comparison-head">
         <h3>Historical paired backtest</h3>
-        <p>Weekly 14-night checkpoints freeze tracked-station records uploaded by local noon. Both rankings are tested against the same later new species.</p>
+        <p>This is a multi-station backtest, not a count of moths at any one station. At each 14-night checkpoint, the target list is frozen using records available then and compared with species newly recorded at that station afterward. A species can count again in a different station-window.</p>
       </div>
       <div class="forecast-validation">{historical_cards}</div>
       <div class="forecast-comparison-head">
@@ -1777,9 +1789,11 @@ def _forecast_station_table(rows: list[dict[str, Any]]) -> str:
         <tr>
           <th scope="row"><a href="stations/{h(row['station_id'])}.html">{h(row['station_name'])}</a></th>
           <td>{h(result_cell(row['historical'].get('seasonal-only') or {}))}</td>
+          <td>{h(result_cell(row['historical'].get('host-only') or {}))}</td>
           <td>{h(result_cell(row['historical'].get('host-evidence') or {}))}</td>
           <td>{h(row['historical'].get('seasonal-only', {}).get('active_nights', 0))}</td>
           <td>{h(result_cell(row['published'].get('seasonal-only') or {}))}</td>
+          <td>{h(result_cell(row['published'].get('host-only') or {}))}</td>
           <td>{h(result_cell(row['published'].get('host-evidence') or {}))}</td>
         </tr>
         """
@@ -1788,7 +1802,7 @@ def _forecast_station_table(rows: list[dict[str, Any]]) -> str:
     return f"""
     <div class="table-wrap forecast-station-table">
       <table>
-        <thead><tr><th>Station</th><th>Historical seasonal-only</th><th>Historical + host</th><th>Historical active nights</th><th>Published seasonal-only</th><th>Published + host</th></tr></thead>
+        <thead><tr><th>Station</th><th>Historical seasonal-only</th><th>Historical host-only</th><th>Historical seasonal + host</th><th>Historical active nights</th><th>Published seasonal-only</th><th>Published host-only</th><th>Published seasonal + host</th></tr></thead>
         <tbody>{table_rows}</tbody>
       </table>
     </div>
@@ -1820,19 +1834,19 @@ def _forecast_validation_page(validation: dict[str, Any]) -> str:
     <section class="validation-intro">
       <p class="eyebrow">internal model check</p>
       <h1>Forecast validation</h1>
-      <p>Does the next-two-weeks target method surface moths that actually arrive? This page evaluates the method without presenting it as a station-facing feature.</p>
+      <p>An internal check of whether Next two weeks target lists surface later new-to-station species. It is not a count of moths or observations at Kingfisher Hollow or any other single station.</p>
     </section>
     <section>
       <div class="section-head">
         <h2>Network summary</h2>
-        <p>Aggregate results are weighted by forecast opportunities and active station-nights, not by giving each station equal weight.</p>
+        <p>These figures combine all stations and repeated 14-night test windows. They count target-list results and new-to-station species outcomes, not individual moth observations. Use the table below for one station.</p>
       </div>
       {_forecast_validation(validation)}
     </section>
     <section>
       <div class="section-head">
         <h2>By station</h2>
-        <p>Stations with few moth nights have less evidence. Published paired columns begin filling after the first saved 14-night windows complete.</p>
+        <p>Use this table for one station, such as Kingfisher Hollow. Stations with few moth nights have less evidence. Published paired columns begin filling after the first saved 14-night windows complete.</p>
       </div>
       {_forecast_station_table(validation.get("stations") or [])}
     </section>
@@ -1841,8 +1855,8 @@ def _forecast_validation_page(validation: dict[str, Any]) -> str:
         <h2>Method notes</h2>
       </div>
       <div class="forecast-method-copy">
-        <p><strong>Historical paired backtest:</strong> fourteen overlapping Monday checkpoints freeze the tracked-station records uploaded by local noon, then rebuild both rankings from that same information. Exact shared host plants are weighted above broader genus overlap; neither ranking can use observations uploaded after the checkpoint.</p>
-        <p><strong>Published paired forecast check:</strong> each new build saves both the seasonal-only and host-evidence rankings in the existing SQLite cache. Once a shared fourteen-night outcome window closes, both lists are scored without new iNaturalist queries. Older saved lists remain visible as legacy single-list checks but are not treated as a comparison.</p>
+        <p><strong>Historical three-way backtest:</strong> fourteen overlapping Monday checkpoints freeze the tracked-station records uploaded by local noon, then rebuild all three rankings from that same information. The next fourteen moth sessions are the outcome period; only species new to that station during that period count as outcomes. The host-only list uses host-association strength alone after the seasonal candidate pool is set; the combined list adds host evidence to the seasonal ranking. Exact shared host plants are weighted above broader genus overlap; no ranking can use observations uploaded after the checkpoint.</p>
+        <p><strong>Published three-way forecast check:</strong> each new build saves the seasonal-only, host-only, and combined rankings in the existing SQLite cache. Once a shared fourteen-night outcome window closes, all three lists are scored without new iNaturalist queries. Older saved lists remain visible as legacy single-list checks but are not treated as a comparison.</p>
       </div>
     </section>
   </main>
