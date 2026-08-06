@@ -124,6 +124,21 @@ website = "https://www.inaturalist.org/places/durfee-hill"
 notes = "Moth observations from the iNaturalist Durfee Hill place. No longer actively surveyed; historical records are kept."
 
 [[stations]]
+id = "ringwood"
+name = "Ringwood Rd"
+enabled = true
+place_id = 174038
+county_place_id = 1082
+state_place_id = 48
+color = "#b0555f"
+timezone = "America/New_York"
+public_location = "Ringwood Rd, Tompkins County, NY"
+regional_watch_lat = 42.4362686576
+regional_watch_lng = -76.3776392341
+website = "https://www.inaturalist.org/places/ringwood-rd"
+notes = "Moth observations from the iNaturalist Ringwood Rd place."
+
+[[stations]]
 id = "tompkins-map-area"
 name = "Woodlawn"
 enabled = true
