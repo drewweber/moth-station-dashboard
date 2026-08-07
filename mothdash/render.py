@@ -1389,6 +1389,7 @@ def _accumulation_bars(profile: dict[str, Any]) -> str:
         <text class="chart-label" x="{left - 8}" y="{top + plot_height + 4}" text-anchor="end">0</text>
         <text class="chart-label" x="{left}" y="{height - 12}" text-anchor="start">{h(min_date)}</text>
         <text class="chart-label" x="{left + plot_width}" y="{height - 12}" text-anchor="end">{h(max_date)}</text>
+        {_accumulation_year_ticks(min_date, max_date, left, plot_width, date_span, top + plot_height)}
         <polygon class="accumulation-area" points="{area_attr}"></polygon>
         <polyline class="accumulation-line" points="{point_attr}"></polyline>
         {''.join(markers)}
@@ -2220,6 +2221,32 @@ def _phenology_ribbons(rows: list[dict[str, Any]]) -> str:
     return "".join(items)
 
 
+def _accumulation_year_ticks(
+    min_date: date,
+    max_date: date,
+    left: int,
+    plot_width: int,
+    date_span: int,
+    axis_y: int,
+) -> str:
+    """Render internal Jan-1 landmarks without replacing exact endpoint dates."""
+    ticks = []
+    for index, year in enumerate(range(min_date.year + 1, max_date.year + 1)):
+        tick_date = date(year, 1, 1)
+        if not min_date < tick_date < max_date:
+            continue
+        x = left + ((tick_date.toordinal() - min_date.toordinal()) / date_span * plot_width)
+        ticks.append(
+            f'''
+            <g class="chart-year-tick chart-year-tick-{'even' if index % 2 == 0 else 'odd'}">
+              <line x1="{x:.1f}" y1="{axis_y}" x2="{x:.1f}" y2="{axis_y + 5}"></line>
+              <text class="chart-label" x="{x:.1f}" y="{axis_y + 17}" text-anchor="middle">{year}</text>
+            </g>
+            '''
+        )
+    return "".join(ticks)
+
+
 def _network_accumulation(
     rows: list[dict[str, Any]],
     launches: list[dict[str, Any]],
@@ -2301,6 +2328,7 @@ def _network_accumulation(
         <text class="chart-label" x="{left - 8}" y="{top + plot_height + 4}" text-anchor="end">0</text>
         <text class="chart-label" x="{left}" y="{height - 12}" text-anchor="start">{h(min_date)}</text>
         <text class="chart-label" x="{left + plot_width}" y="{height - 12}" text-anchor="end">{h(max_date)}</text>
+        {_accumulation_year_ticks(min_date, max_date, left, plot_width, date_span, top + plot_height)}
         <polygon class="accumulation-area" points="{area_attr}"></polygon>
         {''.join(launch_markers)}
         <polyline class="accumulation-line" points="{point_attr}"></polyline>
@@ -5201,6 +5229,15 @@ h2 {
 .chart-grid {
   stroke-dasharray: 4 6;
 }
+.chart-year-tick line {
+  stroke: var(--muted);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+.chart-year-tick text {
+  fill: var(--muted);
+  font-size: 10px;
+}
 .accumulation-area {
   fill: rgba(215, 181, 109, 0.12);
 }
@@ -7405,6 +7442,9 @@ footer div {
   }
   .forecast-validation {
     grid-template-columns: 1fr;
+  }
+  .chart-year-tick-odd text {
+    display: none;
   }
 }
 @media (prefers-reduced-motion: reduce) {

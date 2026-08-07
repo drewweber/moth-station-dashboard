@@ -26,7 +26,12 @@ from mothdash.analysis import (
 )
 from mothdash.config import Settings, Station
 from mothdash.db import connect, init_db
-from mothdash.render import _history_section_nav, _network_accumulation, _recent_week_dashboard
+from mothdash.render import (
+    _accumulation_bars,
+    _history_section_nav,
+    _network_accumulation,
+    _recent_week_dashboard,
+)
 
 
 class SpeciesSemanticsTests(unittest.TestCase):
@@ -161,14 +166,14 @@ class SpeciesSemanticsTests(unittest.TestCase):
     def test_network_accumulation_labels_station_coverage_dates_clearly(self) -> None:
         chart = _network_accumulation(
             [
-                {"date": "2026-07-10", "species": 2, "new_species": 2},
+                {"date": "2024-07-10", "species": 2, "new_species": 2},
                 {"date": "2026-07-12", "species": 3, "new_species": 1},
             ],
             [
                 {
                     "station_id": "station-a",
                     "station_name": "Station A",
-                    "date": "2026-07-10",
+                    "date": "2024-07-10",
                 }
             ],
             [Station(id="station-a", name="Station A", enabled=True, active=True, query={})],
@@ -176,8 +181,20 @@ class SpeciesSemanticsTests(unittest.TestCase):
 
         self.assertIn("Global species accumulation curve", chart)
         self.assertIn("First cached session", chart)
-        self.assertIn("Station A first cached session: 2026-07-10", chart)
+        self.assertIn("Station A first cached session: 2024-07-10", chart)
+        self.assertIn('class="chart-year-tick chart-year-tick-even"', chart)
+        self.assertIn(">2025</text>", chart)
         self.assertIn('href="#accumulation"', _history_section_nav())
+
+        station_chart = _accumulation_bars(
+            {
+                "accumulation": [
+                    {"date": date(2024, 7, 10), "species": 2, "nights": 1},
+                    {"date": date(2026, 7, 12), "species": 3, "nights": 2},
+                ]
+            }
+        )
+        self.assertIn(">2025</text>", station_chart)
 
     def test_station_profile_adds_nearby_seasonal_targets_not_seen_at_station(self) -> None:
         with connect(self.settings.database) as conn:
