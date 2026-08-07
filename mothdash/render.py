@@ -79,7 +79,13 @@ HISTORY_NAV_GROUPS = (
             ("Recent", "recent"),
         ),
     ),
-    ("Network", (("Stations", "stations"),)),
+    (
+        "Network",
+        (
+            ("Stations", "stations"),
+            ("Accumulation", "accumulation"),
+        ),
+    ),
     (
         "Season",
         (
@@ -2275,7 +2281,7 @@ def _network_accumulation(
             <g class="station-launch-marker" style="--station-color: {h(color)}">
               <line x1="{x:.1f}" y1="{top}" x2="{x:.1f}" y2="{top + plot_height}"></line>
               <circle cx="{x:.1f}" cy="{top + plot_height:.1f}" r="4.2"></circle>
-              <title>{h(launch['station_name'])} came online {h(launch_date)}</title>
+              <title>{h(launch['station_name'])} first cached session: {h(launch_date)}</title>
             </g>
             """
         )
@@ -2286,8 +2292,8 @@ def _network_accumulation(
     return f"""
     <figure class="accumulation-line-chart network-line-chart">
       <svg viewBox="0 0 {width} {height}" role="img" aria-labelledby="network-accumulation-title network-accumulation-desc">
-        <title id="network-accumulation-title">Network species accumulation curve</title>
-        <desc id="network-accumulation-desc">Running network moth species count from {h(min_date)} to {h(max_date)}, ending at {h(latest["species"])} species.</desc>
+        <title id="network-accumulation-title">Global species accumulation curve</title>
+        <desc id="network-accumulation-desc">Running union of moth species recorded across all tracked stations from {h(min_date)} to {h(max_date)}, ending at {h(latest["species"])} species. Dashed vertical lines mark each station's first cached observation session.</desc>
         <line class="chart-axis" x1="{left}" y1="{top + plot_height}" x2="{left + plot_width}" y2="{top + plot_height}"></line>
         <line class="chart-axis" x1="{left}" y1="{top}" x2="{left}" y2="{top + plot_height}"></line>
         <line class="chart-grid" x1="{left}" y1="{top}" x2="{left + plot_width}" y2="{top}"></line>
@@ -2303,7 +2309,7 @@ def _network_accumulation(
       </svg>
       <div class="monthly-tooltip" role="tooltip" hidden></div>
       <div class="station-launches">
-        <p>Stations online</p>
+        <p>First cached session</p>
         <ul>{''.join(launch_legend)}</ul>
       </div>
     </figure>
@@ -2478,11 +2484,6 @@ def _trend_section(trends: dict[str, Any], stations: list[Station]) -> str:
         <h3>Phenology ribbons</h3>
         <p>Common network species, shown by observed flight span across all synced years.</p>
         {_phenology_ribbons(trends["phenology"])}
-      </article>
-      <article class="trend-panel">
-        <h3>Network accumulation</h3>
-        <p>Running species list across all tracked stations.</p>
-        {_network_accumulation(trends["network_accumulation"], trends["station_launches"], stations)}
       </article>
       <article class="trend-panel">
         <h3>Monthly overlays</h3>
@@ -5911,6 +5912,12 @@ h2 {
   font-size: 0.64rem;
   font-variant-numeric: tabular-nums;
 }
+.chart-caveat {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
 .monthly-overlay-chart {
   margin: 0;
   position: relative;
@@ -7520,6 +7527,15 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
       <div class="cards">{_station_cards(summaries, stations)}</div>
     </section>
 
+    <section id="accumulation">
+      <div class="section-head">
+        <h2>Global species accumulation</h2>
+        <p>The running union of moth species recorded across all tracked stations. Each dashed line and the key below mark a station's first cached observation session, making changes in network coverage visible alongside species growth.</p>
+      </div>
+      {_network_accumulation(trends["network_accumulation"], trends["station_launches"], stations)}
+      <p class="chart-caveat">This is a cumulative record of the tracked iNaturalist sources, not a standardized measure of survey effort, abundance, or site quality.</p>
+    </section>
+
     <section id="pulses" class="section-chapter-start" data-chapter="Season">
       <div class="section-head">
         <h2>{h(year) if year else "Current"} first-of-season pulses</h2>
@@ -7552,7 +7568,7 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
     <section id="trends">
       <div class="section-head">
         <h2>Trend views</h2>
-        <p>Build-time visual summaries for flight timing, network growth, abundance structure, and shared fauna.</p>
+        <p>Build-time visual summaries for flight timing, monthly variation, abundance structure, and shared fauna.</p>
       </div>
       {_trend_section(trends, stations)}
     </section>

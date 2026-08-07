@@ -24,9 +24,9 @@ from mothdash.analysis import (
     unique_station_taxa,
     weekly_recap,
 )
-from mothdash.config import Settings
+from mothdash.config import Settings, Station
 from mothdash.db import connect, init_db
-from mothdash.render import _recent_week_dashboard
+from mothdash.render import _history_section_nav, _network_accumulation, _recent_week_dashboard
 
 
 class SpeciesSemanticsTests(unittest.TestCase):
@@ -157,6 +157,27 @@ class SpeciesSemanticsTests(unittest.TestCase):
         self.assertEqual(profile["observations"], 5)
         self.assertEqual(trends["network_accumulation"][-1]["species"], 2)
         self.assertNotIn(201, {row["taxon_id"] for row in trends["phenology"]})
+
+    def test_network_accumulation_labels_station_coverage_dates_clearly(self) -> None:
+        chart = _network_accumulation(
+            [
+                {"date": "2026-07-10", "species": 2, "new_species": 2},
+                {"date": "2026-07-12", "species": 3, "new_species": 1},
+            ],
+            [
+                {
+                    "station_id": "station-a",
+                    "station_name": "Station A",
+                    "date": "2026-07-10",
+                }
+            ],
+            [Station(id="station-a", name="Station A", enabled=True, active=True, query={})],
+        )
+
+        self.assertIn("Global species accumulation curve", chart)
+        self.assertIn("First cached session", chart)
+        self.assertIn("Station A first cached session: 2026-07-10", chart)
+        self.assertIn('href="#accumulation"', _history_section_nav())
 
     def test_station_profile_adds_nearby_seasonal_targets_not_seen_at_station(self) -> None:
         with connect(self.settings.database) as conn:
