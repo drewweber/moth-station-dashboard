@@ -253,6 +253,64 @@ class DashboardInsightsRecencyTests(unittest.TestCase):
             any(item["category"] == "Same-night connection" for item in insights),
         )
 
+    def test_common_exact_date_overlap_is_not_a_feed_story(self) -> None:
+        from mothdash.analysis import dashboard_insights
+
+        history_date = date(2025, 6, 1)
+        event_date = date(2026, 6, 1)
+        dates = [history_date, event_date] + [
+            date(2025, 5, day) for day in range(1, 10)
+        ]
+        for obs_id, observed_on in enumerate(dates, start=31):
+            self._insert_observation(
+                station_id="alpha",
+                obs_id=obs_id,
+                taxon_id=130,
+                taxon_name="Common moth",
+                common_name="Common Moth",
+                observed_on=observed_on.isoformat(),
+            )
+
+        insights = dashboard_insights(self.settings, today=event_date + timedelta(days=1))
+
+        self.assertFalse(
+            any(item["category"] == "Notable recurrence" for item in insights),
+            "ordinary seasonal overlap should not become a feed story",
+        )
+        self.assertFalse(
+            any(item["category"] == "This date in history" for item in insights),
+        )
+
+    def test_seldom_recorded_exact_date_recurrence_names_evidence(self) -> None:
+        from mothdash.analysis import dashboard_insights
+
+        history_date = date(2025, 6, 1)
+        event_date = date(2026, 6, 1)
+        for obs_id, observed_on in [(51, history_date), (52, event_date)]:
+            self._insert_observation(
+                station_id="alpha",
+                obs_id=obs_id,
+                taxon_id=140,
+                taxon_name="Sparse moth",
+                common_name="Sparse Moth",
+                observed_on=observed_on.isoformat(),
+            )
+
+        insights = dashboard_insights(self.settings, today=event_date + timedelta(days=1))
+        insight = next(
+            item for item in insights if item["category"] == "Notable recurrence"
+        )
+
+        self.assertEqual(
+            insight["title"],
+            "Sparse Moth (Sparse moth) was recorded on Jun 1 for the second year running",
+        )
+        self.assertIn(
+            "Alpha recorded it on both 2025-06-01 and 2026-06-01.",
+            insight["body"],
+        )
+        self.assertIn("only 2 tracked network records", insight["body"])
+
     def test_shared_fauna_ranking_is_not_date_gated(self) -> None:
         from mothdash.analysis import dashboard_insights
 

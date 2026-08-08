@@ -956,22 +956,50 @@ def dashboard_insights(
         except ValueError:
             history_date = None
         if history_date:
-            then_taxa = {
-                int(row["taxon_id"])
-                for row in rows
-                if row.get("taxon_id") and row.get("session_date") == history_date
-            }
+            then_by_taxon: dict[int, set[str]] = defaultdict(set)
+            for row in rows:
+                if not row.get("taxon_id") or row.get("session_date") != history_date:
+                    continue
+                then_by_taxon[int(row["taxon_id"])].add(row["station_name"])
+            then_taxa = set(then_by_taxon)
             now_taxa = set(latest_by_taxon)
-            echoes = sorted(then_taxa & now_taxa, key=lambda taxon_id: taxon_labels[taxon_id])
-            if echoes:
-                examples = ", ".join(taxon_labels[taxon_id] for taxon_id in echoes[:3])
+            notable_echoes = sorted(
+                (
+                    taxon_id
+                    for taxon_id in then_taxa & now_taxa
+                    if len(taxon_observations[taxon_id]) <= UNUSUAL_NETWORK_RECORDS
+                ),
+                key=lambda taxon_id: (
+                    len(taxon_observations[taxon_id]),
+                    taxon_labels[taxon_id],
+                ),
+            )
+            for taxon_id in notable_echoes:
+                previous_stations = then_by_taxon[taxon_id]
+                current_stations = latest_by_taxon[taxon_id]["stations"]
+                repeated_stations = previous_stations & current_stations
+                regional_records = len(taxon_observations[taxon_id])
+                if repeated_stations:
+                    station_detail = (
+                        f"{', '.join(sorted(repeated_stations))} recorded it on both "
+                        f"{history_date.isoformat()} and {latest.isoformat()}."
+                    )
+                else:
+                    station_detail = (
+                        f"It was recorded at {', '.join(sorted(previous_stations))} on "
+                        f"{history_date.isoformat()} and at "
+                        f"{', '.join(sorted(current_stations))} on {latest.isoformat()}."
+                    )
                 insights.append(
                     _insight(
-                        "This date in history",
-                        f"{len(echoes)} species echoed the same moth night one year later",
-                        f"Recorded on both {history_date.isoformat()} and {latest.isoformat()}, including {examples}.",
-                        "year-over-year return",
-                        79,
+                        "Notable recurrence",
+                        f"{taxon_labels[taxon_id]} was recorded on {latest:%b} {latest.day} for the second year running",
+                        f"{station_detail} It has only {regional_records} tracked network record{'s' if regional_records != 1 else ''}.",
+                        "same date, one year apart",
+                        85
+                        + max(0, UNUSUAL_NETWORK_RECORDS - regional_records)
+                        + (2 if repeated_stations else 0),
+                        subject=f"taxon:{taxon_id}",
                     )
                 )
 
