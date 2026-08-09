@@ -2254,7 +2254,6 @@ def _network_accumulation(
 ) -> str:
     if not rows:
         return '<p class="empty">Network accumulation will appear after synced observations.</p>'
-    max_species = max(row["species"] for row in rows)
     width = 720
     height = 260
     left = 52
@@ -2263,97 +2262,102 @@ def _network_accumulation(
     bottom = 42
     plot_width = width - left - right
     plot_height = height - top - bottom
-    dates = [date.fromisoformat(row["date"]) for row in rows]
-    min_date = min(dates)
-    max_date = max(dates)
-    date_span = max(1, max_date.toordinal() - min_date.toordinal())
-
-    points = []
-    for row, row_date in zip(rows, dates):
-        x = left + ((row_date.toordinal() - min_date.toordinal()) / date_span * plot_width)
-        y = top + plot_height - ((row["species"] / max_species) * plot_height if max_species else 0)
-        points.append((x, y, row, row_date))
-    point_attr = " ".join(f"{x:.1f},{y:.1f}" for x, y, _, _ in points)
-    area_attr = f"{left},{top + plot_height:.1f} {point_attr} {left + plot_width:.1f},{top + plot_height:.1f}"
-    markers = []
-    for x, y, row, row_date in points:
-        tooltip_html = (
-            f'<div class="monthly-tooltip-head"><strong>{h(row_date)}</strong>'
-            f'<span>{h(row["species"])} species · +{h(row["new_species"])} new</span></div>'
-        )
-        markers.append(
-            f"""
-            <g class="monthly-point-group" style="--series-color: var(--leaf)" tabindex="0" role="img"
-               aria-label="{h(row_date)}: {h(row['species'])} species, {h(row['new_species'])} new"
-               data-tooltip-html="{h(tooltip_html)}">
-              <circle class="monthly-hit-target" cx="{x:.1f}" cy="{y:.1f}" r="9"></circle>
-              <circle class="monthly-point" cx="{x:.1f}" cy="{y:.1f}" r="2.6"></circle>
-            </g>
-            """
-        )
     colors = _station_color_map(stations)
     station_lookup = {station.id: station for station in stations}
-    launch_markers = []
     launch_legend = []
     for launch in launches:
         launch_date = date.fromisoformat(launch["date"])
-        if launch_date < min_date or launch_date > max_date:
-            continue
-        x = left + ((launch_date.toordinal() - min_date.toordinal()) / date_span * plot_width)
         color = colors.get(launch["station_id"], FALLBACK_COLORS[0])
         station = station_lookup.get(launch["station_id"])
         short_label = _station_short_label(station) if station else launch["station_name"]
-        launch_markers.append(
-            f"""
-            <g class="station-launch-marker" style="--station-color: {h(color)}">
-              <line x1="{x:.1f}" y1="{top}" x2="{x:.1f}" y2="{top + plot_height}"></line>
-              <circle cx="{x:.1f}" cy="{top + plot_height:.1f}" r="4.2"></circle>
-              <title>{h(launch['station_name'])} first cached session: {h(launch_date)}</title>
-            </g>
-            """
-        )
         launch_legend.append(
             f'<li style="--station-color: {h(color)}"><i></i><span>{h(short_label)}</span><time datetime="{h(launch_date)}">{h(launch_date)}</time></li>'
         )
-    latest = rows[-1]
-    current_year = max_date.year
-    current_year_start = date(current_year, 1, 1)
-    current_year_x = left + (
-        (max(min_date, current_year_start).toordinal() - min_date.toordinal())
-        / date_span
-        * plot_width
-    )
-    show_current_year = current_year_start > min_date
-    zoom_controls = ""
-    if show_current_year:
-        zoom_controls = f'''<div class="chart-range-controls" role="group" aria-label="Accumulation chart time range">
-          <button type="button" data-chart-range="all" aria-pressed="true">All history</button>
-          <button type="button" data-chart-range="current" data-chart-viewbox="{current_year_x:.1f} 0 {left + plot_width - current_year_x:.1f} {height}" aria-pressed="false">{current_year}</button>
-        </div>
-        <p class="chart-range-status" aria-live="polite">Showing all history, {h(min_date)} to {h(max_date)}.</p>'''
+
+    def render_view(view_rows: list[dict[str, Any]], view_id: str, dynamic_y: bool) -> str:
+        dates = [date.fromisoformat(row["date"]) for row in view_rows]
+        min_date = min(dates)
+        max_date = max(dates)
+        date_span = max(1, max_date.toordinal() - min_date.toordinal())
+        values = [row["species"] for row in view_rows]
+        value_min = 0
+        value_max = max(values)
+        if dynamic_y:
+            value_span = max(1, value_max - min(values))
+            padding = max(2, (value_span + 9) // 10)
+            value_min = max(0, min(values) - padding)
+            value_max += padding
+        value_span = max(1, value_max - value_min)
+        points = []
+        for row, row_date in zip(view_rows, dates):
+            x = left + ((row_date.toordinal() - min_date.toordinal()) / date_span * plot_width)
+            y = top + plot_height - ((row["species"] - value_min) / value_span * plot_height)
+            points.append((x, y, row, row_date))
+        point_attr = " ".join(f"{x:.1f},{y:.1f}" for x, y, _, _ in points)
+        area_attr = f"{left},{top + plot_height:.1f} {point_attr} {left + plot_width:.1f},{top + plot_height:.1f}"
+        markers = []
+        for x, y, row, row_date in points:
+            tooltip_html = (
+                f'<div class="monthly-tooltip-head"><strong>{h(row_date)}</strong>'
+                f'<span>{h(row["species"])} species · +{h(row["new_species"])} new</span></div>'
+            )
+            markers.append(
+                f'''<g class="monthly-point-group" style="--series-color: var(--leaf)" tabindex="0" role="img"
+                   aria-label="{h(row_date)}: {h(row['species'])} species, {h(row['new_species'])} new"
+                   data-tooltip-html="{h(tooltip_html)}">
+                  <circle class="monthly-hit-target" cx="{x:.1f}" cy="{y:.1f}" r="9"></circle>
+                  <circle class="monthly-point" cx="{x:.1f}" cy="{y:.1f}" r="2.6"></circle>
+                </g>'''
+            )
+        launch_markers = []
+        for launch in launches:
+            launch_date = date.fromisoformat(launch["date"])
+            if launch_date < min_date or launch_date > max_date:
+                continue
+            x = left + ((launch_date.toordinal() - min_date.toordinal()) / date_span * plot_width)
+            color = colors.get(launch["station_id"], FALLBACK_COLORS[0])
+            launch_markers.append(
+                f'''<g class="station-launch-marker" style="--station-color: {h(color)}">
+                  <line x1="{x:.1f}" y1="{top}" x2="{x:.1f}" y2="{top + plot_height}"></line>
+                  <circle cx="{x:.1f}" cy="{top + plot_height:.1f}" r="4.2"></circle>
+                  <title>{h(launch['station_name'])} first cached session: {h(launch_date)}</title>
+                </g>'''
+            )
+        latest = view_rows[-1]
+        return f'''<svg viewBox="0 0 {width} {height}" role="img" aria-labelledby="network-accumulation-title-{view_id} network-accumulation-desc-{view_id}">
+          <title id="network-accumulation-title-{view_id}">Global species accumulation curve, {h(min_date)} to {h(max_date)}</title>
+          <desc id="network-accumulation-desc-{view_id}">Running union of moth species recorded across all tracked stations from {h(min_date)} to {h(max_date)}, ending at {h(latest["species"])} species. The vertical scale runs from {h(value_min)} to {h(value_max)} species.</desc>
+          <line class="chart-axis" x1="{left}" y1="{top + plot_height}" x2="{left + plot_width}" y2="{top + plot_height}"></line>
+          <line class="chart-axis" x1="{left}" y1="{top}" x2="{left}" y2="{top + plot_height}"></line>
+          <line class="chart-grid" x1="{left}" y1="{top}" x2="{left + plot_width}" y2="{top}"></line>
+          <text class="chart-label" x="{left - 8}" y="{top + 4}" text-anchor="end">{h(value_max)}</text>
+          <text class="chart-label" x="{left - 8}" y="{top + plot_height + 4}" text-anchor="end">{h(value_min)}</text>
+          <text class="chart-label" x="{left}" y="{height - 12}" text-anchor="start">{h(min_date)}</text>
+          <text class="chart-label" x="{left + plot_width}" y="{height - 12}" text-anchor="end">{h(max_date)}</text>
+          {_accumulation_year_ticks(min_date, max_date, left, plot_width, date_span, top + plot_height)}
+          <polygon class="accumulation-area" points="{area_attr}"></polygon>
+          {''.join(launch_markers)}
+          <polyline class="accumulation-line" points="{point_attr}"></polyline>
+          {''.join(markers)}
+          <text class="chart-callout" x="{points[-1][0] - 8:.1f}" y="{points[-1][1] - 10:.1f}" text-anchor="end">{h(latest["species"])} species</text>
+        </svg>'''
+
+    all_dates = [date.fromisoformat(row["date"]) for row in rows]
+    current_year = max(all_dates).year
+    current_rows = [row for row in rows if date.fromisoformat(row["date"]).year == current_year]
+    show_current_year = bool(current_rows) and current_year > min(all_dates).year
+    zoom_controls = f'''<div class="chart-range-controls" role="group" aria-label="Accumulation chart time range">
+      <button type="button" data-chart-range="all" aria-pressed="true">All history</button>
+      <button type="button" data-chart-range="current" aria-pressed="false">{current_year}</button>
+    </div>''' if show_current_year else ""
     return f"""
     <figure class="accumulation-line-chart network-line-chart">
       <div class="chart-toolbar">
         <div><p class="chart-toolbar-label">Zoom</p>{zoom_controls}</div>
       </div>
-      <svg viewBox="0 0 {width} {height}" data-chart-full-viewbox="0 0 {width} {height}" data-chart-current-label="{current_year}" data-chart-current-range="{current_year}-01-01 to {h(max_date)}" role="img" aria-labelledby="network-accumulation-title network-accumulation-desc">
-        <title id="network-accumulation-title">Global species accumulation curve</title>
-        <desc id="network-accumulation-desc">Running union of moth species recorded across all tracked stations from {h(min_date)} to {h(max_date)}, ending at {h(latest["species"])} species. Dashed vertical lines mark each station's first cached observation session.</desc>
-        <line class="chart-axis" x1="{left}" y1="{top + plot_height}" x2="{left + plot_width}" y2="{top + plot_height}"></line>
-        <line class="chart-axis" x1="{left}" y1="{top}" x2="{left}" y2="{top + plot_height}"></line>
-        <line class="chart-grid" x1="{left}" y1="{top}" x2="{left + plot_width}" y2="{top}"></line>
-        <text class="chart-label" x="{left - 8}" y="{top + 4}" text-anchor="end">{h(max_species)}</text>
-        <text class="chart-label" x="{left - 8}" y="{top + plot_height + 4}" text-anchor="end">0</text>
-        <text class="chart-label" x="{left}" y="{height - 12}" text-anchor="start">{h(min_date)}</text>
-        <text class="chart-label" x="{left + plot_width}" y="{height - 12}" text-anchor="end">{h(max_date)}</text>
-        {_accumulation_year_ticks(min_date, max_date, left, plot_width, date_span, top + plot_height)}
-        <polygon class="accumulation-area" points="{area_attr}"></polygon>
-        {''.join(launch_markers)}
-        <polyline class="accumulation-line" points="{point_attr}"></polyline>
-        {''.join(markers)}
-        <text class="chart-callout" x="{points[-1][0] - 8:.1f}" y="{points[-1][1] - 10:.1f}" text-anchor="end">{h(latest["species"])} species</text>
-      </svg>
-      <div class="monthly-tooltip" role="tooltip" hidden></div>
+      <div data-chart-view="all">{render_view(rows, "all", False)}<div class="monthly-tooltip" role="tooltip" hidden></div></div>
+      <div data-chart-view="current" hidden>{render_view(current_rows, "current", True) if show_current_year else ""}<div class="monthly-tooltip" role="tooltip" hidden></div></div>
+      <p class="chart-range-status" aria-live="polite">Showing all history.</p>
       <div class="station-launches">
         <p>First cached session</p>
         <ul>{''.join(launch_legend)}</ul>
@@ -3426,26 +3430,25 @@ function initMonthlyTooltips() {
 
 function initAccumulationChartRanges() {
   document.querySelectorAll(".network-line-chart").forEach((figure) => {
-    const svg = figure.querySelector("svg[data-chart-full-viewbox]");
     const buttons = Array.from(figure.querySelectorAll("[data-chart-range]"));
     const status = figure.querySelector(".chart-range-status");
-    if (!svg || !buttons.length || !status) return;
+    const views = Array.from(figure.querySelectorAll("[data-chart-view]"));
+    if (!buttons.length || !status || !views.length) return;
 
     buttons.forEach((button) => {
       button.addEventListener("click", () => {
-        const isCurrent = button.dataset.chartRange === "current";
-        svg.setAttribute("viewBox", isCurrent
-          ? button.dataset.chartViewbox
-          : svg.dataset.chartFullViewbox);
-        svg.setAttribute("preserveAspectRatio", isCurrent ? "none" : "xMidYMid meet");
+        const range = button.dataset.chartRange;
+        views.forEach((view) => {
+          view.toggleAttribute("hidden", view.dataset.chartView !== range);
+        });
         buttons.forEach((candidate) => {
           const selected = candidate === button;
           candidate.setAttribute("aria-pressed", String(selected));
           candidate.classList.toggle("is-active", selected);
         });
-        status.textContent = isCurrent
-          ? `Showing ${svg.dataset.chartCurrentLabel}, ${svg.dataset.chartCurrentRange}.`
-          : "Showing all history.";
+        const activeSvg = figure.querySelector(`[data-chart-view="${range}"] svg`);
+        status.textContent = activeSvg?.getAttribute("aria-label") ||
+          (range === "current" ? `Showing the ${button.textContent.trim()} detail view.` : "Showing all history.");
       });
     });
   });

@@ -187,6 +187,8 @@ class SpeciesSemanticsTests(unittest.TestCase):
         self.assertIn(">2025</text>", chart)
         self.assertIn('data-chart-range="all"', chart)
         self.assertIn('data-chart-range="current"', chart)
+        self.assertIn('data-chart-view="current" hidden', chart)
+        self.assertIn('network-accumulation-title-current', chart)
         self.assertIn('href="#accumulation"', _history_section_nav())
 
         station_chart = _accumulation_bars(
