@@ -2317,10 +2317,10 @@ def _network_accumulation(
             x = left + ((launch_date.toordinal() - min_date.toordinal()) / date_span * plot_width)
             color = colors.get(launch["station_id"], FALLBACK_COLORS[0])
             launch_markers.append(
-                f'''<g class="station-launch-marker" style="--station-color: {h(color)}">
+                f'''<g class="station-launch-marker" style="--station-color: {h(color)}" role="img"
+                  aria-label="{h(launch['station_name'])} first cached session: {h(launch_date)}">
                   <line x1="{x:.1f}" y1="{top}" x2="{x:.1f}" y2="{top + plot_height}"></line>
                   <circle cx="{x:.1f}" cy="{top + plot_height:.1f}" r="4.2"></circle>
-                  <title>{h(launch['station_name'])} first cached session: {h(launch_date)}</title>
                 </g>'''
             )
         latest = view_rows[-1]
