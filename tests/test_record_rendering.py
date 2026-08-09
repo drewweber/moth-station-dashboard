@@ -313,7 +313,7 @@ class RecordRenderingTests(unittest.TestCase):
         self.assertIn("median upload lag", html)
         self.assertIn("3h 30m", html)
 
-    def test_forecast_validation_separates_historical_and_published_evidence(self) -> None:
+    def test_forecast_validation_shows_historical_evidence_only(self) -> None:
         html = _forecast_validation(
             {
                 "historical": {
@@ -348,14 +348,14 @@ class RecordRenderingTests(unittest.TestCase):
         self.assertIn("Seasonal-only baseline", html)
         self.assertIn("Host-only ranking", html)
         self.assertIn("Seasonal + host evidence", html)
-        self.assertIn("Legacy published target lists", html)
         self.assertIn("12%", html)
         self.assertIn("40 targets predicted across all stations; 5 found for the first time in the following two weeks", html)
         self.assertIn("target coverage", html)
         self.assertIn("forecast results, not moth or observation totals", html)
         self.assertIn("Targets that appeared", html)
-        self.assertIn("3 published forecasts still need", html)
         self.assertIn("View scored forecast windows (1)", html)
+        self.assertNotIn("Published three-way forecast check", html)
+        self.assertNotIn("Legacy published target lists", html)
 
     def test_forecast_validation_page_is_separate_from_station_profiles(self) -> None:
         page = _forecast_validation_page(
