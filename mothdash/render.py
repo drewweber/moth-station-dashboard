@@ -3377,52 +3377,58 @@ function initInsightFeedback() {
 
 function initMonthlyTooltips() {
   document.querySelectorAll(".monthly-overlay-chart, .accumulation-line-chart, .daily-richness-line-chart").forEach((figure) => {
-    const tooltip = figure.querySelector(".monthly-tooltip");
-    if (!tooltip) return;
+    const surfaces = figure.matches(".network-line-chart")
+      ? Array.from(figure.querySelectorAll("[data-chart-view]"))
+      : [figure];
 
-    const positionTooltip = (target, event) => {
-      const figureRect = figure.getBoundingClientRect();
-      const targetRect = target.getBoundingClientRect();
-      const anchorX = event?.clientX || (targetRect.left + targetRect.width / 2);
-      const anchorY = event?.clientY || targetRect.top;
-      let left = anchorX - figureRect.left + 12;
-      let top = anchorY - figureRect.top + 12;
-      const maxLeft = Math.max(8, figureRect.width - tooltip.offsetWidth - 8);
-      left = Math.max(8, Math.min(left, maxLeft));
-      if (top + tooltip.offsetHeight > figureRect.height - 8) {
-        top = Math.max(8, anchorY - figureRect.top - tooltip.offsetHeight - 12);
-      }
-      tooltip.style.left = `${left}px`;
-      tooltip.style.top = `${top}px`;
-    };
+    surfaces.forEach((surface) => {
+      const tooltip = surface.querySelector(".monthly-tooltip");
+      if (!tooltip) return;
 
-    const showTooltip = (target, event) => {
-      tooltip.innerHTML = target.dataset.tooltipHtml || "";
-      tooltip.hidden = false;
-      positionTooltip(target, event);
-    };
-    const hideTooltip = () => {
-      tooltip.hidden = true;
-    };
-
-    figure.querySelectorAll(".monthly-point-group").forEach((target) => {
-      target.addEventListener("pointerenter", (event) => showTooltip(target, event));
-      target.addEventListener("pointermove", (event) => positionTooltip(target, event));
-      target.addEventListener("pointerleave", () => {
-        if (document.activeElement !== target) hideTooltip();
-      });
-      target.addEventListener("focus", () => showTooltip(target));
-      target.addEventListener("blur", hideTooltip);
-      target.addEventListener("click", (event) => {
-        event.preventDefault();
-        target.focus();
-        showTooltip(target, event);
-      });
-      target.addEventListener("keydown", (event) => {
-        if (event.key === "Escape") {
-          hideTooltip();
-          target.blur();
+      const positionTooltip = (target, event) => {
+        const figureRect = figure.getBoundingClientRect();
+        const targetRect = target.getBoundingClientRect();
+        const anchorX = event?.clientX || (targetRect.left + targetRect.width / 2);
+        const anchorY = event?.clientY || targetRect.top;
+        let left = anchorX - figureRect.left + 12;
+        let top = anchorY - figureRect.top + 12;
+        const maxLeft = Math.max(8, figureRect.width - tooltip.offsetWidth - 8);
+        left = Math.max(8, Math.min(left, maxLeft));
+        if (top + tooltip.offsetHeight > figureRect.height - 8) {
+          top = Math.max(8, anchorY - figureRect.top - tooltip.offsetHeight - 12);
         }
+        tooltip.style.left = `${left}px`;
+        tooltip.style.top = `${top}px`;
+      };
+
+      const showTooltip = (target, event) => {
+        tooltip.innerHTML = target.dataset.tooltipHtml || "";
+        tooltip.hidden = false;
+        positionTooltip(target, event);
+      };
+      const hideTooltip = () => {
+        tooltip.hidden = true;
+      };
+
+      surface.querySelectorAll(".monthly-point-group").forEach((target) => {
+        target.addEventListener("pointerenter", (event) => showTooltip(target, event));
+        target.addEventListener("pointermove", (event) => positionTooltip(target, event));
+        target.addEventListener("pointerleave", () => {
+          if (document.activeElement !== target) hideTooltip();
+        });
+        target.addEventListener("focus", () => showTooltip(target));
+        target.addEventListener("blur", hideTooltip);
+        target.addEventListener("click", (event) => {
+          event.preventDefault();
+          target.focus();
+          showTooltip(target, event);
+        });
+        target.addEventListener("keydown", (event) => {
+          if (event.key === "Escape") {
+            hideTooltip();
+            target.blur();
+          }
+        });
       });
     });
   });
