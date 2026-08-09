@@ -174,6 +174,7 @@ class SpeciesSemanticsTests(unittest.TestCase):
                     "station_id": "station-a",
                     "station_name": "Station A",
                     "date": "2024-07-10",
+                    "date": "2026-07-10",
                 }
             ],
             [Station(id="station-a", name="Station A", enabled=True, active=True, query={})],
@@ -181,9 +182,11 @@ class SpeciesSemanticsTests(unittest.TestCase):
 
         self.assertIn("Global species accumulation curve", chart)
         self.assertIn("First cached session", chart)
-        self.assertIn("Station A first cached session: 2024-07-10", chart)
+        self.assertIn("Station A first cached session: 2026-07-10", chart)
         self.assertIn('class="chart-year-tick chart-year-tick-even"', chart)
         self.assertIn(">2025</text>", chart)
+        self.assertIn('data-chart-range="all"', chart)
+        self.assertIn('data-chart-range="current"', chart)
         self.assertIn('href="#accumulation"', _history_section_nav())
 
         station_chart = _accumulation_bars(
@@ -195,7 +198,6 @@ class SpeciesSemanticsTests(unittest.TestCase):
             }
         )
         self.assertIn(">2025</text>", station_chart)
-
     def test_station_profile_adds_nearby_seasonal_targets_not_seen_at_station(self) -> None:
         with connect(self.settings.database) as conn:
             conn.execute(

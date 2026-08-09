@@ -365,16 +365,16 @@ def _station_cards(summaries: list[dict[str, Any]], stations: list[Station]) -> 
         cards.append(
             f"""
             <article class="station-card" style="--station-color: {_station_color(station, index)}">
-              <div>
-                <p class="station-status station-status-{h(status).replace(" ", "-")}">{h(status)}</p>
+              <div class="station-card-head">
+                <p class="station-status station-status-{h(status).replace(" ", "-")}"><span></span>{h(status)}</p>
                 <h3><a href="{h(_station_page_path(station))}">{h(station.name)}</a></h3>
-                <p>{h(location)}</p>
+                <p class="station-location">{h(location)}</p>
               </div>
               <div class="station-numbers">
-                <span><strong>{h(species)}</strong> species</span>
-                <span><strong>{h(f"{observations:,}")}</strong> observations</span>
+                <span><strong>{h(species)}</strong><small>species</small></span>
+                <span><strong>{h(f"{observations:,}")}</strong><small>observations</small></span>
               </div>
-              <p class="latest">Latest session: {h(latest)}</p>
+              <p class="latest"><span>Latest session</span><time datetime="{h(latest) if latest != 'not synced' else ''}">{h(latest)}</time></p>
             </article>
             """
         )
@@ -2316,9 +2316,27 @@ def _network_accumulation(
             f'<li style="--station-color: {h(color)}"><i></i><span>{h(short_label)}</span><time datetime="{h(launch_date)}">{h(launch_date)}</time></li>'
         )
     latest = rows[-1]
+    current_year = max_date.year
+    current_year_start = date(current_year, 1, 1)
+    current_year_x = left + (
+        (max(min_date, current_year_start).toordinal() - min_date.toordinal())
+        / date_span
+        * plot_width
+    )
+    show_current_year = current_year_start > min_date
+    zoom_controls = ""
+    if show_current_year:
+        zoom_controls = f'''<div class="chart-range-controls" role="group" aria-label="Accumulation chart time range">
+          <button type="button" data-chart-range="all" aria-pressed="true">All history</button>
+          <button type="button" data-chart-range="current" data-chart-viewbox="{current_year_x:.1f} 0 {left + plot_width - current_year_x:.1f} {height}" aria-pressed="false">{current_year}</button>
+        </div>
+        <p class="chart-range-status" aria-live="polite">Showing all history, {h(min_date)} to {h(max_date)}.</p>'''
     return f"""
     <figure class="accumulation-line-chart network-line-chart">
-      <svg viewBox="0 0 {width} {height}" role="img" aria-labelledby="network-accumulation-title network-accumulation-desc">
+      <div class="chart-toolbar">
+        <div><p class="chart-toolbar-label">Zoom</p>{zoom_controls}</div>
+      </div>
+      <svg viewBox="0 0 {width} {height}" data-chart-full-viewbox="0 0 {width} {height}" data-chart-current-label="{current_year}" data-chart-current-range="{current_year}-01-01 to {h(max_date)}" role="img" aria-labelledby="network-accumulation-title network-accumulation-desc">
         <title id="network-accumulation-title">Global species accumulation curve</title>
         <desc id="network-accumulation-desc">Running union of moth species recorded across all tracked stations from {h(min_date)} to {h(max_date)}, ending at {h(latest["species"])} species. Dashed vertical lines mark each station's first cached observation session.</desc>
         <line class="chart-axis" x1="{left}" y1="{top + plot_height}" x2="{left + plot_width}" y2="{top + plot_height}"></line>
@@ -3406,6 +3424,33 @@ function initMonthlyTooltips() {
   });
 }
 
+function initAccumulationChartRanges() {
+  document.querySelectorAll(".network-line-chart").forEach((figure) => {
+    const svg = figure.querySelector("svg[data-chart-full-viewbox]");
+    const buttons = Array.from(figure.querySelectorAll("[data-chart-range]"));
+    const status = figure.querySelector(".chart-range-status");
+    if (!svg || !buttons.length || !status) return;
+
+    buttons.forEach((button) => {
+      button.addEventListener("click", () => {
+        const isCurrent = button.dataset.chartRange === "current";
+        svg.setAttribute("viewBox", isCurrent
+          ? button.dataset.chartViewbox
+          : svg.dataset.chartFullViewbox);
+        svg.setAttribute("preserveAspectRatio", isCurrent ? "none" : "xMidYMid meet");
+        buttons.forEach((candidate) => {
+          const selected = candidate === button;
+          candidate.setAttribute("aria-pressed", String(selected));
+          candidate.classList.toggle("is-active", selected);
+        });
+        status.textContent = isCurrent
+          ? `Showing ${svg.dataset.chartCurrentLabel}, ${svg.dataset.chartCurrentRange}.`
+          : "Showing all history.";
+      });
+    });
+  });
+}
+
 function initDailyRichnessLegendToggles() {
   document.querySelectorAll(".daily-richness-line-chart").forEach((figure) => {
     const buttons = Array.from(figure.querySelectorAll("[data-daily-richness-series]"))
@@ -3465,6 +3510,7 @@ initSeasonalTargetFilters();
 initRecordFilters();
 initInsightFeedback();
 initMonthlyTooltips();
+initAccumulationChartRanges();
 initDailyRichnessLegendToggles();
 """
 
@@ -5213,6 +5259,52 @@ h2 {
   margin: 0;
   position: relative;
 }
+.chart-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin: 0 0 8px;
+}
+.chart-toolbar-label {
+  display: inline-block;
+  margin: 0 8px 0 0;
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+.chart-range-controls {
+  display: inline-flex;
+  gap: 4px;
+}
+.chart-range-controls button {
+  min-height: 30px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 4px 9px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.chart-range-controls button:hover,
+.chart-range-controls button[aria-pressed="true"] {
+  border-color: var(--amber);
+  background: color-mix(in srgb, var(--amber) 13%, transparent);
+  color: var(--ink);
+}
+.chart-range-controls button:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+.chart-range-status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
 .accumulation-line-chart svg {
   width: 100%;
   aspect-ratio: 720 / 260;
@@ -6246,29 +6338,30 @@ h2 {
   font-size: 1rem;
 }
 .station-card {
-  min-height: 210px;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
+  min-height: 218px;
+  display: grid;
+  grid-template-rows: minmax(90px, 1fr) auto auto;
+  gap: 16px;
   position: relative;
-  background: var(--panel);
+  overflow: hidden;
+  background: color-mix(in srgb, var(--station-color) 7%, var(--panel));
   border: 1px solid var(--line);
-  border-radius: 6px;
-  padding: 16px;
+  border-radius: 8px;
+  padding: 18px 18px 15px 22px;
   transition: border-color 180ms ease-out, background-color 180ms ease-out;
 }
 .station-card::before {
   content: "";
   position: absolute;
   inset: 0 auto 0 0;
-  width: 5px;
+  width: 4px;
   background: var(--station-color, var(--amber));
-  border-radius: 6px 0 0 6px;
+  border-radius: 8px 0 0 8px;
 }
 .station-card h3 {
-  margin: 8px 0 8px;
-  font-size: 1.25rem;
-  line-height: 1.1;
+  margin: 9px 0 7px;
+  font-size: 1.32rem;
+  line-height: 1.06;
 }
 @media (hover: hover) {
   .station-card:hover,
@@ -6278,9 +6371,6 @@ h2 {
   .insight-card:hover {
     border-color: color-mix(in srgb, var(--amber) 48%, var(--line));
     background-color: color-mix(in srgb, var(--amber) 5%, var(--panel));
-  }
-  .station-card:hover::before {
-    box-shadow: 0 0 14px color-mix(in srgb, var(--station-color) 38%, transparent);
   }
   .sighting-card:hover .sighting-image img,
   .night-card:hover .night-image img {
@@ -6302,32 +6392,69 @@ h2 {
   margin: 0;
   color: var(--muted);
 }
+.station-location {
+  max-width: 28ch;
+  line-height: 1.35;
+}
 .station-status {
-  color: var(--leaf);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.76rem;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+}
+.station-status span {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--leaf);
 }
 .station-status-inactive {
   color: var(--faint);
 }
+.station-status-inactive span {
+  background: var(--faint);
+}
 .station-numbers {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 7px;
-  margin-top: 18px;
 }
 .station-numbers span {
   border: 1px solid var(--line);
-  border-radius: 4px;
-  padding: 5px 8px;
+  border-radius: 5px;
+  padding: 8px 9px;
   color: var(--muted);
   background: rgba(255, 255, 255, 0.02);
-  font-size: 0.86rem;
+}
+.station-numbers strong,
+.station-numbers small {
+  display: block;
+}
+.station-numbers strong {
+  color: var(--ink);
+  font-size: 1.12rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+.station-numbers small {
+  margin-top: 4px;
+  font-size: 0.7rem;
 }
 .latest {
-  padding-top: 14px;
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.8rem;
+  font-size: 0.7rem;
+}
+.latest time {
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
 }
 .sighting-grid,
 .pulse-grid {
