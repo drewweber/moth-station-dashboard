@@ -2324,8 +2324,9 @@ def _network_accumulation(
                 </g>'''
             )
         latest = view_rows[-1]
-        return f'''<svg viewBox="0 0 {width} {height}" role="img" aria-labelledby="network-accumulation-title-{view_id} network-accumulation-desc-{view_id}">
-          <title id="network-accumulation-title-{view_id}">Global species accumulation curve, {h(min_date)} to {h(max_date)}</title>
+        return f'''<svg viewBox="0 0 {width} {height}" role="img"
+          aria-label="Global species accumulation curve, {h(min_date)} to {h(max_date)}"
+          aria-describedby="network-accumulation-desc-{view_id}">
           <desc id="network-accumulation-desc-{view_id}">Running union of moth species recorded across all tracked stations from {h(min_date)} to {h(max_date)}, ending at {h(latest["species"])} species. The vertical scale runs from {h(value_min)} to {h(value_max)} species.</desc>
           <line class="chart-axis" x1="{left}" y1="{top + plot_height}" x2="{left + plot_width}" y2="{top + plot_height}"></line>
           <line class="chart-axis" x1="{left}" y1="{top}" x2="{left}" y2="{top + plot_height}"></line>

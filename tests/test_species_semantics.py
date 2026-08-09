@@ -181,6 +181,8 @@ class SpeciesSemanticsTests(unittest.TestCase):
         )
 
         self.assertIn("Global species accumulation curve", chart)
+        self.assertIn('aria-label="Global species accumulation curve,', chart)
+        self.assertNotIn("<title", chart)
         self.assertIn("First cached session", chart)
         self.assertIn("Station A first cached session: 2026-07-10", chart)
         self.assertIn('class="chart-year-tick chart-year-tick-even"', chart)
@@ -188,7 +190,7 @@ class SpeciesSemanticsTests(unittest.TestCase):
         self.assertIn('data-chart-range="all"', chart)
         self.assertIn('data-chart-range="current"', chart)
         self.assertIn('data-chart-view="current" hidden', chart)
-        self.assertIn('network-accumulation-title-current', chart)
+        self.assertIn('network-accumulation-desc-current', chart)
         self.assertIn('href="#accumulation"', _history_section_nav())
 
         station_chart = _accumulation_bars(
