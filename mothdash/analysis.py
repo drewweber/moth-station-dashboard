@@ -2942,6 +2942,7 @@ def trend_summary(settings: Settings) -> dict[str, Any]:
         return {
             "phenology": [],
             "network_accumulation": [],
+            "network_accumulation_current": [],
             "station_launches": [],
             "monthly_overlays": [],
             "rank_abundance": [],
@@ -3025,6 +3026,14 @@ def trend_summary(settings: Settings) -> dict[str, Any]:
                     "new_species": len(seen) - before,
                 }
             )
+    # Keep the overview light enough to scan, but preserve every gain day in
+    # the active-year detail chart. Sampling the only copy of this series
+    # would otherwise hide real dates when a user zooms in.
+    current_year = max(taxa_by_date).year if taxa_by_date else None
+    network_accumulation_current = [
+        row for row in network_accumulation
+        if current_year is not None and date.fromisoformat(row["date"]).year == current_year
+    ]
     if len(network_accumulation) > 44:
         step = max(1, (len(network_accumulation) + 43) // 44)
         network_accumulation = network_accumulation[::step]
@@ -3148,6 +3157,7 @@ def trend_summary(settings: Settings) -> dict[str, Any]:
     return {
         "phenology": phenology,
         "network_accumulation": network_accumulation,
+        "network_accumulation_current": network_accumulation_current,
         "station_launches": station_launches,
         "monthly_overlays": monthly_overlays,
         "rank_abundance": rank_abundance,

@@ -2210,6 +2210,7 @@ def _network_accumulation(
     rows: list[dict[str, Any]],
     launches: list[dict[str, Any]],
     stations: list[Station],
+    current_rows: list[dict[str, Any]] | None = None,
 ) -> str:
     if not rows:
         return '<p class="empty">Network accumulation will appear after synced observations.</p>'
@@ -2283,10 +2284,14 @@ def _network_accumulation(
                 </g>'''
             )
         latest = view_rows[-1]
+        point_detail = (
+            " Each point in this detail view is a day when the network gained one or more species."
+            if view_id == "current" else ""
+        )
         return f'''<svg viewBox="0 0 {width} {height}" role="img"
           aria-label="Global species accumulation curve, {h(min_date)} to {h(max_date)}"
           aria-describedby="network-accumulation-desc-{view_id}">
-          <desc id="network-accumulation-desc-{view_id}">Running union of moth species recorded across all tracked stations from {h(min_date)} to {h(max_date)}, ending at {h(latest["species"])} species. The vertical scale runs from {h(value_min)} to {h(value_max)} species.</desc>
+          <desc id="network-accumulation-desc-{view_id}">Running union of moth species recorded across all tracked stations from {h(min_date)} to {h(max_date)}, ending at {h(latest["species"])} species. The vertical scale runs from {h(value_min)} to {h(value_max)} species.{h(point_detail)}</desc>
           <line class="chart-axis" x1="{left}" y1="{top + plot_height}" x2="{left + plot_width}" y2="{top + plot_height}"></line>
           <line class="chart-axis" x1="{left}" y1="{top}" x2="{left}" y2="{top + plot_height}"></line>
           <line class="chart-grid" x1="{left}" y1="{top}" x2="{left + plot_width}" y2="{top}"></line>
@@ -2304,7 +2309,13 @@ def _network_accumulation(
 
     all_dates = [date.fromisoformat(row["date"]) for row in rows]
     current_year = max(all_dates).year
-    current_rows = [row for row in rows if date.fromisoformat(row["date"]).year == current_year]
+    if current_rows is None:
+        current_rows = [row for row in rows if date.fromisoformat(row["date"]).year == current_year]
+    else:
+        current_rows = [
+            row for row in current_rows
+            if date.fromisoformat(row["date"]).year == current_year
+        ]
     show_current_year = bool(current_rows) and current_year > min(all_dates).year
     zoom_controls = f'''<div class="chart-range-controls" role="group" aria-label="Accumulation chart time range">
       <button type="button" data-chart-range="all" aria-pressed="true">All history</button>
@@ -7668,7 +7679,7 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
         <h2>Global species accumulation</h2>
         <p>The running union of moth species recorded across all tracked stations. Each dashed line and the key below mark a station's first cached observation session, making changes in network coverage visible alongside species growth.</p>
       </div>
-      {_network_accumulation(trends["network_accumulation"], trends["station_launches"], stations)}
+      {_network_accumulation(trends["network_accumulation"], trends["station_launches"], stations, trends["network_accumulation_current"])}
       <p class="chart-caveat">This is a cumulative record of the tracked iNaturalist sources, not a standardized measure of survey effort, abundance, or site quality.</p>
     </section>
 

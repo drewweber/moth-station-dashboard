@@ -163,6 +163,43 @@ class SpeciesSemanticsTests(unittest.TestCase):
         self.assertEqual(trends["network_accumulation"][-1]["species"], 2)
         self.assertNotIn(201, {row["taxon_id"] for row in trends["phenology"]})
 
+    def test_current_accumulation_detail_keeps_every_species_gain_day(self) -> None:
+        with connect(self.settings.database) as conn:
+            historic_rows = []
+            for index in range(45):
+                observed = date(2024, 1, 1).fromordinal(date(2024, 1, 1).toordinal() + index)
+                historic_rows.append(
+                    (
+                        "station-a", 10_000 + index, observed.isoformat(),
+                        f"{observed.isoformat()}T22:00:00-05:00", 1_000 + index,
+                        f"Historic species {index}", None, "species",
+                        f"https://example.test/historic/{index}",
+                    )
+                )
+            historic_rows.extend(
+                [
+                    ("station-a", 20_001, "2026-08-01", "2026-08-01T22:00:00-04:00", 2_001, "Current species one", None, "species", "https://example.test/current/1"),
+                    ("station-a", 20_002, "2026-08-05", "2026-08-05T22:00:00-04:00", 2_002, "Current species two", None, "species", "https://example.test/current/2"),
+                ]
+            )
+            conn.executemany(
+                """
+                INSERT INTO observations (
+                    station_id, inat_obs_id, observed_on, observed_at,
+                    taxon_id, taxon_name, common_name, rank, url
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                historic_rows,
+            )
+
+        trends = trend_summary(self.settings)
+
+        self.assertLess(len(trends["network_accumulation"]), 48)
+        self.assertEqual(
+            [row["date"] for row in trends["network_accumulation_current"]],
+            ["2026-07-10", "2026-08-01", "2026-08-05"],
+        )
+
     def test_network_accumulation_labels_station_coverage_dates_clearly(self) -> None:
         chart = _network_accumulation(
             [
@@ -192,6 +229,24 @@ class SpeciesSemanticsTests(unittest.TestCase):
         self.assertIn('data-chart-view="current" hidden', chart)
         self.assertIn('network-accumulation-desc-current', chart)
         self.assertIn('href="#accumulation"', _history_section_nav())
+
+        detail_chart = _network_accumulation(
+            [
+                {"date": "2024-07-10", "species": 2, "new_species": 2},
+                {"date": "2026-07-12", "species": 3, "new_species": 1},
+            ],
+            [],
+            [],
+            [
+                {"date": "2026-06-02", "species": 3, "new_species": 1},
+                {"date": "2026-07-12", "species": 4, "new_species": 1},
+                {"date": "2026-08-08", "species": 5, "new_species": 1},
+            ],
+        )
+        self.assertIn('aria-label="2026-06-02: 3 species, 1 new"', detail_chart)
+        self.assertIn('aria-label="2026-07-12: 4 species, 1 new"', detail_chart)
+        self.assertIn('aria-label="2026-08-08: 5 species, 1 new"', detail_chart)
+        self.assertIn("Each point in this detail view is a day when the network gained one or more species.", detail_chart)
 
         station_chart = _accumulation_bars(
             {

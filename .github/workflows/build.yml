@@ -12,7 +12,7 @@ on:
     - cron: "20 17 * 11,12 *" # 12:20 PM EST, November and December
     - cron: "20 17 * 1,2 *" # 12:20 PM EST, January and February
   push:
-    branches: [main]
+    branches: [main, "preview/**"]
     paths:
       - "mothdash/**"
       - "stations.toml"
@@ -54,7 +54,9 @@ jobs:
   build-and-deploy:
     # Forks receive the validation job above, but never receive our iNaturalist
     # sync, Cloudflare credentials, or a Pages deployment attempt.
-    if: github.repository == 'drewweber/moth-station-dashboard' && github.ref == 'refs/heads/main'
+    if: >-
+      github.repository == 'drewweber/moth-station-dashboard' &&
+      (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/preview/'))
     needs: test-and-render
     runs-on: ubuntu-latest
     steps:
@@ -75,9 +77,18 @@ jobs:
       - name: Build dashboard
         run: python -m mothdash build
 
-      - name: Deploy to Cloudflare Pages
+      - name: Deploy production to Cloudflare Pages
+        if: github.ref == 'refs/heads/main'
         uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: pages deploy public --project-name=moth-stations --commit-dirty=true
+
+      - name: Deploy preview to Cloudflare Pages
+        if: startsWith(github.ref, 'refs/heads/preview/')
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy public --project-name=moth-stations --branch=${{ github.ref_name }} --commit-dirty=true
