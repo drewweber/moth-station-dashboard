@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from .config import Settings, Station, active_stations
@@ -19,6 +20,12 @@ SPECIES_RANKS = {
     "subvariety",
     "subform",
 }
+
+
+# First-record lookups are independent read-only API requests. Keeping a
+# bounded pool shortens a cache refresh without changing the records queried
+# or allowing concurrent SQLite writes.
+STATS_FETCH_WORKERS = 12
 
 
 OBS_INSERT = """
@@ -224,21 +231,46 @@ def _station_first_taxa(settings: Settings, station: Station) -> list[dict[str, 
     return [dict(row) for row in rows]
 
 
+def _fetch_first_record_dates(
+    task: tuple[Settings, int, int | None, int | None],
+) -> tuple[str | None, str | None]:
+    """Fetch independent county/state first dates for one station taxon."""
+    settings, taxon_id, county_place_id, state_place_id = task
+    county_first = (
+        first_observed_date(
+            settings.user_agent,
+            taxon_id=taxon_id,
+            place_id=county_place_id,
+        )
+        if county_place_id
+        else None
+    )
+    state_first = (
+        first_observed_date(
+            settings.user_agent,
+            taxon_id=taxon_id,
+            place_id=state_place_id,
+        )
+        if state_place_id
+        else None
+    )
+    return county_first, state_first
+
+
 def refresh_station_stats(settings: Settings, stations: list[Station]) -> None:
     """Refresh cached county/state first dates for station taxa.
 
     These are iNaturalist firsts, not absolute historical records.
     """
     remaining = settings.stats_refresh_limit
+    refresh_tasks: list[tuple[Station, dict[str, Any]]] = []
     for station in active_stations(stations):
         if remaining <= 0:
-            print("[stats] refresh budget exhausted")
-            return
+            break
         if not station.county_place_id and not station.state_place_id:
             continue
 
         taxa = _station_first_taxa(settings, station)
-        refreshed = 0
         for row in taxa:
             taxon_id = row["taxon_id"]
             station_first = row["station_first_date"]
@@ -265,52 +297,59 @@ def refresh_station_stats(settings: Settings, stations: list[Station]) -> None:
                 continue
             if remaining <= 0:
                 break
-
-            county_first = None
-            state_first = None
-            if station.county_place_id:
-                county_first = first_observed_date(
-                    settings.user_agent,
-                    taxon_id=taxon_id,
-                    place_id=station.county_place_id,
-                )
-            if station.state_place_id:
-                state_first = first_observed_date(
-                    settings.user_agent,
-                    taxon_id=taxon_id,
-                    place_id=station.state_place_id,
-                )
-
-            is_county_first = bool(
-                station_first and county_first and station_first <= county_first
-            )
-            is_state_first = bool(
-                station_first and state_first and station_first <= state_first
-            )
-            with connect(settings.database) as conn:
-                conn.execute(
-                    """
-                    INSERT OR REPLACE INTO station_taxon_stats (
-                        station_id, taxon_id, county_place_id, state_place_id,
-                        station_first_date, county_first_date, state_first_date,
-                        is_county_first, is_state_first, cached_at
-                    ) VALUES (?,?,?,?,?,?,?,?,?, CURRENT_TIMESTAMP)
-                    """,
-                    (
-                        station.id,
-                        taxon_id,
-                        station.county_place_id,
-                        station.state_place_id,
-                        station_first,
-                        county_first,
-                        state_first,
-                        int(is_county_first),
-                        int(is_state_first),
-                    ),
-                )
-            refreshed += 1
+            refresh_tasks.append((station, row))
             remaining -= 1
-        print(f"[{station.id}] refreshed first-record stats for {refreshed} taxa")
+
+    fetch_inputs = [
+        (settings, int(row["taxon_id"]), station.county_place_id, station.state_place_id)
+        for station, row in refresh_tasks
+    ]
+    with ThreadPoolExecutor(
+        max_workers=min(STATS_FETCH_WORKERS, len(fetch_inputs) or 1)
+    ) as executor:
+        first_dates = list(executor.map(_fetch_first_record_dates, fetch_inputs))
+
+    refreshed_by_station: dict[str, int] = {}
+    for (station, row), (county_first, state_first) in zip(refresh_tasks, first_dates):
+        taxon_id = int(row["taxon_id"])
+        station_first = row["station_first_date"]
+        is_county_first = bool(
+            station_first and county_first and station_first <= county_first
+        )
+        is_state_first = bool(
+            station_first and state_first and station_first <= state_first
+        )
+        with connect(settings.database) as conn:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO station_taxon_stats (
+                    station_id, taxon_id, county_place_id, state_place_id,
+                    station_first_date, county_first_date, state_first_date,
+                    is_county_first, is_state_first, cached_at
+                ) VALUES (?,?,?,?,?,?,?,?,?, CURRENT_TIMESTAMP)
+                """,
+                (
+                    station.id,
+                    taxon_id,
+                    station.county_place_id,
+                    station.state_place_id,
+                    station_first,
+                    county_first,
+                    state_first,
+                    int(is_county_first),
+                    int(is_state_first),
+                ),
+            )
+        refreshed_by_station[station.id] = refreshed_by_station.get(station.id, 0) + 1
+
+    for station in active_stations(stations):
+        if station.county_place_id or station.state_place_id:
+            print(
+                f"[{station.id}] refreshed first-record stats for "
+                f"{refreshed_by_station.get(station.id, 0)} taxa"
+            )
+    if remaining <= 0:
+        print("[stats] refresh budget exhausted")
 
 
 def sync_all(settings: Settings, stations: list[Station], full: bool = False) -> None:

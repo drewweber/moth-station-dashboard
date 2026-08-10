@@ -9,7 +9,7 @@ from mothdash.analysis import recent_days_taxa
 from mothdash.config import Settings, Station, active_stations, historical_stations
 from mothdash.db import connect, init_db
 from mothdash.render import _snapshot_payload
-from mothdash.sync import pending_station_updates, sync_all
+from mothdash.sync import pending_station_updates, refresh_station_stats, sync_all
 
 
 def station(station_id: str, *, enabled: bool = True, active: bool = True) -> Station:
@@ -122,6 +122,72 @@ class StationActivityTests(unittest.TestCase):
             self.settings.user_agent,
             **self.active.api_params(self.settings),
         )
+
+    @patch("mothdash.sync.first_observed_date")
+    def test_first_record_refresh_keeps_ordered_budget_and_cached_values(
+        self, first_date_mock
+    ) -> None:
+        with connect(self.settings.database) as conn:
+            conn.executemany(
+                """
+                INSERT INTO observations (
+                    station_id, inat_obs_id, observed_on, taxon_id, taxon_name, rank
+                ) VALUES (?, ?, ?, ?, ?, 'species')
+                """,
+                [
+                    ("active", 1, "2026-06-01", 101, "First species"),
+                    ("active", 2, "2026-06-02", 102, "Second species"),
+                    ("active", 3, "2026-06-03", 103, "Outside budget"),
+                ],
+            )
+
+        def first_date(_user_agent, *, taxon_id, place_id):
+            return {
+                (101, 1082): "2026-06-01",
+                (101, 48): "2026-05-30",
+                (102, 1082): "2026-06-10",
+                (102, 48): "2026-06-02",
+                (103, 1082): "2026-06-03",
+                (103, 48): "2026-06-03",
+            }[(taxon_id, place_id)]
+
+        first_date_mock.side_effect = first_date
+        limited_settings = Settings(
+            root=self.settings.root,
+            data_dir=self.settings.data_dir,
+            public_dir=self.settings.public_dir,
+            database=self.settings.database,
+            stats_refresh_limit=2,
+        )
+
+        refresh_station_stats(limited_settings, [self.active])
+
+        with connect(self.settings.database) as conn:
+            rows = conn.execute(
+                """
+                SELECT taxon_id, county_first_date, state_first_date,
+                       is_county_first, is_state_first
+                FROM station_taxon_stats
+                ORDER BY taxon_id
+                """
+            ).fetchall()
+        self.assertEqual(
+            [tuple(row) for row in rows],
+            [
+                (101, "2026-06-01", "2026-05-30", 1, 0),
+                (102, "2026-06-10", "2026-06-02", 1, 1),
+            ],
+        )
+        self.assertEqual(first_date_mock.call_count, 4)
+
+        refresh_station_stats(limited_settings, [self.active])
+        self.assertEqual(
+            first_date_mock.call_count,
+            6,
+            "the next run refreshes only the taxon outside the first budget",
+        )
+        refresh_station_stats(limited_settings, [self.active])
+        self.assertEqual(first_date_mock.call_count, 6, "fresh cached values are reused")
 
 
 if __name__ == "__main__":
