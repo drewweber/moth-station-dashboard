@@ -70,28 +70,43 @@ def _mode_toggle(history_href: str, live_href: str, active: str) -> str:
     """
 
 
-HISTORY_NAV_GROUPS = (
+HISTORY_NAV_DESTINATIONS = (
+    (
+        "Dashboard",
+        (("Dashboard", "dashboard", "main"),),
+    ),
     (
         "Latest",
         (
-            ("Previous full night", "last-night"),
-            ("Past week", "past-week"),
-            ("Feed", "feed"),
-            ("Recent", "recent"),
+            ("Previous full night", "dashboard", "last-night"),
+            ("Past week", "dashboard", "past-week"),
+            ("Feed", "dashboard", "feed"),
+            ("Recent", "dashboard", "recent"),
         ),
     ),
     (
         "Network",
         (
-            ("Stations", "stations"),
-            ("Accumulation", "accumulation"),
+            ("Stations", "dashboard", "stations"),
+            ("Accumulation", "dashboard", "accumulation"),
         ),
     ),
     (
         "Season",
         (
-            ("First arrivals", "pulses"),
-            ("Trends", "trends"),
+            ("First arrivals", "dashboard", "pulses"),
+            ("Trends", "dashboard", "trends"),
+        ),
+    ),
+    (
+        "Archive",
+        (
+            ("Archive overview", "archive", "main"),
+            ("First records", "archive", "archive-pulses"),
+            ("Daily calendar", "archive", "archive-calendar"),
+            ("Flagged firsts", "archive", "archive-records"),
+            ("Unique moths", "archive", "archive-unique"),
+            ("Species comparison", "archive", "archive-species"),
         ),
     ),
 )
@@ -182,13 +197,54 @@ def _grouped_section_nav(
     )
 
 
-def _history_section_nav(index_href: str = "", *, active_tracking: bool = False) -> str:
-    """Render navigation for the History dashboard sections."""
-    return _grouped_section_nav(
-        HISTORY_NAV_GROUPS,
-        "History sections",
-        anchor_prefix=index_href,
-        active_tracking=active_tracking,
+def _history_section_nav(
+    index_href: str = "",
+    *,
+    current_page: str = "dashboard",
+    active_tracking: bool = False,
+) -> str:
+    """Render the complete History navigation with page-correct destinations."""
+    archive_href = (
+        f"{index_href[:-len('index.html')]}archive.html"
+        if index_href.endswith("index.html")
+        else "archive.html"
+    )
+
+    def href(page: str, section_id: str) -> str:
+        if page == current_page:
+            return f"#{section_id}"
+        base = index_href if page == "dashboard" else archive_href
+        return f"{base}#{section_id}"
+
+    groups = tuple(
+        (
+            group_label,
+            tuple((label, href(page, section_id)) for label, page, section_id in items),
+        )
+        for group_label, items in HISTORY_NAV_DESTINATIONS
+    )
+    group_markup = []
+    for group_label, items in groups:
+        if len(items) == 1:
+            _, item_href = items[0]
+            group_markup.append(
+                f'<span class="section-nav-group section-nav-group-single" '
+                f'role="group" aria-label="{h(group_label)}">'
+                f'<a href="{h(item_href)}">{h(group_label)}</a></span>'
+            )
+            continue
+        links = "".join(
+            f'<a href="{h(item_href)}">{h(label)}</a>' for label, item_href in items
+        )
+        group_markup.append(
+            f'<span class="section-nav-group" role="group" aria-label="{h(group_label)}">'
+            f'<span class="section-nav-group-label" aria-hidden="true">{h(group_label)}</span>'
+            f"{links}</span>"
+        )
+    tracking = " data-dashboard-section-nav" if active_tracking else ""
+    return (
+        f'<nav class="section-nav section-nav-grouped" '
+        f'aria-label="History sections"{tracking}>{"".join(group_markup)}</nav>'
     )
 
 
@@ -2558,7 +2614,7 @@ def _archive_page(
         <a class="brand" href="index.html"><span class="brand-mark" aria-hidden="true"></span><span>Moth stations</span></a>
         {_mode_toggle("index.html", "live.html", "history")}
       </div>
-      {_history_section_nav("index.html")}
+      {_history_section_nav("index.html", current_page="archive", active_tracking=True)}
     </div>
   </header>
   <main id="main" class="site-shell">

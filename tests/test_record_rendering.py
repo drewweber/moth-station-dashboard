@@ -44,21 +44,32 @@ def records(count: int) -> list[dict]:
 
 class RecordRenderingTests(unittest.TestCase):
     def test_page_navigation_uses_relevant_sections(self) -> None:
-        history_nav = _history_section_nav("../index.html", active_tracking=True)
+        history_nav = _history_section_nav(active_tracking=True)
+        archive_nav = _history_section_nav(
+            "index.html", current_page="archive", active_tracking=True
+        )
         station_nav = _station_section_nav(active_tracking=True)
         live_nav = _live_section_nav()
 
         self.assertIn('aria-label="History sections"', history_nav)
-        self.assertIn('href="../index.html#last-night"', history_nav)
-        self.assertNotIn('href="../index.html#species"', history_nav)
+        self.assertIn('href="#last-night"', history_nav)
+        self.assertIn('href="archive.html#archive-calendar"', history_nav)
+        self.assertIn('href="archive.html#archive-species"', history_nav)
         self.assertIn("data-dashboard-section-nav", history_nav)
         self.assertIn('aria-label="Latest"', history_nav)
         self.assertIn('aria-label="Season"', history_nav)
+        self.assertIn('aria-label="Archive"', history_nav)
         self.assertLess(history_nav.index("#last-night"), history_nav.index("#feed"))
         self.assertLess(history_nav.index("#recent"), history_nav.index("#stations"))
-        self.assertNotIn("#calendar", history_nav)
-        self.assertNotIn("#records", history_nav)
         self.assertLess(history_nav.index("#pulses"), history_nav.index("#trends"))
+        self.assertLess(history_nav.index("#trends"), history_nav.index("#archive-pulses"))
+
+        self.assertIn('href="index.html#last-night"', archive_nav)
+        self.assertIn('href="#archive-calendar"', archive_nav)
+        self.assertIn('href="#archive-species"', archive_nav)
+        self.assertIn('aria-label="Latest"', archive_nav)
+        self.assertIn('aria-label="Archive"', archive_nav)
+        self.assertIn("data-dashboard-section-nav", archive_nav)
 
         self.assertIn('aria-label="Station profile sections"', station_nav)
         self.assertIn('href="#station-story"', station_nav)
