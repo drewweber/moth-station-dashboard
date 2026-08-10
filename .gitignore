@@ -5,11 +5,13 @@ __pycache__/
 data/*.db
 data/*.db-*
 public/index.html
+public/archive.html
 public/live.html
 public/forecast-validation.html
 public/live-snapshot.json
 public/insights.json
 public/trends.json
+public/assets/
 public/stations/
 logs/
 .cache/

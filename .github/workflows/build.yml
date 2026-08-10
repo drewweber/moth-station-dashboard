@@ -47,9 +47,13 @@ jobs:
           python -m mothdash init-db
           python -m mothdash render
           test -s public/index.html
+          test -s public/archive.html
           test -s public/live.html
           test -s public/forecast-validation.html
           test -s public/live-snapshot.json
+          test -s public/assets/dashboard.css
+          test -s public/assets/dashboard.js
+          test -s public/assets/live.js
 
   build-and-deploy:
     # Forks receive the validation job above, but never receive our iNaturalist
