@@ -16,6 +16,7 @@ from .analysis import (
     dashboard_insights,
     first_of_season,
     forecast_validation_summary,
+    render_row_cache,
     generated_at,
     diversify_by_station,
     habitat_summary,
@@ -90,12 +91,9 @@ HISTORY_NAV_GROUPS = (
         "Season",
         (
             ("First arrivals", "pulses"),
-            ("Calendar", "calendar"),
             ("Trends", "trends"),
         ),
     ),
-    ("Finds", (("Firsts", "records"), ("Unique", "unique"))),
-    ("Explore", (("Species", "species"),)),
 )
 
 STATION_NAV_GROUPS = (
@@ -1785,7 +1783,7 @@ def _forecast_validation_page(validation: dict[str, Any]) -> str:
   <title>Forecast validation · Moth Station Dashboard</title>
   <meta name="description" content="Internal validation of two-week moth-station targets.">
   <meta name="theme-color" content="#151611">
-  <style>{CSS}</style>
+  <link rel="stylesheet" href="assets/dashboard.css">
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to forecast validation</a>
@@ -2525,6 +2523,114 @@ def _trend_section(trends: dict[str, Any], stations: list[Station]) -> str:
     """
 
 
+def _archive_page(
+    *,
+    year: int | None,
+    pulses: list[dict[str, Any]],
+    all_time_pulses: list[dict[str, Any]],
+    year_calendar: list[dict[str, Any]],
+    all_time_calendar: list[dict[str, Any]],
+    records: list[dict[str, Any]],
+    uniques: list[dict[str, Any]],
+    taxa: list[dict[str, Any]],
+    year_taxa: list[dict[str, Any]],
+    recent_week_taxa: list[dict[str, Any]],
+    latest_night_taxa: list[dict[str, Any]],
+    stations: list[Station],
+) -> str:
+    """Render long-lived reference tables away from the dashboard landing page."""
+    current_year_label = h(year) if year else "Current"
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Moth Station Data Archive</title>
+  <meta name="description" content="Full reference tables for the Moth Station Dashboard.">
+  <meta name="theme-color" content="#151611">
+  <link rel="stylesheet" href="assets/dashboard.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to archive</a>
+  <header>
+    <div class="topbar">
+      <div class="topbar-primary">
+        <a class="brand" href="index.html"><span class="brand-mark" aria-hidden="true"></span><span>Moth stations</span></a>
+        {_mode_toggle("index.html", "live.html", "history")}
+      </div>
+      {_history_section_nav("index.html")}
+    </div>
+  </header>
+  <main id="main" class="site-shell">
+    <div class="validation-intro">
+      <p class="eyebrow">full reference views</p>
+      <h1>Data archive</h1>
+      <p>Complete tables and long-term views live here so the dashboard stays quick to open. These use the same build-time cache and definitions as the dashboard.</p>
+      <p><a class="footer-utility-link" href="index.html">Return to the dashboard overview</a></p>
+    </div>
+    <section id="archive-pulses">
+      <div class="section-head">
+        <h2>First-of-season records</h2>
+        <p>All tracked multi-station first-of-season comparisons. First-session dates use moth session dates, with records before noon assigned to the previous evening.</p>
+      </div>
+      {_view_toggle("First arrival archive view", ("archive-pulse-year", f"{current_year_label} season"), ("archive-pulse-all-time", "All time"))}
+      <div class="view-panel" id="archive-pulse-year"><div class="table-wrap">{_pulse_table(pulses, stations)}</div></div>
+      <div class="view-panel" id="archive-pulse-all-time" hidden><div class="table-wrap">{_pulse_table(all_time_pulses, stations)}</div></div>
+    </section>
+    <section id="archive-calendar">
+      <div class="section-head">
+        <h2>Daily species calendar</h2>
+        <p>Station cells show unique moth species per station per night. The total column is the network species union, not a sum of station counts.</p>
+      </div>
+      {_view_toggle("Calendar archive view", ("archive-calendar-year", f"{current_year_label} dates"), ("archive-calendar-all-years", "All years"))}
+      <div class="view-panel" id="archive-calendar-year">
+        {_daily_species_line_chart(year_calendar, stations, "year")}
+        <div class="table-wrap">{_calendar_table(year_calendar, stations, "year")}</div>
+      </div>
+      <div class="view-panel" id="archive-calendar-all-years" hidden>
+        {_daily_species_line_chart(all_time_calendar, stations, "all")}
+        <div class="table-wrap">{_calendar_table(all_time_calendar, stations, "all")}</div>
+      </div>
+    </section>
+    <section id="archive-records">
+      <div class="section-head">
+        <h2>Flagged firsts</h2>
+        <p>County, state, and tracked-network firsts. Filter by type or location to inspect the complete cached record set.</p>
+      </div>
+      {_record_filters(stations)}
+      <div class="record-grid" data-record-grid>{_record_cards(records)}</div>
+      <div class="record-grid-controls" data-record-grid-controls hidden>
+        <span data-record-grid-count aria-live="polite"></span>
+        <button type="button" data-record-grid-expand data-page-size="{RECORD_CARD_PREVIEW_LIMIT}">Show all matching photos</button>
+      </div>
+      <div class="table-wrap">{_record_table(records)}</div>
+    </section>
+    <section id="archive-unique">
+      <div class="section-head">
+        <h2>Moths unique to one station</h2>
+        <p>These species currently appear at only one tracked station, which can reflect habitat, effort, observer focus, or upload timing.</p>
+      </div>
+      {_unique_station_sections(uniques, stations)}
+    </section>
+    <section id="archive-species">
+      <div class="section-head">
+        <h2>Station species comparison</h2>
+        <p>Each cell shows observation count, first session date, and any county, state, or tracked-station first flags.</p>
+      </div>
+      {_view_toggle("Species comparison archive view", ("archive-species-all-time", "All time"), ("archive-species-year", f"{current_year_label} only"), ("archive-species-past-week", "Past week"), ("archive-species-last-night", "Previous full night"))}
+      <div class="view-panel" id="archive-species-all-time"><div class="table-wrap">{_comparison_table(taxa, stations)}</div></div>
+      <div class="view-panel" id="archive-species-year" hidden><div class="table-wrap">{_comparison_table(year_taxa, stations)}</div></div>
+      <div class="view-panel" id="archive-species-past-week" hidden><div class="table-wrap">{_comparison_table(recent_week_taxa, stations)}</div></div>
+      <div class="view-panel" id="archive-species-last-night" hidden><div class="table-wrap">{_comparison_table(latest_night_taxa, stations)}</div></div>
+    </section>
+  </main>
+  <footer><div>Generated {h(generated_at())}. <a class="footer-utility-link" href="index.html">Dashboard overview</a></div></footer>
+  <script src="assets/dashboard.js" defer></script>
+</body>
+</html>
+"""
+
+
 SENSITIVE_LIVE_QUERY_KEYS = {
     "lat",
     "lng",
@@ -2627,7 +2733,7 @@ def _station_profile_page(station: Station, profile: dict[str, Any], recap: dict
   <title>{h(station.name)} · Moth Station Dashboard</title>
   <meta name="description" content="Station profile for {h(station.name)} in the moth stations dashboard.">
   <meta name="theme-color" content="#151611">
-  <style>{CSS}</style>
+  <link rel="stylesheet" href="../assets/dashboard.css">
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to station profile</a>
@@ -2744,7 +2850,7 @@ def _station_profile_page(station: Station, profile: dict[str, Any], recap: dict
     </section>
   </main>
   <footer><div>Generated {h(generated_at())}. Station profiles are generated from the synced iNaturalist observation cache.</div></footer>
-  <script>{DASHBOARD_JS}</script>
+  <script src="../assets/dashboard.js" defer></script>
 </body>
 </html>
 """
@@ -2760,7 +2866,7 @@ def _station_habitat_page(station: Station, habitat: dict[str, Any], color: str)
   <title>Habitat archive · {h(station.name)} · Moth Station Dashboard</title>
   <meta name="description" content="Documented moth host-plant associations for {h(station.name)}.">
   <meta name="theme-color" content="#151611">
-  <style>{CSS}</style>
+  <link rel="stylesheet" href="../assets/dashboard.css">
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to habitat archive</a>
@@ -4551,7 +4657,7 @@ def _live_page(live_snapshot: dict) -> str:
       </div>
     </section>
   </main>
-  <script>{LIVE_JS}</script>
+  <script src="assets/live.js" defer></script>
 </body>
 </html>
 """
@@ -7570,6 +7676,12 @@ footer div {
 
 
 def render(settings: Settings, stations: list[Station], output: Path | None = None) -> Path:
+    """Render one site from a consistent in-process observation snapshot."""
+    with render_row_cache():
+        return _render(settings, stations, output)
+
+
+def _render(settings: Settings, stations: list[Station], output: Path | None = None) -> Path:
     init_db(settings.database)
     output = output or settings.public_dir / "index.html"
     settings.public_dir.mkdir(parents=True, exist_ok=True)
@@ -7606,7 +7718,7 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
   <title>Moth Station Dashboard</title>
   <meta name="description" content="Compare recent moth observations and first-of-season records across iNaturalist stations.">
   <meta name="theme-color" content="#151611">
-  <style>{CSS}</style>
+  <link rel="stylesheet" href="assets/dashboard.css">
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to dashboard</a>
@@ -7689,27 +7801,7 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
         <p>Species appearing at two or more stations are grouped by how tightly their first session dates line up. Switch to all-time to compare first arrivals across the full station history.</p>
       </div>
       <div class="pulse-grid">{_pulse_cards(pulses)}</div>
-      {_view_toggle("First arrival view", ("pulse-year", f"{year} season" if year else "Current season"), ("pulse-all-time", "All time"))}
-      <div class="view-panel" id="pulse-year"><div class="table-wrap">{_pulse_table(pulses, stations)}</div></div>
-      <div class="view-panel" id="pulse-all-time" hidden><div class="table-wrap">{_pulse_table(all_time_pulses, stations)}</div></div>
-    </section>
-
-    <section id="calendar">
-      <div class="section-head">
-        <h2>Daily species calendar</h2>
-        <p>Station cells show unique moth species per station per night. The total column is the unique species union across stations, not a sum of site counts.</p>
-      </div>
-      {_view_toggle("Calendar view", ("calendar-year", f"{year} dates" if year else "Current dates"), ("calendar-all-years", "All years"))}
-      <div class="view-panel" id="calendar-year">
-        <div class="calendar-line-head"><h3>Daily richness by contribution</h3><p>Each bar totals the network species union. Color shows species only found at one station; gray shows species shared by multiple stations.</p></div>
-        {_daily_species_line_chart(year_calendar, stations, "year")}
-        <div class="table-wrap">{_calendar_table(year_calendar, stations, "year")}</div>
-      </div>
-      <div class="view-panel" id="calendar-all-years" hidden>
-        <div class="calendar-line-head"><h3>Daily richness by contribution</h3><p>Same calendar dates are combined across synced years. Each bar totals the network species union, split into station-only and shared species.</p></div>
-        {_daily_species_line_chart(all_time_calendar, stations, "all")}
-        <div class="table-wrap">{_calendar_table(all_time_calendar, stations, "all")}</div>
-      </div>
+      <p><a class="footer-utility-link" href="archive.html#archive-pulses">Browse all first-of-season comparisons</a></p>
     </section>
 
     <section id="trends">
@@ -7720,45 +7812,16 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
       {_trend_section(trends, stations)}
     </section>
 
-    <section id="records" class="section-chapter-start" data-chapter="Finds">
+    <section id="archive" class="section-chapter-start" data-chapter="Explore">
       <div class="section-head">
-        <h2>Recent firsts</h2>
-        <p>The newest county, state, and tracked-network firsts, ordered by observation date. Filter by type or location to see everything that matches, not just the newest batch.</p>
+        <h2>Full data archive</h2>
+        <p>Long-term tables, daily richness, flagged firsts, station-unique lists, and the complete species comparison are available on a separate page so the dashboard stays quick to load.</p>
       </div>
-      {_record_filters(stations)}
-      <div class="record-grid" data-record-grid>{_record_cards(records)}</div>
-      <div class="record-grid-controls" data-record-grid-controls hidden>
-        <span data-record-grid-count aria-live="polite"></span>
-        <button type="button" data-record-grid-expand data-page-size="{RECORD_CARD_PREVIEW_LIMIT}">Show all matching photos</button>
-      </div>
-      <details class="record-archive">
-        <summary>Browse all flagged firsts ({h(len(records))})</summary>
-        <div class="table-wrap">{_record_table(records)}</div>
-      </details>
-    </section>
-
-    <section id="unique">
-      <div class="section-head">
-        <h2>Moths unique to one station</h2>
-        <p>These species currently appear at only one tracked station, which can reflect habitat, effort, observer focus, or upload timing.</p>
-      </div>
-      {_unique_station_sections(uniques, stations)}
-    </section>
-
-    <section id="species" class="section-chapter-start" data-chapter="Explore">
-      <div class="section-head">
-        <h2>Station species comparison</h2>
-        <p>Each cell shows the observation count, first session date, and any county, state, or tracked-station first flags. Default sort favors species found across the most stations.</p>
-      </div>
-      {_view_toggle("Species comparison view", ("species-all-time", "All time"), ("species-year", f"{year} only" if year else "Current year"), ("species-past-week", "Past week"), ("species-last-night", "Previous full night"))}
-      <div class="view-panel" id="species-all-time"><div class="table-wrap">{_comparison_table(taxa, stations)}</div></div>
-      <div class="view-panel" id="species-year" hidden><div class="table-wrap">{_comparison_table(year_taxa, stations)}</div></div>
-      <div class="view-panel" id="species-past-week" hidden><div class="table-wrap">{_comparison_table(recent_week_taxa, stations)}</div></div>
-      <div class="view-panel" id="species-last-night" hidden><div class="table-wrap">{_comparison_table(latest_night_taxa, stations)}</div></div>
+      <p><a class="footer-utility-link" href="archive.html">Open the complete data archive</a></p>
     </section>
   </main>
-  <footer><div>Generated {h(generated_at())}. First-of-season dates use moth session dates, with records before noon assigned to the previous evening. <a class="footer-utility-link" href="forecast-validation.html">Forecast validation</a></div></footer>
-  <script>{DASHBOARD_JS}</script>
+  <footer><div>Generated {h(generated_at())}. First-of-season dates use moth session dates, with records before noon assigned to the previous evening. <a class="footer-utility-link" href="archive.html">Data archive</a> <a class="footer-utility-link" href="forecast-validation.html">Forecast validation</a></div></footer>
+  <script src="assets/dashboard.js" defer></script>
 </body>
 </html>
 """
@@ -7782,6 +7845,28 @@ def render(settings: Settings, stations: list[Station], output: Path | None = No
     )
     (settings.public_dir / "forecast-validation.html").write_text(
         _forecast_validation_page(forecast_validation),
+        encoding="utf-8",
+    )
+    assets_dir = settings.public_dir / "assets"
+    assets_dir.mkdir(parents=True, exist_ok=True)
+    (assets_dir / "dashboard.css").write_text(CSS, encoding="utf-8")
+    (assets_dir / "dashboard.js").write_text(DASHBOARD_JS, encoding="utf-8")
+    (assets_dir / "live.js").write_text(LIVE_JS, encoding="utf-8")
+    (settings.public_dir / "archive.html").write_text(
+        _archive_page(
+            year=year,
+            pulses=pulses,
+            all_time_pulses=all_time_pulses,
+            year_calendar=year_calendar,
+            all_time_calendar=all_time_calendar,
+            records=records,
+            uniques=uniques,
+            taxa=taxa,
+            year_taxa=year_taxa,
+            recent_week_taxa=recent_week_taxa,
+            latest_night_taxa=latest_night_taxa,
+            stations=stations,
+        ),
         encoding="utf-8",
     )
     stations_dir = settings.public_dir / "stations"

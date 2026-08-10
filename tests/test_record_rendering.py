@@ -8,6 +8,7 @@ from mothdash.render import (
     RECORD_CARD_PREVIEW_LIMIT,
     RECORD_TABLE_PAGE_SIZE,
     _daily_species_line_chart,
+    _archive_page,
     _forecast_validation,
     _forecast_validation_page,
     _history_section_nav,
@@ -49,14 +50,15 @@ class RecordRenderingTests(unittest.TestCase):
 
         self.assertIn('aria-label="History sections"', history_nav)
         self.assertIn('href="../index.html#last-night"', history_nav)
-        self.assertIn('href="../index.html#species"', history_nav)
+        self.assertNotIn('href="../index.html#species"', history_nav)
         self.assertIn("data-dashboard-section-nav", history_nav)
         self.assertIn('aria-label="Latest"', history_nav)
         self.assertIn('aria-label="Season"', history_nav)
         self.assertLess(history_nav.index("#last-night"), history_nav.index("#feed"))
         self.assertLess(history_nav.index("#recent"), history_nav.index("#stations"))
-        self.assertLess(history_nav.index("#trends"), history_nav.index("#records"))
-        self.assertLess(history_nav.index("#unique"), history_nav.index("#species"))
+        self.assertNotIn("#calendar", history_nav)
+        self.assertNotIn("#records", history_nav)
+        self.assertLess(history_nav.index("#pulses"), history_nav.index("#trends"))
 
         self.assertIn('aria-label="Station profile sections"', station_nav)
         self.assertIn('href="#station-story"', station_nav)
@@ -98,6 +100,7 @@ class RecordRenderingTests(unittest.TestCase):
         self.assertIn('class="switch-track"', page)
         self.assertIn('class="live-actions"', page)
         self.assertNotIn("10-minute iNaturalist check", page)
+        self.assertIn('src="assets/live.js" defer', page)
         self.assertIn(".switch-track", page)
         self.assertIn("refresh every 10 minutes", page)
         self.assertIn('id="live-new-species-counter"', page)
@@ -180,6 +183,29 @@ class RecordRenderingTests(unittest.TestCase):
         self.assertIn("scrollIntoView", DASHBOARD_JS)
         self.assertIn("nearPageBottom", DASHBOARD_JS)
         self.assertIn("nearPageBottom", LIVE_JS)
+
+    def test_data_archive_keeps_full_reference_views_off_the_dashboard_landing_page(self) -> None:
+        page = _archive_page(
+            year=2026,
+            pulses=[],
+            all_time_pulses=[],
+            year_calendar=[],
+            all_time_calendar=[],
+            records=[],
+            uniques=[],
+            taxa=[],
+            year_taxa=[],
+            recent_week_taxa=[],
+            latest_night_taxa=[],
+            stations=[],
+        )
+
+        self.assertIn("Data archive", page)
+        self.assertIn("same build-time cache and definitions", page)
+        self.assertIn('id="archive-calendar"', page)
+        self.assertIn('id="archive-records"', page)
+        self.assertIn('id="archive-species"', page)
+        self.assertIn('href="index.html"', page)
 
     def test_seasonal_target_list_identifies_local_date_evidence(self) -> None:
         html = _seasonal_target_list(
