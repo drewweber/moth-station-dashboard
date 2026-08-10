@@ -16,6 +16,7 @@ from .analysis import (
     dashboard_insights,
     first_of_season,
     forecast_validation_summary,
+    render_row_cache,
     generated_at,
     diversify_by_station,
     habitat_summary,
@@ -7675,6 +7676,12 @@ footer div {
 
 
 def render(settings: Settings, stations: list[Station], output: Path | None = None) -> Path:
+    """Render one site from a consistent in-process observation snapshot."""
+    with render_row_cache():
+        return _render(settings, stations, output)
+
+
+def _render(settings: Settings, stations: list[Station], output: Path | None = None) -> Path:
     init_db(settings.database)
     output = output or settings.public_dir / "index.html"
     settings.public_dir.mkdir(parents=True, exist_ok=True)

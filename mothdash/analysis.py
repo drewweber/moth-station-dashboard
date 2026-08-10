@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from contextlib import contextmanager
 from datetime import date, datetime, time, timedelta
 from functools import lru_cache
 from pathlib import Path
@@ -13,6 +14,24 @@ from zoneinfo import ZoneInfo
 from .config import Settings
 from .db import connect
 from .regional import cached_regional_watchlist, regional_reference_date
+
+
+# Render operations assemble many independent views from one immutable
+# observation snapshot. This cache is deliberately process- and render-scoped:
+# it is never used by sync commands and is cleared when rendering finishes.
+_render_rows_cache: dict[Settings, list[dict[str, Any]]] | None = None
+
+
+@contextmanager
+def render_row_cache() -> Any:
+    """Reuse the observation snapshot while one static site is rendered."""
+    global _render_rows_cache
+    previous = _render_rows_cache
+    _render_rows_cache = {}
+    try:
+        yield
+    finally:
+        _render_rows_cache = previous
 
 
 def parse_date(value: str | None) -> date | None:
@@ -88,6 +107,10 @@ def _label(row: dict[str, Any]) -> str:
 
 
 def load_rows(settings: Settings) -> list[dict[str, Any]]:
+    if _render_rows_cache is not None:
+        cached = _render_rows_cache.get(settings)
+        if cached is not None:
+            return cached
     with connect(settings.database) as conn:
         rows = conn.execute(
             """
@@ -106,6 +129,8 @@ def load_rows(settings: Settings) -> list[dict[str, Any]]:
             settings.session_cutoff_hour,
         )
         row["label"] = _label(row)
+    if _render_rows_cache is not None:
+        _render_rows_cache[settings] = out
     return out
 
 
@@ -2637,6 +2662,33 @@ def _host_species_key(host: dict[str, str]) -> tuple[str, str] | None:
     return (genus.casefold(), species.casefold())
 
 
+@lru_cache(maxsize=1)
+def _host_reference_catalog() -> tuple[
+    dict[str, set[str]], dict[tuple[str, str], set[str]]
+]:
+    """Build the immutable host reference indexes once per render process.
+
+    Forecast validation evaluates many historical checkpoints. The host-plant
+    dataset does not vary by checkpoint, so rebuilding these indexes inside
+    every ranking wastes CPU without changing the evidence or its scores.
+    """
+    host_data = _load_host_plants()
+    species_hosts: dict[str, list[dict[str, str]]] = host_data.get("species", {})
+    match_level: dict[str, str] = host_data.get("match_level", {})
+    genus_catalog: dict[str, set[str]] = defaultdict(set)
+    plant_catalog: dict[tuple[str, str], set[str]] = defaultdict(set)
+    for name, hosts in species_hosts.items():
+        if match_level.get(name) != "species":
+            continue
+        for host in _dedupe_hosts(hosts):
+            if host["genus"]:
+                genus_catalog[host["genus"]].add(name)
+            plant_key = _host_species_key(host)
+            if plant_key:
+                plant_catalog[plant_key].add(name)
+    return genus_catalog, plant_catalog
+
+
 def _add_target_host_matches(
     targets: list[dict[str, Any]],
     taxa: list[dict[str, Any]],
@@ -2669,17 +2721,7 @@ def _add_target_host_matches(
 
     confirmed_by_genus: dict[str, set[str]] = defaultdict(set)
     confirmed_by_plant: dict[tuple[str, str], set[str]] = defaultdict(set)
-    genus_catalog: dict[str, set[str]] = defaultdict(set)
-    plant_catalog: dict[tuple[str, str], set[str]] = defaultdict(set)
-    for name, hosts in species_hosts.items():
-        if match_level.get(name) != "species":
-            continue
-        for host in _dedupe_hosts(hosts):
-            if host["genus"]:
-                genus_catalog[host["genus"]].add(name)
-            plant_key = _host_species_key(host)
-            if plant_key:
-                plant_catalog[plant_key].add(name)
+    genus_catalog, plant_catalog = _host_reference_catalog()
 
     for taxon in taxa:
         if station_id not in taxon.get("stations", {}):
