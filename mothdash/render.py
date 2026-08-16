@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from datetime import date, datetime
 from html import escape
 from pathlib import Path
@@ -7973,6 +7974,9 @@ def _render(settings: Settings, stations: list[Station], output: Path | None = N
     stations_dir.mkdir(parents=True, exist_ok=True)
     station_colors = _station_color_map(stations)
     forecast_snapshot_at = datetime.now(ZoneInfo(settings.timezone))
+    forecast_deployment_channel = (
+        os.environ.get("MOTHDASH_DEPLOYMENT_CHANNEL", "local").strip() or "local"
+    )
     for station in stations:
         if not station.enabled:
             continue
@@ -7982,6 +7986,7 @@ def _render(settings: Settings, stations: list[Station], output: Path | None = N
             station.id,
             profile["seasonal_targets"],
             snapshot_at=forecast_snapshot_at,
+            deployment_channel=forecast_deployment_channel,
         )
         recap = weekly_recap(settings, station.id)
         habitat = habitat_summary(settings, station.id, taxa)

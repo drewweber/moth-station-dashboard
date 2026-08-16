@@ -1920,6 +1920,7 @@ def store_forecast_snapshot(
     targets: dict[str, Any],
     *,
     snapshot_at: datetime | None = None,
+    deployment_channel: str = "production",
 ) -> None:
     """Persist the exact target list rendered for a station at build time."""
     reference_day = targets.get("reference_day")
@@ -1940,8 +1941,9 @@ def store_forecast_snapshot(
         cursor = conn.execute(
             """
             INSERT INTO forecast_runs (
-                snapshot_at, station_id, reference_day, window_end, source, target_count
-            ) VALUES (?,?,?,?,?,?)
+                snapshot_at, station_id, reference_day, window_end, source,
+                target_count, deployment_channel
+            ) VALUES (?,?,?,?,?,?,?)
             """,
             (
                 snapshot_text,
@@ -1950,6 +1952,7 @@ def store_forecast_snapshot(
                 window_end.isoformat(),
                 str(targets.get("source") or "unknown"),
                 len(items),
+                deployment_channel,
             ),
         )
         forecast_run_id = int(cursor.lastrowid)
@@ -2005,6 +2008,7 @@ def _published_forecast_validation(
             FROM forecast_runs
             WHERE station_id = ?
               AND window_end < ?
+              AND deployment_channel = 'production'
             ORDER BY reference_day, snapshot_at
             """,
             (station_id, reference_day.isoformat()),

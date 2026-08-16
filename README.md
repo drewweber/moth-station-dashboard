@@ -94,6 +94,10 @@ proof that an individual record was a sheet capture. Validation measures new
 tracked-source records and reports the unadjusted seasonal order alongside the
 sheet-time production order.
 
+Forecast snapshots record their deployment channel. Only lists issued by a
+production build enter the prospective scorecard; local renders and Cloudflare
+preview deployments cannot be mistaken for published predictions.
+
 The initial cache fill is deliberately comprehensive. It stores counts by
 calendar day, so later daily builds reuse the overlapping 13 days and fetch
 only the newly entering day. This keeps routine GitHub Actions and iNaturalist

@@ -1,5 +1,6 @@
 from datetime import date, datetime
 from pathlib import Path
+import sqlite3
 from tempfile import TemporaryDirectory
 import unittest
 from unittest import mock
@@ -971,6 +972,74 @@ class SpeciesSemanticsTests(unittest.TestCase):
         self.assertEqual(legacy["target_hits"], 1)
         self.assertEqual(legacy["caught_new_species"], 1)
         self.assertEqual(validation["seasonal-only"]["available_snapshots"], 0)
+
+    def test_published_forecast_validation_ignores_preview_snapshots(self) -> None:
+        preview_targets = {
+            "reference_day": date(2026, 7, 6),
+            "source": "nearby-inaturalist",
+            "items": [{"taxon_id": 404, "label": "Preview Target"}],
+        }
+        store_forecast_snapshot(
+            self.settings,
+            "station-a",
+            preview_targets,
+            snapshot_at=datetime(2026, 7, 6, 12, tzinfo=ZoneInfo("America/New_York")),
+            deployment_channel="preview",
+        )
+
+        validation = _published_forecast_validation(
+            self.settings,
+            load_rows(self.settings),
+            "station-a",
+            date(2026, 7, 22),
+        )
+
+        self.assertEqual(validation["legacy"]["available_snapshots"], 0)
+        with connect(self.settings.database) as conn:
+            channel = conn.execute(
+                "SELECT deployment_channel FROM forecast_runs"
+            ).fetchone()["deployment_channel"]
+        self.assertEqual(channel, "preview")
+
+    def test_init_db_marks_existing_forecast_runs_as_legacy(self) -> None:
+        legacy_database = Path(self.temporary_directory.name) / "legacy.db"
+        with sqlite3.connect(legacy_database) as conn:
+            conn.execute(
+                """
+                CREATE TABLE forecast_runs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    snapshot_at TEXT NOT NULL,
+                    station_id TEXT NOT NULL,
+                    reference_day TEXT NOT NULL,
+                    window_end TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    target_count INTEGER NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                """
+                INSERT INTO forecast_runs (
+                    snapshot_at, station_id, reference_day, window_end,
+                    source, target_count
+                ) VALUES ('2026-07-01T12:00:00-04:00', 'station-a',
+                          '2026-07-01', '2026-07-15', 'legacy-test', 10)
+                """
+            )
+
+        init_db(legacy_database)
+        init_db(legacy_database)
+
+        with connect(legacy_database) as conn:
+            columns = {
+                row["name"] for row in conn.execute("PRAGMA table_info(forecast_runs)")
+            }
+            channel = conn.execute(
+                "SELECT deployment_channel FROM forecast_runs"
+            ).fetchone()["deployment_channel"]
+
+        self.assertIn("deployment_channel", columns)
+        self.assertEqual(channel, "legacy")
 
     def test_published_forecast_validation_compares_saved_ranking_variants(self) -> None:
         with connect(self.settings.database) as conn:
