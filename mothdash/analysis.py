@@ -1253,6 +1253,87 @@ def _seasonal_offset(day: date, reference_day: date) -> int:
 
 
 UPCOMING_MOTH_LIMIT = 10
+SHEET_TIME_START_HOUR = 18
+SHEET_TIME_END_HOUR = 10
+SHEET_TIME_MIN_EVIDENCE = 4
+SHEET_TIME_MAX_NIGHT_SHARE = 0.5
+
+
+def _is_sheet_time_observation(
+    row: dict[str, Any],
+    station_context: dict[str, dict[str, Any]],
+    default_timezone: str,
+) -> bool:
+    """Return whether an exact observation time falls in the sheet-time proxy."""
+    observed_at = parse_timestamp(row.get("observed_at"))
+    if observed_at is None:
+        return False
+    source = station_context.get(str(row.get("station_id")), {})
+    timezone = str(source.get("timezone") or default_timezone)
+    zone = ZoneInfo(timezone)
+    if observed_at.tzinfo is None:
+        local_observed_at = observed_at.replace(tzinfo=zone)
+    else:
+        local_observed_at = observed_at.astimezone(zone)
+    return (
+        local_observed_at.hour >= SHEET_TIME_START_HOUR
+        or local_observed_at.hour < SHEET_TIME_END_HOUR
+    )
+
+
+def _sheet_time_evidence(
+    rows: list[dict[str, Any]],
+    station_context: dict[str, dict[str, Any]],
+    default_timezone: str,
+) -> dict[int, dict[str, int]]:
+    """Count pre-existing records at hours compatible with a light sheet.
+
+    iNaturalist does not consistently store survey method for these sources.
+    Exact observation time is therefore used only as a conservative negative
+    signal: a species with several timed records dominated by daytime records
+    is moved behind otherwise comparable seasonal candidates. This must not be
+    presented as proof that any individual record came from a sheet.
+    """
+    evidence: dict[int, dict[str, int]] = defaultdict(
+        lambda: {"timed_records": 0, "sheet_time_records": 0}
+    )
+    for row in rows:
+        taxon_id = row.get("taxon_id")
+        if taxon_id is None or not is_species(row):
+            continue
+        if parse_timestamp(row.get("observed_at")) is None:
+            continue
+        item = evidence[int(taxon_id)]
+        item["timed_records"] += 1
+        if _is_sheet_time_observation(row, station_context, default_timezone):
+            item["sheet_time_records"] += 1
+    return dict(evidence)
+
+
+def _sheet_time_order(
+    seasonal_items: list[dict[str, Any]],
+    evidence: dict[int, dict[str, int]],
+) -> list[dict[str, Any]]:
+    """Preserve seasonal order while demoting well-evidenced daytime taxa."""
+    ordered = []
+    for seasonal_order, item in enumerate(seasonal_items):
+        counts = evidence.get(int(item["taxon_id"]), {})
+        timed_records = int(counts.get("timed_records") or 0)
+        sheet_time_records = int(counts.get("sheet_time_records") or 0)
+        sheet_time_share = (
+            sheet_time_records / timed_records if timed_records else None
+        )
+        day_biased = bool(
+            timed_records >= SHEET_TIME_MIN_EVIDENCE
+            and sheet_time_share is not None
+            and sheet_time_share <= SHEET_TIME_MAX_NIGHT_SHARE
+        )
+        item["timed_records"] = timed_records
+        item["sheet_time_records"] = sheet_time_records
+        item["sheet_time_share"] = sheet_time_share
+        item["day_biased_evidence"] = day_biased
+        ordered.append((day_biased, seasonal_order, item))
+    return [item for _, _, item in sorted(ordered, key=lambda row: row[:2])]
 
 
 def _station_seasonal_targets(
@@ -1263,6 +1344,7 @@ def _station_seasonal_targets(
     station_context: dict[str, dict[str, Any]],
     reference_day: date,
     limit: int = UPCOMING_MOTH_LIMIT,
+    default_timezone: str = "America/New_York",
 ) -> dict[str, Any]:
     """Find new-to-station moths timed by nearby tracked-station records.
 
@@ -1399,6 +1481,10 @@ def _station_seasonal_targets(
             item["label"],
         ),
     )
+    sheet_time_items = _sheet_time_order(
+        seasonal_only_items,
+        _sheet_time_evidence(all_rows, station_context, default_timezone),
+    )
     # Keep the same seasonal candidate pool and target-list length for all
     # variants. This ranking deliberately ignores seasonal abundance after a
     # species enters the pool, letting the validation isolate host evidence.
@@ -1426,12 +1512,13 @@ def _station_seasonal_targets(
         "reference_day": reference_day,
         "location_label": location_label,
         "source": "tracked-network",
-        # The leak-aware historical backtest consistently favors the seasonal
-        # order. Host associations remain useful context, but do not improve
-        # this production prediction when allowed to reorder the same pool.
-        "ranking_method": "seasonal-only",
-        "items": seasonal_only_items[:limit],
+        # Preserve the strongest seasonal order while moving taxa with credible
+        # daytime-only timing evidence behind candidates that remain plausible
+        # at a light sheet. Host associations remain supporting context.
+        "ranking_method": "sheet-time",
+        "items": sheet_time_items[:limit],
         "ranking_variants": {
+            "sheet-time": sheet_time_items[:limit],
             "seasonal-only": seasonal_only_items[:limit],
             "host-only": host_only_items[:limit],
             "host-evidence": host_evidence_items[:limit],
@@ -1506,6 +1593,8 @@ def _regional_seasonal_targets(
     reference_day: date,
     *,
     limit: int = UPCOMING_MOTH_LIMIT,
+    all_rows: list[dict[str, Any]] | None = None,
+    station_context: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any] | None:
     """Convert the cached nearby-iNat seasonal census into station targets."""
     cached = cached_regional_watchlist(settings, station_id, reference_day)
@@ -1586,6 +1675,14 @@ def _regional_seasonal_targets(
             item["label"],
         ),
     )
+    sheet_time_items = _sheet_time_order(
+        seasonal_only_items,
+        _sheet_time_evidence(
+            all_rows or [],
+            station_context or _forecast_station_context(settings),
+            settings.timezone,
+        ),
+    )
     host_only_items = sorted(
         items,
         key=lambda item: (
@@ -1607,9 +1704,10 @@ def _regional_seasonal_targets(
         "window": window,
         "radius_km": float(run["radius_km"]),
         "cached_at": run.get("cached_at"),
-        "ranking_method": "seasonal-only",
-        "items": seasonal_only_items[:limit],
+        "ranking_method": "sheet-time",
+        "items": sheet_time_items[:limit],
         "ranking_variants": {
+            "sheet-time": sheet_time_items[:limit],
             "seasonal-only": seasonal_only_items[:limit],
             "host-only": host_only_items[:limit],
             "host-evidence": host_evidence_items[:limit],
@@ -1618,14 +1716,19 @@ def _regional_seasonal_targets(
 
 
 FORECAST_BACKTEST_WEEKS = 14
-FORECAST_RANKING_VARIANTS = ("seasonal-only", "host-only", "host-evidence")
+FORECAST_RANKING_VARIANTS = (
+    "sheet-time",
+    "seasonal-only",
+    "host-only",
+    "host-evidence",
+)
 
 
 def _forecast_station_context(settings: Settings) -> dict[str, dict[str, Any]]:
     with connect(settings.database) as conn:
         rows = conn.execute(
             """
-            SELECT id, county_place_id, state_place_id, public_location
+            SELECT id, timezone, county_place_id, state_place_id, public_location
             FROM stations
             WHERE enabled = 1
             """
@@ -1757,6 +1860,7 @@ def _historical_target_backtest(
             _historical_station_taxa(known_rows, station_id),
             station_context,
             anchor,
+            default_timezone=timezone,
         )
         window_end = anchor + timedelta(days=13)
         outcome_rows = [
@@ -1764,6 +1868,7 @@ def _historical_target_backtest(
             if row.get("station_id") == station_id
             and row.get("session_date")
             and anchor <= row["session_date"] <= window_end
+            and _is_sheet_time_observation(row, station_context, timezone)
         ]
         active_nights = {row["session_date"] for row in outcome_rows}
         if not active_nights:
@@ -1940,6 +2045,7 @@ def _published_forecast_validation(
             for row in rows:
                 variant_rows.setdefault((run["id"], row["variant"]), []).append(dict(row))
 
+    station_context = _forecast_station_context(settings)
     species_rows = [
         row for row in all_rows if row.get("taxon_id") and is_species(row)
     ]
@@ -1969,6 +2075,11 @@ def _published_forecast_validation(
             if row.get("station_id") == station_id
             and row.get("session_date")
             and start <= row["session_date"] <= end
+            and _is_sheet_time_observation(
+                row,
+                station_context,
+                settings.timezone,
+            )
         ]
         active_nights = {row["session_date"] for row in outcome_rows}
         if not active_nights:
@@ -2410,6 +2521,8 @@ def station_profile(
         taxa_seen,
         taxa,
         reference_day,
+        all_rows=all_rows,
+        station_context=station_context,
     )
     if seasonal_targets is None:
         # A build remains useful if iNaturalist's regional endpoint is down.
@@ -2421,6 +2534,7 @@ def station_profile(
             taxa,
             station_context,
             reference_day,
+            default_timezone=settings.timezone,
         )
 
     active_sessions = len({row["session_date"] for row in species_rows if row.get("session_date")})

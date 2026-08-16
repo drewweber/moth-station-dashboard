@@ -78,15 +78,21 @@ separate from the station's host-plant targets and its own historical
   configured 100 km reference radius, not only the tracked stations;
 - it counts records occurring on the next 14 recurring calendar days across
   iNaturalist history, weights the nearer week slightly more, and publishes the
-  ten unrecorded species with the strongest seasonal score;
+  ten unrecorded species with the strongest seasonal evidence after the
+  sheet-time adjustment;
+- it preserves that seasonal order unless a species has at least four timed
+  tracked-source records and no more than half fall from 6 p.m. to 10 a.m.;
+  those credibly daytime-weighted taxa move behind otherwise neutral candidates;
 - it shows host associations as supporting context without using them to
-  reorder the production prediction, because the leak-aware historical
-  reconstruction currently favors the seasonal-only ranking.
+  reorder the production prediction.
 
 This is a ranked watchlist for likely next new station records, not a guarantee
 that all ten will appear on a particular sheet night. Uploaded iNaturalist
-records also do not consistently encode survey method, so validation measures
-new tracked-source records rather than sheet-only captures.
+records also do not consistently encode survey method. Exact observation time
+is therefore a conservative negative signal for daytime-weighted species, not
+proof that an individual record was a sheet capture. Validation measures new
+tracked-source records and reports the unadjusted seasonal order alongside the
+sheet-time production order.
 
 The initial cache fill is deliberately comprehensive. It stores counts by
 calendar day, so later daily builds reuse the overlapping 13 days and fetch

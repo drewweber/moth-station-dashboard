@@ -424,7 +424,7 @@ class SpeciesSemanticsTests(unittest.TestCase):
         host_only = profile["seasonal_targets"]["ranking_variants"]["host-only"]
         self.assertEqual(host_only[0]["taxon_id"], 404)
 
-    def test_prediction_publishes_exactly_ten_in_seasonal_order(self) -> None:
+    def test_prediction_publishes_exactly_ten_in_sheet_time_order(self) -> None:
         with connect(self.settings.database) as conn:
             conn.execute(
                 """
@@ -467,7 +467,7 @@ class SpeciesSemanticsTests(unittest.TestCase):
             )
 
         self.assertEqual(10, UPCOMING_MOTH_LIMIT)
-        self.assertEqual("seasonal-only", targets["ranking_method"])
+        self.assertEqual("sheet-time", targets["ranking_method"])
         self.assertEqual(10, len(targets["items"]))
         self.assertEqual(
             list(range(400, 410)),
@@ -477,6 +477,62 @@ class SpeciesSemanticsTests(unittest.TestCase):
             410,
             targets["ranking_variants"]["host-evidence"][0]["taxon_id"],
             "host evidence remains available for comparison without changing production order",
+        )
+
+    def test_prediction_demotes_a_well_evidenced_daytime_taxon(self) -> None:
+        with connect(self.settings.database) as conn:
+            conn.execute(
+                """
+                INSERT INTO regional_watch_runs (
+                    station_id, window_start, window_end, latitude, longitude, radius_km
+                ) VALUES ('station-a', '2026-07-22', '2026-08-04', 42.4, -76.4, 100)
+                """
+            )
+            conn.executemany(
+                """
+                INSERT INTO regional_watch_taxa (
+                    station_id, window_start, taxon_id, taxon_name, common_name,
+                    photo_url, record_count
+                ) VALUES ('station-a', '2026-07-22', ?, ?, ?, NULL, ?)
+                """,
+                [
+                    (500 + index, f"Targetus {index}", f"Target {index}", 20 - index)
+                    for index in range(11)
+                ],
+            )
+
+        timed_rows = [
+            {
+                "station_id": "station-b",
+                "taxon_id": 500,
+                "rank": "species",
+                "observed_at": f"2026-07-{10 + index:02d}T14:00:00-04:00",
+            }
+            for index in range(4)
+        ] + [
+            {
+                "station_id": "station-b",
+                "taxon_id": 501,
+                "rank": "species",
+                "observed_at": f"2026-07-{10 + index:02d}T22:00:00-04:00",
+            }
+            for index in range(4)
+        ]
+        targets = _regional_seasonal_targets(
+            self.settings,
+            "station-a",
+            set(),
+            [],
+            date(2026, 7, 22),
+            all_rows=timed_rows,
+            station_context={"station-b": {"timezone": "America/New_York"}},
+        )
+
+        self.assertEqual(500, targets["ranking_variants"]["seasonal-only"][0]["taxon_id"])
+        self.assertNotIn(500, [item["taxon_id"] for item in targets["items"]])
+        self.assertEqual(501, targets["items"][0]["taxon_id"])
+        self.assertTrue(
+            targets["ranking_variants"]["seasonal-only"][0]["day_biased_evidence"]
         )
 
     def test_host_evidence_scores_all_shared_exact_plants_above_one_or_broader_genus(self) -> None:
@@ -796,13 +852,59 @@ class SpeciesSemanticsTests(unittest.TestCase):
             weeks=1,
         )
 
-        for variant in ("seasonal-only", "host-only", "host-evidence"):
+        for variant in ("sheet-time", "seasonal-only", "host-only", "host-evidence"):
             result = backtest[variant]
             self.assertEqual(result["checked_windows"], 1)
             self.assertEqual(result["target_count"], 1)
             self.assertEqual(result["target_hits"], 1)
             self.assertEqual(result["caught_new_species"], 1)
             self.assertEqual(result["median_hit_rank"], 1)
+
+    def test_historical_target_backtest_does_not_score_daytime_outcomes(self) -> None:
+        with connect(self.settings.database) as conn:
+            conn.execute("DELETE FROM observations")
+            conn.execute(
+                "UPDATE stations SET county_place_id = 1082, state_place_id = 48"
+            )
+            conn.executemany(
+                """
+                INSERT INTO observations (
+                    station_id, inat_obs_id, observed_on, observed_at, created_at,
+                    taxon_id, taxon_name, common_name, rank, url
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        "station-a", 1050, "2026-06-01", "2026-06-01T22:00:00-04:00",
+                        "2026-06-02T02:00:00Z", 101, "Species alpha", "Alpha", "species",
+                        "https://example.test/1050",
+                    ),
+                    (
+                        "station-b", 1051, "2025-07-10", "2025-07-10T22:00:00-04:00",
+                        "2025-07-11T02:00:00Z", 404, "Targetus diurnalis", "Day Target", "species",
+                        "https://example.test/1051",
+                    ),
+                    (
+                        "station-a", 1052, "2026-07-12", "2026-07-12T14:00:00-04:00",
+                        "2026-07-13T02:00:00Z", 404, "Targetus diurnalis", "Day Target", "species",
+                        "https://example.test/1052",
+                    ),
+                ],
+            )
+
+        backtest = _historical_target_backtest(
+            load_rows(self.settings),
+            "station-a",
+            _forecast_station_context(self.settings),
+            date(2026, 7, 21),
+            cutoff_hour=12,
+            timezone="America/New_York",
+            weeks=1,
+        )
+
+        for variant in ("sheet-time", "seasonal-only", "host-only", "host-evidence"):
+            self.assertEqual(backtest[variant]["checked_windows"], 0)
+            self.assertEqual(backtest[variant]["quiet_windows"], 1)
 
     def test_published_forecast_validation_uses_first_snapshot_per_day(self) -> None:
         with connect(self.settings.database) as conn:
@@ -898,6 +1000,7 @@ class SpeciesSemanticsTests(unittest.TestCase):
             "source": "nearby-inaturalist",
             "items": [{"taxon_id": 404, "label": "Host Target"}],
             "ranking_variants": {
+                "sheet-time": [{"taxon_id": 404, "label": "Host Target"}],
                 "seasonal-only": [{"taxon_id": 405, "label": "Baseline Target"}],
                 "host-only": [{"taxon_id": 404, "label": "Host Target"}],
                 "host-evidence": [{"taxon_id": 404, "label": "Host Target"}],
@@ -917,6 +1020,8 @@ class SpeciesSemanticsTests(unittest.TestCase):
             date(2026, 7, 22),
         )
 
+        self.assertEqual(validation["sheet-time"]["available_snapshots"], 1)
+        self.assertEqual(validation["sheet-time"]["target_hits"], 1)
         self.assertEqual(validation["seasonal-only"]["available_snapshots"], 1)
         self.assertEqual(validation["seasonal-only"]["target_hits"], 0)
         self.assertEqual(validation["host-only"]["target_hits"], 1)
