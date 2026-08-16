@@ -20,6 +20,7 @@ from mothdash.render import (
     _record_cards,
     _record_table,
     _seasonal_target_list,
+    _seasonal_target_intro,
     _sampling_context,
     _station_section_nav,
     _taxa_period_dashboard,
@@ -249,18 +250,22 @@ class RecordRenderingTests(unittest.TestCase):
                             "station_moth_count": 1,
                         },
                         "host_match_score": 1.5,
+                        "timed_records": 5,
+                        "sheet_time_records": 4,
                     }
                 ]
             }
         )
 
         self.assertIn("Target Moth", html)
+        self.assertIn("<strong>#1</strong>", html)
         self.assertIn("Jul 20 to Aug 4", html)
         self.assertIn("seen this season at Nearby Station", html)
         self.assertIn("https://www.inaturalist.org/taxa/77", html)
         self.assertIn("seasonal-target-card", html)
         self.assertIn("Host-linked (1)", html)
         self.assertIn("Host evidence: 1 exact shared host plant · 1 station moth", html)
+        self.assertIn("Sheet-time evidence: 4 of 5 tracked records", html)
         self.assertIn('data-seasonal-target-time="this-week"', html)
         self.assertIn('data-seasonal-target-peak="this-week"', html)
         self.assertIn('data-seasonal-target-host-match="true"', html)
@@ -299,6 +304,23 @@ class RecordRenderingTests(unittest.TestCase):
         self.assertIn('data-seasonal-target-peak="this-week"', html)
         self.assertIn("within 100 km · historical seasonal evidence", html)
         self.assertIn("Regional Moth", html)
+
+    def test_prediction_intro_names_ten_and_keeps_host_evidence_contextual(self) -> None:
+        title, intro = _seasonal_target_intro(
+            Station(
+                id="station-a",
+                name="Station A",
+                enabled=True,
+                active=True,
+                query={},
+            ),
+            {"source": "nearby-inaturalist", "radius_km": 100},
+        )
+
+        self.assertEqual("Predicted next 10 moths", title)
+        self.assertIn("ten moth species not yet recorded", intro)
+        self.assertIn("Host associations are shown as context but do not change", intro)
+        self.assertIn("not a guarantee for any one sheet night", intro)
 
     def test_insight_feedback_cards_have_stable_rating_hooks(self) -> None:
         insight = {
@@ -354,6 +376,13 @@ class RecordRenderingTests(unittest.TestCase):
         html = _forecast_validation(
             {
                 "historical": {
+                    "sheet-time": {
+                        "checked_windows": 2,
+                        "target_count": 40,
+                        "target_hits": 6,
+                        "new_species": 12,
+                        "active_nights": 9,
+                    },
                     "seasonal-only": {
                         "checked_windows": 2,
                         "quiet_windows": 1,
@@ -381,12 +410,17 @@ class RecordRenderingTests(unittest.TestCase):
             }
         )
 
-        self.assertIn("Historical three-way backtest", html)
+        self.assertIn("Historical four-way backtest", html)
+        self.assertIn("Sheet-time production order", html)
         self.assertIn("Seasonal-only baseline", html)
         self.assertIn("Host-only ranking", html)
         self.assertIn("Seasonal + host evidence", html)
         self.assertIn("12%", html)
-        self.assertIn("40 targets predicted across all stations; 5 found for the first time in the following two weeks", html)
+        self.assertIn(
+            "40 targets predicted across all stations; 5 found for the first time "
+            "during sheet-compatible hours in the following two weeks",
+            html,
+        )
         self.assertIn("target coverage", html)
         self.assertIn("forecast results, not moth or observation totals", html)
         self.assertIn("Targets that appeared", html)

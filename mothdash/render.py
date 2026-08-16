@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from datetime import date, datetime
 from html import escape
 from pathlib import Path
@@ -117,7 +118,7 @@ STATION_NAV_GROUPS = (
     (
         "Look ahead",
         (
-            ("Next two weeks", "station-targets"),
+            ("Next 10", "station-targets"),
             ("Return watch", "station-watch-next"),
         ),
     ),
@@ -1540,7 +1541,10 @@ def _seasonal_target_list(targets: dict[str, Any]) -> str:
             if row.get("photo_url")
             else '<div class="watch-placeholder" aria-hidden="true">No photo</div>'
         )
-        title = f'<a href="{h(row["inat_taxon_url"])}">{label}</a>'
+        title = (
+            f'<strong>#{order + 1}</strong> '
+            f'<a href="{h(row["inat_taxon_url"])}">{label}</a>'
+        )
         time_buckets = " ".join(row.get("time_buckets") or ["this-week", "next-week"])
         peak_buckets = " ".join(
             row.get("peak_buckets")
@@ -1588,6 +1592,17 @@ def _seasonal_target_list(targets: dict[str, Any]) -> str:
                 signal = f"seen this season at {source_names}"
             else:
                 signal = f"{scope} history: {source_names}"
+        timed_records = int(row.get("timed_records") or 0)
+        sheet_time_records = int(row.get("sheet_time_records") or 0)
+        if timed_records >= 4:
+            sheet_time_marker = f"""
+              <span class="target-sheet-time">
+                <span aria-hidden="true">&#9680;</span>
+                Sheet-time evidence: {h(sheet_time_records)} of {h(timed_records)} tracked records
+              </span>
+            """
+        else:
+            sheet_time_marker = ""
         host_matches = row.get("host_matches") or []
         host_evidence = row.get("host_evidence") or {}
         exact_plant_matches = int(
@@ -1660,6 +1675,7 @@ def _seasonal_target_list(targets: dict[str, Any]) -> str:
                 <span>{title}</span>
                 <small>{h(detail)}</small>
                 <em>{h(signal)}</em>
+                {sheet_time_marker}
                 {host_marker}
               </div>
             </li>
@@ -1676,17 +1692,25 @@ def _seasonal_target_intro(station: Station, targets: dict[str, Any]) -> tuple[s
     if targets.get("source") == "nearby-inaturalist":
         radius = float(targets.get("radius_km", 100))
         return (
-            "Next two weeks",
-            "Moths not yet recorded at "
-            f"{h(station.name)} that iNaturalist has documented within {radius:g} km "
-            "during the next 14 calendar days. Top 20 are ranked by nearby seasonal record count; comprehensive host evidence is supporting context, with exact shared host plants weighted above broader genus overlap.",
+            "Predicted next 10 moths",
+            "The ten moth species not yet recorded at "
+            f"{h(station.name)} with the strongest near-term seasonal evidence within "
+            f"{radius:g} km. Nearby iNaturalist records from the next 14 calendar days "
+            "set the order, with this week's records weighted slightly more than next "
+            "week's. Species with at least four timed tracked records move behind the "
+            "other candidates when half or fewer fall during sheet-compatible hours "
+            "(6 p.m. to 10 a.m.). Host associations are shown as context but do not change the "
+            "ranking. This is a watchlist for likely next new station records, not a "
+            "guarantee for any one sheet night.",
         )
     return (
-        "Regional watchlist",
-        "New-to-"
-        f"{h(station.name)} species for the current seasonal window, using other "
-        "tracked-station records. This fallback appears only while nearby "
-        "iNaturalist evidence is unavailable.",
+        "Predicted next 10 moths",
+        "Up to ten new-to-"
+        f"{h(station.name)} species ranked by current seasonal evidence from other "
+        "tracked sources, with credible daytime-weighted taxa moved behind the sheet-time "
+        "candidates. Host associations are context only. This fallback appears "
+        "while the broader nearby-iNaturalist evidence is unavailable, and it is a "
+        "watchlist rather than a guarantee for any one sheet night.",
     )
 
 
@@ -1715,7 +1739,7 @@ def _forecast_window_table(rows: list[dict[str, Any]], label: str) -> str:
       <summary>View {h(label)} ({h(len(rows))})</summary>
       <div class="table-wrap forecast-window-table-wrap">
         <table>
-          <thead><tr><th>Forecast window</th><th>Active nights</th><th>Targets that appeared</th><th>New species predicted</th></tr></thead>
+          <thead><tr><th>Forecast window</th><th>Active sheet-time nights</th><th>Targets that appeared</th><th>New sheet-time species predicted</th></tr></thead>
           <tbody>{table_rows}</tbody>
         </table>
       </div>
@@ -1745,7 +1769,7 @@ def _forecast_scorecard(data: dict[str, Any], *, title: str, detail: str, empty:
     rank_label = "--" if median_rank is None else f"#{median_rank:g}"
     quiet = int(data.get("quiet_windows") or 0)
     quiet_detail = (
-        f" {quiet} window{'s' if quiet != 1 else ''} with no species-level station activity were not scored."
+        f" {quiet} window{'s' if quiet != 1 else ''} with no species-level activity during sheet-compatible hours were not scored."
         if quiet else ""
     )
     return f"""
@@ -1753,9 +1777,9 @@ def _forecast_scorecard(data: dict[str, Any], *, title: str, detail: str, empty:
       <h3>{h(title)}</h3>
       <p>{h(detail)}{h(quiet_detail)}</p>
       <dl class="forecast-metrics">
-        <div><dt>targets found</dt><dd>{h(_forecast_percent(hits, targets))}</dd><small>{h(targets)} targets predicted across all stations; {h(hits)} found for the first time in the following two weeks</small></div>
-        <div><dt>target coverage</dt><dd>{h(_forecast_percent(hits, new_species))}</dd><small>{h(new_species)} species first recorded at a station in that period; {h(hits)} were predicted on the target list</small></div>
-        <div><dt>evidence</dt><dd>{h(checked)} tests</dd><small>{h(active_nights)} active station-nights across 14-night test windows</small></div>
+        <div><dt>targets found</dt><dd>{h(_forecast_percent(hits, targets))}</dd><small>{h(targets)} targets predicted across all stations; {h(hits)} found for the first time during sheet-compatible hours in the following two weeks</small></div>
+        <div><dt>target coverage</dt><dd>{h(_forecast_percent(hits, new_species))}</dd><small>{h(new_species)} species first recorded at sheet-compatible hours in that period; {h(hits)} were predicted on the target list</small></div>
+        <div><dt>evidence</dt><dd>{h(checked)} tests</dd><small>{h(active_nights)} active sheet-time nights across 14-night test windows</small></div>
         <div><dt>typical useful rank</dt><dd>{h(rank_label)}</dd><small>where a matching species sat in its original target list</small></div>
       </dl>
       {_forecast_window_table(data.get('windows') or [], 'scored forecast windows')}
@@ -1766,6 +1790,12 @@ def _forecast_scorecard(data: dict[str, Any], *, title: str, detail: str, empty:
 def _forecast_validation(validation: dict[str, Any]) -> str:
     historical = validation.get("historical") or {}
     historical_cards = f"""
+      {_forecast_scorecard(
+          historical.get("sheet-time") or {},
+          title="Sheet-time production order",
+          detail="Keeps the seasonal order but moves a species behind neutral candidates when at least four pre-checkpoint timed records exist and half or fewer fall from 6 p.m. to 10 a.m.",
+          empty="Not enough station history and later moth-night activity are available for a conservative backtest yet.",
+      )}
       {_forecast_scorecard(
           historical.get("seasonal-only") or {},
           title="Seasonal-only baseline",
@@ -1788,8 +1818,8 @@ def _forecast_validation(validation: dict[str, Any]) -> str:
     return f"""
     <div class="forecast-comparison">
       <div class="forecast-comparison-head">
-        <h3>Historical three-way backtest</h3>
-        <p>Imagine writing a Next two weeks list on a past Monday, then checking what became newly recorded at that station over the following 14 nights. We repeat that test across the network. These are forecast results, not moth or observation totals.</p>
+        <h3>Historical four-way backtest</h3>
+        <p>Imagine writing a ranked ten-species prediction list on a past Monday, then checking what became newly recorded during sheet-compatible hours over the following 14 nights. We repeat that test across the network. Sheet-time is the production order; the other three show what changes when that filter or host evidence is removed. These are forecast results, not moth or observation totals.</p>
       </div>
       <div class="forecast-validation">{historical_cards}</div>
     </div>
@@ -1812,6 +1842,7 @@ def _forecast_station_table(rows: list[dict[str, Any]]) -> str:
         f"""
         <tr>
           <th scope="row"><a href="stations/{h(row['station_id'])}.html">{h(row['station_name'])}</a></th>
+          <td>{h(historical_result_cell(row['historical'].get('sheet-time') or {}))}</td>
           <td>{h(historical_result_cell(row['historical'].get('seasonal-only') or {}))}</td>
           <td>{h(historical_result_cell(row['historical'].get('host-only') or {}))}</td>
           <td>{h(historical_result_cell(row['historical'].get('host-evidence') or {}))}</td>
@@ -1823,7 +1854,7 @@ def _forecast_station_table(rows: list[dict[str, Any]]) -> str:
     return f"""
     <div class="table-wrap forecast-station-table">
       <table>
-        <thead><tr><th>Station</th><th>Historical seasonal-only</th><th>Historical host-only</th><th>Historical seasonal + host</th><th>Historical active nights</th></tr></thead>
+        <thead><tr><th>Station</th><th>Historical sheet-time</th><th>Historical seasonal-only</th><th>Historical host-only</th><th>Historical seasonal + host</th><th>Historical sheet-time nights</th></tr></thead>
         <tbody>{table_rows}</tbody>
       </table>
     </div>
@@ -1837,7 +1868,7 @@ def _forecast_validation_page(validation: dict[str, Any]) -> str:
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Forecast validation · Moth Station Dashboard</title>
-  <meta name="description" content="Internal validation of two-week moth-station targets.">
+  <meta name="description" content="Internal validation of the predicted next 10 moths at tracked sources.">
   <meta name="theme-color" content="#151611">
   <link rel="stylesheet" href="assets/dashboard.css">
 </head>
@@ -1855,12 +1886,12 @@ def _forecast_validation_page(validation: dict[str, Any]) -> str:
     <section class="validation-intro">
       <p class="eyebrow">internal model check</p>
       <h1>Forecast validation</h1>
-      <p>Did the Next two weeks list help us anticipate species that were new at a station? This is the scorecard, not a count of moths or observations.</p>
+      <p>Did the predicted next 10 help us anticipate species that were new at a tracked source? This is the scorecard, not a count of moths or observations.</p>
     </section>
     <section>
       <div class="section-head">
-        <h2>Network forecast accuracy</h2>
-        <p><strong>Targets found</strong> shows how many predicted targets were first recorded in the following two weeks. <strong>Target coverage</strong> shows how many of the first-time station records had been predicted. The repeated number is the overlap between those two groups. Results combine stations and repeated 14-night tests; use the table below for Kingfisher Hollow alone.</p>
+        <h2>Network forecast evidence</h2>
+        <p><strong>Targets found</strong> shows how many predicted targets were first recorded during sheet-compatible hours in the following two weeks. <strong>Target coverage</strong> shows how many of those first-time records had been predicted. The repeated number is the overlap between those two groups. Results combine tracked sources and repeated 14-night tests; use the table below for Kingfisher Hollow alone.</p>
       </div>
       {_forecast_validation(validation)}
     </section>
@@ -1876,7 +1907,7 @@ def _forecast_validation_page(validation: dict[str, Any]) -> str:
         <h2>Method notes</h2>
       </div>
       <div class="forecast-method-copy">
-        <p><strong>Historical three-way backtest:</strong> fourteen overlapping Monday checkpoints freeze the tracked-station records uploaded by local noon, then rebuild all three rankings from that same information. The next fourteen moth sessions are the outcome period; only species new to that station during that period count as outcomes. The host-only list uses host-association strength alone after the seasonal candidate pool is set; the combined list adds host evidence to the seasonal ranking. Exact shared host plants are weighted above broader genus overlap; no ranking can use observations uploaded after the checkpoint.</p>
+        <p><strong>Historical four-way backtest:</strong> fourteen overlapping Monday checkpoints freeze the tracked-source records uploaded by local noon, then rebuild all four ten-species rankings from that same information. The next fourteen nights are the outcome period; only species new to that source and timestamped from 6 p.m. to 10 a.m. count as outcomes. Sheet-time is the production order: it preserves the seasonal ranking, but moves a species behind neutral candidates when at least four timed pre-checkpoint records exist and half or fewer were observed in that interval. Seasonal-only shows the unadjusted order. The host-only list uses host-association strength after the seasonal candidate pool is set; the combined list adds host evidence to the seasonal ranking. Exact shared host plants are weighted above broader genus overlap; no ranking can use observations uploaded after the checkpoint. Uploaded records do not consistently identify survey method, so sheet-compatible hours are a conservative timing proxy, not proof that an individual moth was physically present on a sheet.</p>
       </div>
     </section>
   </main>
@@ -5609,6 +5640,20 @@ h2 {
   font-size: 0.76rem;
   line-height: 1.3;
 }
+.target-sheet-time {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  margin-top: 7px;
+  color: var(--muted);
+  font-size: 0.76rem;
+  line-height: 1.3;
+}
+.target-sheet-time span[aria-hidden="true"] {
+  flex: 0 0 auto;
+  color: var(--amber);
+  font-size: 0.92rem;
+}
 .target-host-marker span[aria-hidden="true"] {
   flex: 0 0 auto;
   font-size: 0.92rem;
@@ -7929,6 +7974,9 @@ def _render(settings: Settings, stations: list[Station], output: Path | None = N
     stations_dir.mkdir(parents=True, exist_ok=True)
     station_colors = _station_color_map(stations)
     forecast_snapshot_at = datetime.now(ZoneInfo(settings.timezone))
+    forecast_deployment_channel = (
+        os.environ.get("MOTHDASH_DEPLOYMENT_CHANNEL", "local").strip() or "local"
+    )
     for station in stations:
         if not station.enabled:
             continue
@@ -7938,6 +7986,7 @@ def _render(settings: Settings, stations: list[Station], output: Path | None = N
             station.id,
             profile["seasonal_targets"],
             snapshot_at=forecast_snapshot_at,
+            deployment_channel=forecast_deployment_channel,
         )
         recap = weekly_recap(settings, station.id)
         habitat = habitat_summary(settings, station.id, taxa)

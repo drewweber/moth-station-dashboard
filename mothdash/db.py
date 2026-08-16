@@ -129,7 +129,8 @@ CREATE TABLE IF NOT EXISTS forecast_runs (
     reference_day  TEXT NOT NULL,
     window_end     TEXT NOT NULL,
     source         TEXT NOT NULL,
-    target_count   INTEGER NOT NULL
+    target_count   INTEGER NOT NULL,
+    deployment_channel TEXT NOT NULL DEFAULT 'legacy'
 );
 
 CREATE INDEX IF NOT EXISTS idx_forecast_runs_station_window
@@ -189,3 +190,11 @@ def connect(path: Path):
 def init_db(path: Path) -> None:
     with connect(path) as conn:
         conn.executescript(SCHEMA)
+        forecast_run_columns = {
+            row["name"] for row in conn.execute("PRAGMA table_info(forecast_runs)")
+        }
+        if "deployment_channel" not in forecast_run_columns:
+            conn.execute(
+                "ALTER TABLE forecast_runs ADD COLUMN deployment_channel "
+                "TEXT NOT NULL DEFAULT 'legacy'"
+            )

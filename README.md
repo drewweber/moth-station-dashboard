@@ -67,9 +67,9 @@ After pushing this repo to GitHub:
 If the Cloudflare Pages project uses a different name, update
 `.github/workflows/build.yml`.
 
-## Upcoming-Moth Watchlists
+## Predicted Next 10 Moths
 
-Every station profile includes a **Next two weeks** list. It is intentionally
+Every station profile includes a **Predicted next 10 moths** list. It is intentionally
 separate from the station's host-plant targets and its own historical
 `Watch next` list:
 
@@ -77,8 +77,26 @@ separate from the station's host-plant targets and its own historical
 - it uses all public iNaturalist moth observations within the station's
   configured 100 km reference radius, not only the tracked stations;
 - it counts records occurring on the next 14 recurring calendar days across
-  iNaturalist history, then ranks the unrecorded species by local seasonal
-  record count.
+  iNaturalist history, weights the nearer week slightly more, and publishes the
+  ten unrecorded species with the strongest seasonal evidence after the
+  sheet-time adjustment;
+- it preserves that seasonal order unless a species has at least four timed
+  tracked-source records and no more than half fall from 6 p.m. to 10 a.m.;
+  those credibly daytime-weighted taxa move behind otherwise neutral candidates;
+- it shows host associations as supporting context without using them to
+  reorder the production prediction.
+
+This is a ranked watchlist for likely next new station records, not a guarantee
+that all ten will appear on a particular sheet night. Uploaded iNaturalist
+records also do not consistently encode survey method. Exact observation time
+is therefore a conservative negative signal for daytime-weighted species, not
+proof that an individual record was a sheet capture. Validation measures new
+tracked-source records and reports the unadjusted seasonal order alongside the
+sheet-time production order.
+
+Forecast snapshots record their deployment channel. Only lists issued by a
+production build enter the prospective scorecard; local renders and Cloudflare
+preview deployments cannot be mistaken for published predictions.
 
 The initial cache fill is deliberately comprehensive. It stores counts by
 calendar day, so later daily builds reuse the overlapping 13 days and fetch

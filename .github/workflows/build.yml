@@ -79,6 +79,8 @@ jobs:
             mothdash-db-
 
       - name: Build dashboard
+        env:
+          MOTHDASH_DEPLOYMENT_CHANNEL: ${{ github.ref == 'refs/heads/main' && 'production' || 'preview' }}
         run: python -m mothdash build
 
       - name: Deploy production to Cloudflare Pages
