@@ -117,7 +117,7 @@ STATION_NAV_GROUPS = (
     (
         "Look ahead",
         (
-            ("Next two weeks", "station-targets"),
+            ("Next 10", "station-targets"),
             ("Return watch", "station-watch-next"),
         ),
     ),
@@ -1540,7 +1540,10 @@ def _seasonal_target_list(targets: dict[str, Any]) -> str:
             if row.get("photo_url")
             else '<div class="watch-placeholder" aria-hidden="true">No photo</div>'
         )
-        title = f'<a href="{h(row["inat_taxon_url"])}">{label}</a>'
+        title = (
+            f'<strong>#{order + 1}</strong> '
+            f'<a href="{h(row["inat_taxon_url"])}">{label}</a>'
+        )
         time_buckets = " ".join(row.get("time_buckets") or ["this-week", "next-week"])
         peak_buckets = " ".join(
             row.get("peak_buckets")
@@ -1676,17 +1679,22 @@ def _seasonal_target_intro(station: Station, targets: dict[str, Any]) -> tuple[s
     if targets.get("source") == "nearby-inaturalist":
         radius = float(targets.get("radius_km", 100))
         return (
-            "Next two weeks",
-            "Moths not yet recorded at "
-            f"{h(station.name)} that iNaturalist has documented within {radius:g} km "
-            "during the next 14 calendar days. Top 20 are ranked by nearby seasonal record count; comprehensive host evidence is supporting context, with exact shared host plants weighted above broader genus overlap.",
+            "Predicted next 10 moths",
+            "The ten moth species not yet recorded at "
+            f"{h(station.name)} with the strongest near-term seasonal evidence within "
+            f"{radius:g} km. Nearby iNaturalist records from the next 14 calendar days "
+            "set the order, with this week's records weighted slightly more than next "
+            "week's. Host associations are shown as context but do not change the "
+            "ranking. This is a watchlist for likely next new station records, not a "
+            "guarantee for any one sheet night.",
         )
     return (
-        "Regional watchlist",
-        "New-to-"
-        f"{h(station.name)} species for the current seasonal window, using other "
-        "tracked-station records. This fallback appears only while nearby "
-        "iNaturalist evidence is unavailable.",
+        "Predicted next 10 moths",
+        "Up to ten new-to-"
+        f"{h(station.name)} species ranked by current seasonal evidence from other "
+        "tracked sources. Host associations are context only. This fallback appears "
+        "while the broader nearby-iNaturalist evidence is unavailable, and it is a "
+        "watchlist rather than a guarantee for any one sheet night.",
     )
 
 
@@ -1789,7 +1797,7 @@ def _forecast_validation(validation: dict[str, Any]) -> str:
     <div class="forecast-comparison">
       <div class="forecast-comparison-head">
         <h3>Historical three-way backtest</h3>
-        <p>Imagine writing a Next two weeks list on a past Monday, then checking what became newly recorded at that station over the following 14 nights. We repeat that test across the network. These are forecast results, not moth or observation totals.</p>
+        <p>Imagine writing a ranked ten-species prediction list on a past Monday, then checking what became newly recorded at that station over the following 14 nights. We repeat that test across the network. These are forecast results, not moth or observation totals.</p>
       </div>
       <div class="forecast-validation">{historical_cards}</div>
     </div>
@@ -1837,7 +1845,7 @@ def _forecast_validation_page(validation: dict[str, Any]) -> str:
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Forecast validation · Moth Station Dashboard</title>
-  <meta name="description" content="Internal validation of two-week moth-station targets.">
+  <meta name="description" content="Internal validation of the predicted next 10 moths at tracked sources.">
   <meta name="theme-color" content="#151611">
   <link rel="stylesheet" href="assets/dashboard.css">
 </head>
@@ -1855,11 +1863,11 @@ def _forecast_validation_page(validation: dict[str, Any]) -> str:
     <section class="validation-intro">
       <p class="eyebrow">internal model check</p>
       <h1>Forecast validation</h1>
-      <p>Did the Next two weeks list help us anticipate species that were new at a station? This is the scorecard, not a count of moths or observations.</p>
+      <p>Did the predicted next 10 help us anticipate species that were new at a tracked source? This is the scorecard, not a count of moths or observations.</p>
     </section>
     <section>
       <div class="section-head">
-        <h2>Network forecast accuracy</h2>
+        <h2>Network forecast evidence</h2>
         <p><strong>Targets found</strong> shows how many predicted targets were first recorded in the following two weeks. <strong>Target coverage</strong> shows how many of the first-time station records had been predicted. The repeated number is the overlap between those two groups. Results combine stations and repeated 14-night tests; use the table below for Kingfisher Hollow alone.</p>
       </div>
       {_forecast_validation(validation)}
@@ -1876,7 +1884,7 @@ def _forecast_validation_page(validation: dict[str, Any]) -> str:
         <h2>Method notes</h2>
       </div>
       <div class="forecast-method-copy">
-        <p><strong>Historical three-way backtest:</strong> fourteen overlapping Monday checkpoints freeze the tracked-station records uploaded by local noon, then rebuild all three rankings from that same information. The next fourteen moth sessions are the outcome period; only species new to that station during that period count as outcomes. The host-only list uses host-association strength alone after the seasonal candidate pool is set; the combined list adds host evidence to the seasonal ranking. Exact shared host plants are weighted above broader genus overlap; no ranking can use observations uploaded after the checkpoint.</p>
+        <p><strong>Historical three-way backtest:</strong> fourteen overlapping Monday checkpoints freeze the tracked-source records uploaded by local noon, then rebuild all three ten-species rankings from that same information. The next fourteen moth sessions are the outcome period; only species new to that source during that period count as outcomes. Seasonal-only is the production order because it has performed best in this reconstruction. The host-only list uses host-association strength after the seasonal candidate pool is set; the combined list adds host evidence to the seasonal ranking. Exact shared host plants are weighted above broader genus overlap; no ranking can use observations uploaded after the checkpoint. Uploaded records do not consistently identify survey method, so these results predict new source records rather than proving that every outcome was physically present on a sheet.</p>
       </div>
     </section>
   </main>

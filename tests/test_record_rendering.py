@@ -20,6 +20,7 @@ from mothdash.render import (
     _record_cards,
     _record_table,
     _seasonal_target_list,
+    _seasonal_target_intro,
     _sampling_context,
     _station_section_nav,
     _taxa_period_dashboard,
@@ -255,6 +256,7 @@ class RecordRenderingTests(unittest.TestCase):
         )
 
         self.assertIn("Target Moth", html)
+        self.assertIn("<strong>#1</strong>", html)
         self.assertIn("Jul 20 to Aug 4", html)
         self.assertIn("seen this season at Nearby Station", html)
         self.assertIn("https://www.inaturalist.org/taxa/77", html)
@@ -299,6 +301,23 @@ class RecordRenderingTests(unittest.TestCase):
         self.assertIn('data-seasonal-target-peak="this-week"', html)
         self.assertIn("within 100 km · historical seasonal evidence", html)
         self.assertIn("Regional Moth", html)
+
+    def test_prediction_intro_names_ten_and_keeps_host_evidence_contextual(self) -> None:
+        title, intro = _seasonal_target_intro(
+            Station(
+                id="station-a",
+                name="Station A",
+                enabled=True,
+                active=True,
+                query={},
+            ),
+            {"source": "nearby-inaturalist", "radius_km": 100},
+        )
+
+        self.assertEqual("Predicted next 10 moths", title)
+        self.assertIn("ten moth species not yet recorded", intro)
+        self.assertIn("Host associations are shown as context but do not change", intro)
+        self.assertIn("not a guarantee for any one sheet night", intro)
 
     def test_insight_feedback_cards_have_stable_rating_hooks(self) -> None:
         insight = {

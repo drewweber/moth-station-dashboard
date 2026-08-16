@@ -1252,6 +1252,9 @@ def _seasonal_offset(day: date, reference_day: date) -> int:
     )
 
 
+UPCOMING_MOTH_LIMIT = 10
+
+
 def _station_seasonal_targets(
     all_rows: list[dict[str, Any]],
     station_id: str,
@@ -1259,7 +1262,7 @@ def _station_seasonal_targets(
     taxa: list[dict[str, Any]],
     station_context: dict[str, dict[str, Any]],
     reference_day: date,
-    limit: int = 20,
+    limit: int = UPCOMING_MOTH_LIMIT,
 ) -> dict[str, Any]:
     """Find new-to-station moths timed by nearby tracked-station records.
 
@@ -1423,7 +1426,11 @@ def _station_seasonal_targets(
         "reference_day": reference_day,
         "location_label": location_label,
         "source": "tracked-network",
-        "items": host_evidence_items[:limit],
+        # The leak-aware historical backtest consistently favors the seasonal
+        # order. Host associations remain useful context, but do not improve
+        # this production prediction when allowed to reorder the same pool.
+        "ranking_method": "seasonal-only",
+        "items": seasonal_only_items[:limit],
         "ranking_variants": {
             "seasonal-only": seasonal_only_items[:limit],
             "host-only": host_only_items[:limit],
@@ -1498,7 +1505,7 @@ def _regional_seasonal_targets(
     taxa: list[dict[str, Any]],
     reference_day: date,
     *,
-    limit: int = 20,
+    limit: int = UPCOMING_MOTH_LIMIT,
 ) -> dict[str, Any] | None:
     """Convert the cached nearby-iNat seasonal census into station targets."""
     cached = cached_regional_watchlist(settings, station_id, reference_day)
@@ -1600,7 +1607,8 @@ def _regional_seasonal_targets(
         "window": window,
         "radius_km": float(run["radius_km"]),
         "cached_at": run.get("cached_at"),
-        "items": host_evidence_items[:limit],
+        "ranking_method": "seasonal-only",
+        "items": seasonal_only_items[:limit],
         "ranking_variants": {
             "seasonal-only": seasonal_only_items[:limit],
             "host-only": host_only_items[:limit],

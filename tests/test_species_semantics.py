@@ -6,10 +6,12 @@ from unittest import mock
 from zoneinfo import ZoneInfo
 
 from mothdash.analysis import (
+    UPCOMING_MOTH_LIMIT,
     _add_target_host_matches,
     _forecast_station_context,
     _historical_target_backtest,
     _published_forecast_validation,
+    _regional_seasonal_targets,
     first_of_season,
     last_completed_session_taxa,
     load_rows,
@@ -421,6 +423,61 @@ class SpeciesSemanticsTests(unittest.TestCase):
         self.assertFalse(later["host_matches"])
         host_only = profile["seasonal_targets"]["ranking_variants"]["host-only"]
         self.assertEqual(host_only[0]["taxon_id"], 404)
+
+    def test_prediction_publishes_exactly_ten_in_seasonal_order(self) -> None:
+        with connect(self.settings.database) as conn:
+            conn.execute(
+                """
+                INSERT INTO regional_watch_runs (
+                    station_id, window_start, window_end, latitude, longitude, radius_km
+                ) VALUES ('station-a', '2026-07-22', '2026-08-04', 42.4, -76.4, 100)
+                """
+            )
+            conn.executemany(
+                """
+                INSERT INTO regional_watch_taxa (
+                    station_id, window_start, taxon_id, taxon_name, common_name,
+                    photo_url, record_count
+                ) VALUES ('station-a', '2026-07-22', ?, ?, ?, NULL, ?)
+                """,
+                [
+                    (400 + index, f"Targetus {index}", f"Target {index}", 20 - index)
+                    for index in range(11)
+                ],
+            )
+
+        def add_conflicting_host_order(items, _taxa, _station_id):
+            for item in items:
+                item["host_matches"] = []
+                item["host_match_score"] = 0.0
+                item["prediction_score"] = item["seasonal_score"]
+            items[-1]["host_match_score"] = 100.0
+            items[-1]["prediction_score"] = 1_000.0
+
+        with mock.patch(
+            "mothdash.analysis._add_target_host_matches",
+            side_effect=add_conflicting_host_order,
+        ):
+            targets = _regional_seasonal_targets(
+                self.settings,
+                "station-a",
+                set(),
+                [],
+                date(2026, 7, 22),
+            )
+
+        self.assertEqual(10, UPCOMING_MOTH_LIMIT)
+        self.assertEqual("seasonal-only", targets["ranking_method"])
+        self.assertEqual(10, len(targets["items"]))
+        self.assertEqual(
+            list(range(400, 410)),
+            [item["taxon_id"] for item in targets["items"]],
+        )
+        self.assertEqual(
+            410,
+            targets["ranking_variants"]["host-evidence"][0]["taxon_id"],
+            "host evidence remains available for comparison without changing production order",
+        )
 
     def test_host_evidence_scores_all_shared_exact_plants_above_one_or_broader_genus(self) -> None:
         host_data = {
