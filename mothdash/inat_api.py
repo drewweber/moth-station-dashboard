@@ -12,6 +12,11 @@ from urllib.request import Request, urlopen
 
 BASE = "https://api.inaturalist.org/v1"
 PER_PAGE = 200
+MAX_INCREMENTAL_UPDATE_RESULTS = 10_000
+
+
+class ObservationResultLimitExceeded(RuntimeError):
+    """Raised when an incremental crawl would exceed its result budget."""
 
 
 def _clean(params: dict[str, Any]) -> dict[str, str]:
@@ -88,6 +93,7 @@ def iter_observations(
     user_agent: str,
     id_above: int = 0,
     max_pages: int | None = None,
+    max_results: int | None = None,
 ) -> Iterator[dict[str, Any]]:
     """Yield matching observations using an id cursor.
 
@@ -96,6 +102,7 @@ def iter_observations(
     """
     page_count = 0
     cursor = id_above
+    yielded = 0
     while True:
         data = get_json(
             "observations",
@@ -107,9 +114,22 @@ def iter_observations(
             **params,
         )
         results = data.get("results") or []
+        if page_count == 0 and max_results is not None:
+            total = int(data.get("total_results") or 0)
+            if total > max_results:
+                raise ObservationResultLimitExceeded(
+                    f"Observation query returned {total:,} results; "
+                    f"incremental limit is {max_results:,}"
+                )
         if not results:
             return
         for obs in results:
+            yielded += 1
+            if max_results is not None and yielded > max_results:
+                raise ObservationResultLimitExceeded(
+                    "Observation query exceeded the incremental limit of "
+                    f"{max_results:,} results while paging"
+                )
             yield obs
         cursor = int(results[-1]["id"])
         page_count += 1
@@ -117,6 +137,30 @@ def iter_observations(
             return
         if max_pages is not None and page_count >= max_pages:
             return
+
+
+def iter_updated_observations(
+    params: dict[str, Any],
+    user_agent: str,
+    updated_since: str,
+    max_results: int = MAX_INCREMENTAL_UPDATE_RESULTS,
+) -> Iterator[dict[str, Any]]:
+    """Yield observations changed after a watermark without deep pagination.
+
+    The fixed ``updated_since`` window selects changed records, while the
+    observation ID cursor provides stable, complete pagination even though
+    their update timestamps are not ordered by ID. Declared oversized windows
+    are rejected before yielding, and a cumulative guard covers result sets
+    that grow while they are being paged.
+    """
+    update_params = dict(params)
+    update_params["updated_since"] = updated_since
+    yield from iter_observations(
+        update_params,
+        user_agent=user_agent,
+        id_above=0,
+        max_results=max_results,
+    )
 
 
 def iter_species_counts(

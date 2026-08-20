@@ -98,6 +98,39 @@ class StationActivityTests(unittest.TestCase):
             [self.active],
         )
 
+    @patch("mothdash.sync.refresh_regional_watchlists")
+    @patch("mothdash.sync.refresh_station_stats")
+    @patch("mothdash.sync.sync_station", return_value=(1, 1))
+    def test_full_sync_rebuilds_only_active_station_and_preserves_inactive_history(
+        self,
+        sync_station_mock,
+        refresh_station_stats_mock,
+        _refresh_regional_watchlists_mock,
+    ) -> None:
+        with connect(self.settings.database) as conn:
+            conn.execute(
+                "INSERT INTO observations (station_id, inat_obs_id) VALUES (?, ?)",
+                (self.inactive.id, 100),
+            )
+
+        sync_all(self.settings, self.stations, full=True)
+
+        sync_station_mock.assert_called_once_with(
+            self.settings,
+            self.active,
+            full=True,
+        )
+        refresh_station_stats_mock.assert_called_once_with(
+            self.settings,
+            [self.active],
+        )
+        with connect(self.settings.database) as conn:
+            inactive_rows = conn.execute(
+                "SELECT inat_obs_id FROM observations WHERE station_id = ?",
+                (self.inactive.id,),
+            ).fetchall()
+        self.assertEqual([row["inat_obs_id"] for row in inactive_rows], [100])
+
     @patch("mothdash.sync.latest_observation_id")
     def test_pending_updates_compare_remote_id_with_sync_cursor(self, latest_mock) -> None:
         with connect(self.settings.database) as conn:

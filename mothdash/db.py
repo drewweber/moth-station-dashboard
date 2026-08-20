@@ -168,7 +168,10 @@ CREATE TABLE IF NOT EXISTS sync_log (
     full_sync      INTEGER NOT NULL,
     observations_added INTEGER NOT NULL,
     observations_seen  INTEGER NOT NULL,
-    max_inat_obs_id INTEGER
+    max_inat_obs_id INTEGER,
+    observations_reconciled INTEGER NOT NULL DEFAULT 0,
+    observations_removed INTEGER NOT NULL DEFAULT 0,
+    updates_through TEXT
 );
 """
 
@@ -198,3 +201,18 @@ def init_db(path: Path) -> None:
                 "ALTER TABLE forecast_runs ADD COLUMN deployment_channel "
                 "TEXT NOT NULL DEFAULT 'legacy'"
             )
+        sync_log_columns = {
+            row["name"] for row in conn.execute("PRAGMA table_info(sync_log)")
+        }
+        if "observations_reconciled" not in sync_log_columns:
+            conn.execute(
+                "ALTER TABLE sync_log ADD COLUMN observations_reconciled "
+                "INTEGER NOT NULL DEFAULT 0"
+            )
+        if "observations_removed" not in sync_log_columns:
+            conn.execute(
+                "ALTER TABLE sync_log ADD COLUMN observations_removed "
+                "INTEGER NOT NULL DEFAULT 0"
+            )
+        if "updates_through" not in sync_log_columns:
+            conn.execute("ALTER TABLE sync_log ADD COLUMN updates_through TEXT")

@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from .config import Settings, Station, active_stations
 from .db import connect, init_db
-from .inat_api import first_observed_date, iter_observations, latest_observation_id
+from .inat_api import (
+    ObservationResultLimitExceeded,
+    first_observed_date,
+    iter_observations,
+    iter_updated_observations,
+    latest_observation_id,
+)
 from .regional import refresh_regional_watchlists
 
 
@@ -19,6 +26,7 @@ SPECIES_RANKS = {
     "subvariety",
     "subform",
 }
+UPDATE_WATERMARK_OVERLAP = timedelta(minutes=5)
 
 
 OBS_INSERT = """
@@ -92,6 +100,161 @@ def _observation_row(station_id: str, obs: dict[str, Any]) -> tuple[Any, ...] | 
     )
 
 
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _parse_sync_time(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _format_api_time(value: datetime) -> str:
+    return value.astimezone(timezone.utc).isoformat(timespec="seconds").replace(
+        "+00:00", "Z"
+    )
+
+
+def _latest_sync_state(settings: Settings, station_id: str) -> dict[str, Any] | None:
+    with connect(settings.database) as conn:
+        row = conn.execute(
+            """
+            SELECT * FROM sync_log
+            WHERE station_id = ?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (station_id,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def _latest_full_sync_at(settings: Settings, station_id: str) -> datetime | None:
+    with connect(settings.database) as conn:
+        row = conn.execute(
+            """
+            SELECT synced_at FROM sync_log
+            WHERE station_id = ? AND full_sync = 1
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (station_id,),
+        ).fetchone()
+    return _parse_sync_time(row["synced_at"]) if row else None
+
+
+def _full_sync_due(
+    settings: Settings,
+    station_id: str,
+    now: datetime | None = None,
+) -> bool:
+    last_full = _latest_full_sync_at(settings, station_id)
+    if last_full is None:
+        return True
+    current = now or _utc_now()
+    return current - last_full >= timedelta(days=settings.full_sync_interval_days)
+
+
+def _updated_since(settings: Settings, station_id: str) -> str | None:
+    with connect(settings.database) as conn:
+        row = conn.execute(
+            """
+            SELECT updates_through FROM sync_log
+            WHERE station_id = ? AND updates_through IS NOT NULL
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (station_id,),
+        ).fetchone()
+    watermark = _parse_sync_time(row["updates_through"]) if row else None
+    if watermark is None:
+        watermark = _latest_full_sync_at(settings, station_id)
+    if watermark is None:
+        return None
+    return _format_api_time(watermark - UPDATE_WATERMARK_OVERLAP)
+
+
+def _taxon_lineage_ids(obs: dict[str, Any]) -> set[int]:
+    taxon = obs.get("taxon") or {}
+    values = list(taxon.get("ancestor_ids") or [])
+    if not values and taxon.get("ancestry"):
+        values.extend(str(taxon["ancestry"]).split("/"))
+    values.append(taxon.get("id"))
+    lineage = set()
+    for value in values:
+        try:
+            lineage.add(int(value))
+        except (TypeError, ValueError):
+            continue
+    return lineage
+
+
+def _scope_ids(value: Any) -> set[int]:
+    values = value if isinstance(value, (list, tuple, set)) else (value,)
+    result = set()
+    for item in values:
+        try:
+            result.add(int(item))
+        except (TypeError, ValueError):
+            continue
+    return result
+
+
+def _observation_matches_taxon_scope(settings: Settings, obs: dict[str, Any]) -> bool:
+    lineage = _taxon_lineage_ids(obs)
+    if not lineage:
+        return False
+    scope = settings.taxon_params()
+    included = _scope_ids(scope.get("taxon_id"))
+    excluded = _scope_ids(scope.get("without_taxon_id"))
+    return (not included or bool(lineage & included)) and not bool(lineage & excluded)
+
+
+def _reconcile_updated_observations(
+    conn,
+    settings: Settings,
+    station: Station,
+    updated_since: str,
+) -> tuple[int, int, int]:
+    """Refresh older source records whose current iNaturalist state changed."""
+    added = 0
+    reconciled = 0
+    removed = 0
+    for obs in iter_updated_observations(
+        station.query,
+        user_agent=settings.user_agent,
+        updated_since=updated_since,
+    ):
+        reconciled += 1
+        observation_id = int(obs["id"])
+        cached = conn.execute(
+            "SELECT 1 FROM observations WHERE station_id = ? AND inat_obs_id = ?",
+            (station.id, observation_id),
+        ).fetchone()
+        row = None
+        if _observation_matches_taxon_scope(settings, obs):
+            row = _observation_row(station.id, obs)
+        if row is None:
+            if cached:
+                conn.execute(
+                    "DELETE FROM observations WHERE station_id = ? AND inat_obs_id = ?",
+                    (station.id, observation_id),
+                )
+                removed += 1
+            continue
+        conn.execute(OBS_INSERT, row)
+        if not cached:
+            added += 1
+    return added, reconciled, removed
+
+
 def _upsert_station(settings: Settings, station: Station) -> None:
     with connect(settings.database) as conn:
         conn.execute(
@@ -129,49 +292,130 @@ def sync_station(settings: Settings, station: Station, full: bool = False) -> tu
     init_db(settings.database)
     _upsert_station(settings, station)
 
-    with connect(settings.database) as conn:
-        if full:
-            conn.execute("DELETE FROM observations WHERE station_id = ?", (station.id,))
-            cursor = 0
-        else:
+    sync_started_at = _utc_now()
+    if not full and _full_sync_due(settings, station.id, now=sync_started_at):
+        full = True
+        print(
+            f"[{station.id}] full reconciliation due "
+            f"(every {settings.full_sync_interval_days} days)"
+        )
+
+    state = _latest_sync_state(settings, station.id)
+    if full:
+        cursor = 0
+    elif state and state.get("max_inat_obs_id") is not None:
+        cursor = int(state["max_inat_obs_id"])
+    else:
+        with connect(settings.database) as conn:
             row = conn.execute(
                 "SELECT COALESCE(MAX(inat_obs_id), 0) AS max_id "
                 "FROM observations WHERE station_id = ?",
                 (station.id,),
             ).fetchone()
-            cursor = int(row["max_id"])
+        cursor = int(row["max_id"])
 
     seen = 0
     added = 0
+    reconciled = 0
+    removed = 0
     max_id = cursor
     params = station.api_params(settings)
+    updated_since = None if full else _updated_since(settings, station.id)
 
     # Keep the whole station write in one SQLite transaction. Opening and
     # committing a connection for every iNaturalist observation was the
     # dominant cost of a first sync and adds no recovery benefit here.
-    with connect(settings.database) as conn:
-        for obs in iter_observations(params, user_agent=settings.user_agent, id_above=cursor):
-            seen += 1
-            max_id = max(max_id, int(obs["id"]))
-            row = _observation_row(station.id, obs)
-            if row is None:
-                continue
-            before = conn.total_changes
-            conn.execute(OBS_INSERT, row)
-            if conn.total_changes > before:
-                added += 1
+    try:
+        with connect(settings.database) as conn:
+            old_ids = set()
+            stored_ids = set()
+            if full:
+                old_ids = {
+                    int(row["inat_obs_id"])
+                    for row in conn.execute(
+                        "SELECT inat_obs_id FROM observations WHERE station_id = ?",
+                        (station.id,),
+                    )
+                }
+                conn.execute(
+                    "DELETE FROM observations WHERE station_id = ?",
+                    (station.id,),
+                )
+            try:
+                for obs in iter_observations(
+                    params,
+                    user_agent=settings.user_agent,
+                    id_above=cursor,
+                ):
+                    seen += 1
+                    observation_id = int(obs["id"])
+                    max_id = max(max_id, observation_id)
+                    row = _observation_row(station.id, obs)
+                    if row is None:
+                        continue
+                    conn.execute(OBS_INSERT, row)
+                    stored_ids.add(observation_id)
+                    added += 1
+
+                if full:
+                    # A valid empty station is possible, but never replace a
+                    # populated cache after one surprising empty page without
+                    # confirming the current source query is truly empty.
+                    if old_ids and seen == 0:
+                        confirmed_latest_id = latest_observation_id(
+                            settings.user_agent,
+                            **params,
+                        )
+                        if confirmed_latest_id:
+                            raise RuntimeError(
+                                f"[{station.id}] full reconciliation returned "
+                                "no observations, but the source query still "
+                                f"contains observation {confirmed_latest_id}"
+                            )
+                    removed = len(old_ids - stored_ids)
+                elif updated_since:
+                    update_added, reconciled, removed = _reconcile_updated_observations(
+                        conn,
+                        settings,
+                        station,
+                        updated_since,
+                    )
+                    added += update_added
+                    seen += reconciled
+            except Exception:
+                if full:
+                    conn.rollback()
+                raise
+    except ObservationResultLimitExceeded as exc:
+        print(f"[{station.id}] {exc}; falling back to a full reconciliation")
+        return sync_station(settings, station, full=True)
 
     with connect(settings.database) as conn:
         conn.execute(
             """
             INSERT INTO sync_log (
                 station_id, full_sync, observations_added, observations_seen,
-                max_inat_obs_id
-            ) VALUES (?,?,?,?,?)
+                max_inat_obs_id, observations_reconciled,
+                observations_removed, updates_through
+            ) VALUES (?,?,?,?,?,?,?,?)
             """,
-            (station.id, int(full), added, seen, max_id),
+            (
+                station.id,
+                int(full),
+                added,
+                seen,
+                max_id,
+                reconciled,
+                removed,
+                _format_api_time(sync_started_at),
+            ),
         )
 
+    if reconciled or removed:
+        print(
+            f"[{station.id}] reconciled {reconciled} changed source records, "
+            f"removed {removed} stale cached records"
+        )
     return added, seen
 
 
@@ -187,13 +431,15 @@ def pending_station_updates(settings: Settings, stations: list[Station]) -> list
         with connect(settings.database) as conn:
             row = conn.execute(
                 """
-                SELECT COALESCE(MAX(max_inat_obs_id), 0) AS max_id
+                SELECT COALESCE(max_inat_obs_id, 0) AS max_id
                 FROM sync_log
                 WHERE station_id = ?
+                ORDER BY id DESC
+                LIMIT 1
                 """,
                 (station.id,),
             ).fetchone()
-        cached_id = int(row["max_id"])
+        cached_id = int(row["max_id"]) if row else 0
         newest_id = latest_observation_id(
             settings.user_agent,
             **station.api_params(settings),

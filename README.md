@@ -31,7 +31,7 @@ Useful commands:
 python3 -m mothdash sync       # update SQLite only
 python3 -m mothdash render     # rebuild HTML from existing SQLite
 python3 -m mothdash build      # sync, then render
-python3 -m mothdash sync --full # clear and resync station observations
+python3 -m mothdash sync --full # atomically replace active-station observations
 python3 -m mothdash check      # report stations with data newer than the cache
 ```
 
@@ -52,7 +52,20 @@ configure secrets or a Cloudflare Pages project in their forks.
 Scheduled builds use a two-stage workflow to stay within the free tiers: a
 small cursor check asks iNaturalist whether an active station has new records,
 then dispatches the sync/render/deploy workflow only when data changed. A daily
-build remains as a backstop for older records newly added to a station query.
+build also reconciles older records whose identification or taxonomic rank
+changed after upload. Records deleted from iNaturalist or moved outside a
+station's project/place/radius cannot appear in that update feed, so the first
+successful build after 30 days automatically performs an atomic full rebuild
+of active stations. This uses the existing daily deployment rather than adding
+another scheduled run. A maintainer can also select **full_rebuild** when
+manually dispatching the build workflow.
+
+The full-rebuild interval is configured with `full_sync_interval_days` in
+`stations.toml`. As of August 2026, the active queries contain about 26,600
+observations, or roughly 140 observation pages. At the client's sequential
+one-request-per-second pacing, the monthly observation pass adds about 2.5
+minutes; it does not add another Pages deployment. Inactive stations retain
+their frozen history and are never queried by either incremental or full sync.
 
 After pushing this repo to GitHub:
 
@@ -146,8 +159,9 @@ This is an intentionally small first pass:
 
 - county/state firsts are planned but not implemented yet
 - weather correlation is planned but not implemented yet
-- incremental sync follows iNaturalist observation IDs, so use `sync --full`
-  after major station-query changes
+- incremental sync follows new observation IDs and separately reconciles older
+  records updated by iNaturalist; use `sync --full` immediately after a major
+  station-query change instead of waiting for the automatic 30-day backstop
 - first-of-season timing is based on observed date, with records before noon
   assigned to the previous evening's moth session
 - county/state first-record context is cached and refreshed gradually so

@@ -12,6 +12,7 @@ stats_refresh_limit = 80
 regional_watch_radius_km = 100
 regional_watch_days = 14
 regional_watch_cache_hours = 168
+full_sync_interval_days = 30
 
 [[stations]]
 id = "kingfisher"

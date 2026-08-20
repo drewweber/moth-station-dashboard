@@ -1,7 +1,13 @@
 name: Build and deploy dashboard
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      full_rebuild:
+        description: "Re-fetch every active-station observation"
+        type: boolean
+        required: false
+        default: false
   schedule:
     # Daily correctness backstop. The lightweight check-new workflow triggers
     # additional builds only when iNaturalist has new matching observations.
@@ -81,7 +87,13 @@ jobs:
       - name: Build dashboard
         env:
           MOTHDASH_DEPLOYMENT_CHANNEL: ${{ github.ref == 'refs/heads/main' && 'production' || 'preview' }}
-        run: python -m mothdash build
+          MOTHDASH_FULL_REBUILD: ${{ inputs.full_rebuild || 'false' }}
+        run: |
+          if [ "$MOTHDASH_FULL_REBUILD" = "true" ]; then
+            python -m mothdash build --full
+          else
+            python -m mothdash build
+          fi
 
       - name: Deploy production to Cloudflare Pages
         if: github.ref == 'refs/heads/main'

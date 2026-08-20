@@ -60,6 +60,7 @@ class Settings:
     regional_watch_radius_km: float = 100.0
     regional_watch_days: int = 14
     regional_watch_cache_hours: int = 168
+    full_sync_interval_days: int = 30
 
     def taxon_params(self) -> dict[str, int]:
         try:
@@ -143,6 +144,7 @@ def load_config(path: str | Path = "stations.toml") -> tuple[Settings, list[Stat
         regional_watch_radius_km=float(raw_settings.get("regional_watch_radius_km", 100)),
         regional_watch_days=int(raw_settings.get("regional_watch_days", 14)),
         regional_watch_cache_hours=int(raw_settings.get("regional_watch_cache_hours", 168)),
+        full_sync_interval_days=int(raw_settings.get("full_sync_interval_days", 30)),
     )
     settings.taxon_params()
     if settings.regional_watch_radius_km <= 0:
@@ -151,6 +153,8 @@ def load_config(path: str | Path = "stations.toml") -> tuple[Settings, list[Stat
         raise ValueError("regional_watch_days must be greater than zero")
     if settings.regional_watch_cache_hours <= 0:
         raise ValueError("regional_watch_cache_hours must be greater than zero")
+    if settings.full_sync_interval_days <= 0:
+        raise ValueError("full_sync_interval_days must be greater than zero")
 
     stations = []
     seen = set()
