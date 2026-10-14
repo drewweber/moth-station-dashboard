@@ -5,10 +5,12 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 from datetime import date, datetime
 from html import escape
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 from zoneinfo import ZoneInfo
 
 from .analysis import (
@@ -37,6 +39,7 @@ from .analysis import (
 from .config import Settings, Station, active_stations
 from .db import connect, init_db
 from .regional import regional_reference_date
+from .photos import prepare_photos
 
 
 FALLBACK_COLORS = [
@@ -370,6 +373,38 @@ def _hero_metrics(
     )
 
 
+def _photo_image(row: dict[str, Any], *, thumbnail: bool = False, eager: bool = False) -> str:
+    """Use measured local widths; keep unrecognized upstream URLs intact."""
+    url = row.get("photo_url") or ""
+    variants = row.get("photo_variants") or []
+    extra = ""
+    if variants:
+        largest = max(variants, key=lambda item: item["width"])
+        url = largest["url"]
+        sources = ", ".join(f'{item["url"]} {item["width"]}w' for item in variants)
+        sizes = "(max-width: 620px) 92px, 104px" if thumbnail else "(max-width: 620px) min(78vw, 320px), (max-width: 980px) 50vw, 320px"
+        extra = (
+            f' srcset="{h(sources)}" sizes="{h(sizes)}"'
+            f' width="{largest["width"]}" height="{largest["height"]}"'
+        )
+    elif thumbnail:
+        try:
+            parts = urlsplit(url)
+        except ValueError:
+            parts = None
+        if parts and parts.scheme == "https" and parts.netloc in {
+            "inaturalist-open-data.s3.amazonaws.com", "static.inaturalist.org"
+        } and re.fullmatch(r"/photos/\d+/(?:medium|small)\.(?:jpg|jpeg|png|webp)", parts.path):
+            path = re.sub(r"/(?:medium|small)\.", "/small.", parts.path)
+            url = urlunsplit(parts._replace(path=path))
+    attribution = row.get("photo_attribution")
+    if attribution:
+        extra += f' title="{h(attribution)}"'
+    priority = ' fetchpriority="high"' if eager else ""
+    loading = "eager" if eager else "lazy"
+    return f'<img src="{h(url)}" alt="{h(row.get("label") or "Moth observation")}" loading="{loading}" decoding="async"{priority}{extra}>'
+
+
 def _photo_strip(rows: list[dict[str, Any]]) -> str:
     photos = []
     seen = set()
@@ -383,7 +418,7 @@ def _photo_strip(rows: list[dict[str, Any]]) -> str:
         photos.append(
             f"""
             <a class="photo-tile" href="{h(row.get("url"))}" aria-label="{h(label)} at {h(station)}">
-              <img src="{h(url)}" alt="{h(label)}" loading="lazy">
+              {_photo_image(row, eager=not photos)}
               <span>
                 <strong>{h(label)}</strong>
                 <small>{h(station)}</small>
@@ -513,7 +548,7 @@ def _recent_cards(rows: list[dict[str, Any]]) -> str:
         label = h(row["label"])
         image = ""
         if row.get("photo_url"):
-            image = f'<img src="{h(row["photo_url"])}" alt="{label}" loading="lazy">'
+            image = _photo_image(row, thumbnail=True)
         else:
             image = '<div class="sighting-placeholder" aria-hidden="true">light sheet</div>'
         taxon = label
@@ -769,11 +804,11 @@ def _record_cards(rows: list[dict[str, Any]]) -> str:
     return "".join(cards)
 
 
-def _record_table(rows: list[dict[str, Any]]) -> str:
+def _record_table(rows: list[dict[str, Any]], *, paginated: bool = True) -> str:
     if not rows:
         return '<p class="empty">No first-record highlights are available yet.</p>'
     body = []
-    for row in rows:
+    for row in rows[:RECORD_TABLE_PAGE_SIZE] if paginated else rows:
         body.append(
             f"""
             <tr data-record-row data-flags="{h('|'.join(row["flags"]))}"
@@ -790,8 +825,25 @@ def _record_table(rows: list[dict[str, Any]]) -> str:
             </tr>
             """
         )
+    table_attributes = (
+        f'data-record-table data-record-total="{len(rows)}" '
+        'data-record-src="assets/archive-records.json"'
+        if paginated else ""
+    )
+    controls = f"""
+    <div class="record-archive-controls">
+      <span data-record-count aria-live="polite">Showing {min(RECORD_TABLE_PAGE_SIZE, len(rows))} of {len(rows)} records</span>
+      <button type="button" data-record-show-more data-page-size="{RECORD_TABLE_PAGE_SIZE}"{'' if len(rows) > RECORD_TABLE_PAGE_SIZE else ' hidden'}>
+        Show {min(RECORD_TABLE_PAGE_SIZE, max(0, len(rows) - RECORD_TABLE_PAGE_SIZE))} more
+      </button>
+    </div>
+    <p data-record-error role="status" hidden>Could not load the complete records. The current preview is still available.
+      <button type="button" data-record-retry>Retry loading records</button>
+    </p>
+    <p><a class="footer-utility-link" href="archive-records-all.html">View all {len(rows)} records on one page</a></p>
+    """ if paginated else ""
     return f"""
-    <table class="sortable-table" data-record-table>
+    <table class="sortable-table" {table_attributes}>
       <thead>
         <tr>
           <th scope="col">{_sort_button("Species")}</th>
@@ -802,12 +854,7 @@ def _record_table(rows: list[dict[str, Any]]) -> str:
       </thead>
       <tbody>{''.join(body)}</tbody>
     </table>
-    <div class="record-archive-controls">
-      <span data-record-count aria-live="polite">Showing all {h(len(rows))} records</span>
-      <button type="button" data-record-show-more data-page-size="{RECORD_TABLE_PAGE_SIZE}">
-        Show {RECORD_TABLE_PAGE_SIZE} more
-      </button>
-    </div>
+    {controls}
     """
 
 
@@ -963,7 +1010,7 @@ def _unique_station_sections(rows: list[dict[str, Any]], stations: list[Station]
     """
 
 
-def _pulse_table(rows: list[dict[str, Any]], stations: list[Station]) -> str:
+def _pulse_table(rows: list[dict[str, Any]], stations: list[Station], *, limit: int | None = 80) -> str:
     if not rows:
         return '<p class="empty">No multi-station first-of-season records yet. Add another station and sync observations to compare seasonal timing.</p>'
     enabled = [station for station in stations if station.enabled]
@@ -974,7 +1021,7 @@ def _pulse_table(rows: list[dict[str, Any]], stations: list[Station]) -> str:
         for station in enabled
     )
     body = []
-    for row in rows[:80]:
+    for row in rows[:limit]:
         station_cells = []
         for station in enabled:
             entry = row["stations"].get(station.id)
@@ -1025,7 +1072,7 @@ def _comparison_table(rows: list[dict[str, Any]], stations: list[Station]) -> st
         for station in enabled
     )
     body = []
-    for row in rows[:250]:
+    for row in rows:
         cells = []
         for station in enabled:
             entry = row["stations"].get(station.id)
@@ -2221,7 +2268,7 @@ def _profile_recent(rows: list[dict[str, Any]]) -> str:
         label = h(row["label"])
         image = ""
         if row.get("photo_url"):
-            image = f'<img src="{h(row["photo_url"])}" alt="{label}" loading="lazy">'
+            image = _photo_image(row, thumbnail=True)
         else:
             image = '<div class="sighting-placeholder" aria-hidden="true">light sheet</div>'
         title = f'<a href="{h(row["url"])}">{label}</a>' if row.get("url") else label
@@ -2660,24 +2707,17 @@ def _archive_page(
         <h2>First-of-season records</h2>
         <p>All tracked multi-station first-of-season comparisons. First-session dates use moth session dates, with records before noon assigned to the previous evening.</p>
       </div>
-      {_view_toggle("First arrival archive view", ("archive-pulse-year", f"{current_year_label} season"), ("archive-pulse-all-time", "All time"))}
+      <h3>{current_year_label} season</h3>
       <div class="view-panel" id="archive-pulse-year"><div class="table-wrap">{_pulse_table(pulses, stations)}</div></div>
-      <div class="view-panel" id="archive-pulse-all-time" hidden><div class="table-wrap">{_pulse_table(all_time_pulses, stations)}</div></div>
+      <p id="archive-pulse-all-time"><a class="footer-utility-link" href="archive-pulse-all-time.html">View all-time first-of-season comparisons</a></p>
     </section>
     <section id="archive-calendar">
       <div class="section-head">
         <h2>Daily species calendar</h2>
         <p>Station cells show unique moth species per station per night. The total column is the network species union, not a sum of station counts.</p>
       </div>
-      {_view_toggle("Calendar archive view", ("archive-calendar-year", f"{current_year_label} dates"), ("archive-calendar-all-years", "All years"))}
-      <div class="view-panel" id="archive-calendar-year">
-        {_daily_species_line_chart(year_calendar, stations, "year")}
-        <div class="table-wrap">{_calendar_table(year_calendar, stations, "year")}</div>
-      </div>
-      <div class="view-panel" id="archive-calendar-all-years" hidden>
-        {_daily_species_line_chart(all_time_calendar, stations, "all")}
-        <div class="table-wrap">{_calendar_table(all_time_calendar, stations, "all")}</div>
-      </div>
+      <p id="archive-calendar-year"><a class="footer-utility-link" href="archive-calendar-year.html">View {current_year_label} daily calendar and richness chart</a></p>
+      <p id="archive-calendar-all-years"><a class="footer-utility-link" href="archive-calendar-all-years.html">View all-years daily calendar and richness chart</a></p>
     </section>
     <section id="archive-records">
       <div class="section-head">
@@ -2685,10 +2725,10 @@ def _archive_page(
         <p>County, state, and tracked-network firsts. Filter by type or location to inspect the complete cached record set.</p>
       </div>
       {_record_filters(stations)}
-      <div class="record-grid" data-record-grid>{_record_cards(records)}</div>
+      <div class="record-grid" id="archive-record-photo-grid" data-record-grid>{_record_cards(records)}</div>
       <div class="record-grid-controls" data-record-grid-controls hidden>
         <span data-record-grid-count aria-live="polite"></span>
-        <button type="button" data-record-grid-expand data-page-size="{RECORD_CARD_PREVIEW_LIMIT}">Show all matching photos</button>
+        <button type="button" data-record-grid-expand data-page-size="{RECORD_CARD_PREVIEW_LIMIT}" aria-expanded="false" aria-controls="archive-record-photo-grid">Show all matching photos</button>
       </div>
       <div class="table-wrap">{_record_table(records)}</div>
     </section>
@@ -2704,11 +2744,10 @@ def _archive_page(
         <h2>Station species comparison</h2>
         <p>Each cell shows observation count, first session date, and any county, state, or tracked-station first flags.</p>
       </div>
-      {_view_toggle("Species comparison archive view", ("archive-species-all-time", "All time"), ("archive-species-year", f"{current_year_label} only"), ("archive-species-past-week", "Past week"), ("archive-species-last-night", "Previous full night"))}
-      <div class="view-panel" id="archive-species-all-time"><div class="table-wrap">{_comparison_table(taxa, stations)}</div></div>
-      <div class="view-panel" id="archive-species-year" hidden><div class="table-wrap">{_comparison_table(year_taxa, stations)}</div></div>
-      <div class="view-panel" id="archive-species-past-week" hidden><div class="table-wrap">{_comparison_table(recent_week_taxa, stations)}</div></div>
-      <div class="view-panel" id="archive-species-last-night" hidden><div class="table-wrap">{_comparison_table(latest_night_taxa, stations)}</div></div>
+      <p id="archive-species-all-time"><a class="footer-utility-link" href="archive-species-all-time.html">View all-time species comparison</a></p>
+      <p id="archive-species-year"><a class="footer-utility-link" href="archive-species-year.html">View {current_year_label} species comparison</a></p>
+      <p id="archive-species-past-week"><a class="footer-utility-link" href="archive-species-past-week.html">View past-week species comparison</a></p>
+      <p id="archive-species-last-night"><a class="footer-utility-link" href="archive-species-last-night.html">View previous-full-night species comparison</a></p>
     </section>
   </main>
   <footer><div>Generated {h(generated_at())}. <a class="footer-utility-link" href="index.html">Dashboard overview</a></div></footer>
@@ -2716,6 +2755,77 @@ def _archive_page(
 </body>
 </html>
 """
+
+
+def _write_archive_assets(output: Path, **data: Any) -> None:
+    """Write the bounded archive and independently navigable full reference views."""
+    (output / "archive.html").write_text(_archive_page(**data), encoding="utf-8")
+    assets = output / "assets"
+    assets.mkdir(parents=True, exist_ok=True)
+    (assets / "archive-records.json").write_text(
+        json.dumps(data["records"], default=str, separators=(",", ":")), encoding="utf-8"
+    )
+    stations = data["stations"]
+    year_label = str(data["year"] or "Current")
+
+    def write_page(name: str, title: str, section: str, description: str, content: str) -> None:
+        page = f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{h(title)} · Moth Station Data Archive</title>
+  <link rel="stylesheet" href="assets/dashboard.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to data</a>
+  <header><div class="topbar"><a class="brand" href="index.html">Moth stations</a>
+    <a href="archive.html#{h(section)}">Return to data archive</a></div></header>
+  <main id="main" class="site-shell">
+    <section><div class="section-head"><h1>{h(title)}</h1><p>{h(description)}</p></div>
+      {content}
+    </section>
+    <p><a class="footer-utility-link" href="archive.html#{h(section)}">Return to data archive</a></p>
+  </main>
+  <footer><div>Generated {h(generated_at())}. Uses the same build-time cache and definitions as the dashboard.</div></footer>
+  <script src="assets/dashboard.js" defer></script>
+</body>
+</html>
+"""
+        (output / f"{name}.html").write_text(page, encoding="utf-8")
+
+    write_page(
+        "archive-records-all", "All flagged firsts", "archive-records",
+        "County, state, and tracked-network firsts. Station first dates use moth sessions, with records before noon assigned to the previous evening.",
+        f'<div class="table-wrap">{_record_table(data["records"], paginated=False)}</div>',
+    )
+    write_page(
+        "archive-pulse-all-time", "All-time first-of-season comparisons", "archive-pulses",
+        "First-session dates use moth sessions, with records before noon assigned to the previous evening.",
+        f'<div class="table-wrap">{_pulse_table(data["all_time_pulses"], stations, limit=None)}</div>',
+    )
+    for name, key, label, mode in (
+        ("archive-calendar-year", "year_calendar", f"{year_label} daily species calendar", "year"),
+        ("archive-calendar-all-years", "all_time_calendar", "All-years daily species calendar", "all"),
+    ):
+        rows = data[key]
+        write_page(
+            name, label, "archive-calendar",
+            "Station cells show unique moth species per station per night. The total column is the network species union, not a sum of station counts.",
+            _daily_species_line_chart(rows, stations, mode)
+            + f'<div class="table-wrap">{_calendar_table(rows, stations, mode)}</div>',
+        )
+    for name, key, label in (
+        ("archive-species-all-time", "taxa", "All-time species comparison"),
+        ("archive-species-year", "year_taxa", f"{year_label} species comparison"),
+        ("archive-species-past-week", "recent_week_taxa", "Past-week species comparison"),
+        ("archive-species-last-night", "latest_night_taxa", "Previous-full-night species comparison"),
+    ):
+        write_page(
+            name, label, "archive-species",
+            "Each cell shows observation count, first moth-session date, and any county, state, or tracked-station first flags. Records before noon belong to the previous evening.",
+            f'<div class="table-wrap">{_comparison_table(data[key], stations)}</div>',
+        )
 
 
 SENSITIVE_LIVE_QUERY_KEYS = {
@@ -3023,6 +3133,8 @@ function sortTable(table, columnIndex, direction, type) {
 
 function initSortableTables() {
   document.querySelectorAll(".sortable-table").forEach((table) => {
+    // The archive record table sorts its complete data before rendering a page.
+    if (table.hasAttribute("data-record-table")) return;
     table.querySelectorAll("thead .sort-button").forEach((button, index) => {
       const type = button.dataset.sortType || "text";
       button.addEventListener("click", () => {
@@ -3328,7 +3440,7 @@ function buildRecordCardHtml(row) {
 }
 
 function initRecordFilters() {
-  const section = document.querySelector("#records");
+  const section = document.querySelector("#archive-records");
   if (!section) return;
   const typeSelect = section.querySelector('[data-record-filter="type"]');
   const locationSelect = section.querySelector('[data-record-filter="location"]');
@@ -3337,39 +3449,83 @@ function initRecordFilters() {
   const gridControls = section.querySelector("[data-record-grid-controls]");
   const gridCount = section.querySelector("[data-record-grid-count]");
   const gridExpand = section.querySelector("[data-record-grid-expand]");
-  const archive = section.querySelector(".record-archive");
   const table = section.querySelector("[data-record-table]");
   const showMore = section.querySelector("[data-record-show-more]");
   const count = section.querySelector("[data-record-count]");
-  if (!typeSelect || !locationSelect) return;
+  const loadError = section.querySelector("[data-record-error]");
+  const retry = section.querySelector("[data-record-retry]");
+  if (!typeSelect || !locationSelect || !table) return;
+  const tbody = table.tBodies[0];
+  const sortButtons = Array.from(table.querySelectorAll("thead .sort-button"));
+  const controls = [typeSelect, locationSelect, showMore, gridExpand, retry, ...sortButtons].filter(Boolean);
   const pageSize = Number(showMore?.dataset.pageSize || 100);
   const cardPageSize = Number(gridExpand?.dataset.pageSize || 12);
   const originalGridHtml = cardGrid ? cardGrid.innerHTML : "";
+  const total = Number(table.dataset.recordTotal || 0);
+  let records = Array.from(tbody.rows).map((row) => ({ dataset: { ...row.dataset } }));
+  let loaded = records.length === total;
+  let loading = null;
   let visibleLimit = pageSize;
   let cardsExpanded = false;
+  let sortColumn = null;
+  let sortDirection = "asc";
+  let retryAction = () => {};
+
+  const ensureRecords = async () => {
+    if (loaded) return;
+    if (!loading) {
+      loading = (async () => {
+        const response = await fetch(table.dataset.recordSrc);
+        if (!response.ok) throw new Error("Record data unavailable");
+        const data = await response.json();
+        if (!Array.isArray(data) || data.length !== total || data.some((row) => !row || typeof row.label !== "string" || !Array.isArray(row.flags))) {
+          throw new Error("Record data does not match this archive");
+        }
+        records = data.map((row) => ({ dataset: {
+          label: row.label,
+          stationId: row.station_id,
+          stationName: row.station_name,
+          first: row.first || "",
+          flags: row.flags.join("|"),
+          photoUrl: row.photo_url || "",
+          href: row.url || "",
+        } }));
+        loaded = true;
+      })();
+    }
+    try {
+      await loading;
+    } finally {
+      loading = null;
+    }
+  };
+
+  const rowHtml = ({ dataset: row }) => {
+    const label = recordEscapeHtml(row.label);
+    const title = row.href ? `<a href="${recordEscapeHtml(row.href)}">${label}</a>` : label;
+    const flags = (row.flags || "").split("|").filter(Boolean)
+      .map((flag) => `<span class="flag">${recordEscapeHtml(flag)}</span>`).join("");
+    return `<tr data-record-row><td>${title}</td><td>${recordEscapeHtml(row.stationName)}</td><td>${recordEscapeHtml(row.first)}</td><td>${flags}</td></tr>`;
+  };
 
   const apply = () => {
     const type = typeSelect.value;
     const location = locationSelect.value;
     const filterActive = Boolean(type) || Boolean(location);
-    const rows = Array.from(table?.tBodies[0]?.rows || []);
-    const matching = rows.filter((item) => {
+    const matching = records.filter((item) => {
       const flags = (item.dataset.flags || "").split("|").filter(Boolean);
       const matchesType = !type || flags.includes(type);
       const matchesLocation = !location || item.dataset.stationId === location;
       return matchesType && matchesLocation;
     });
-    const matchingRows = new Set(matching);
-
-    rows.forEach((item) => {
-      if (filterActive) {
-        item.hidden = !matchingRows.has(item);
-      } else {
-        item.hidden = rows.indexOf(item) >= visibleLimit;
-      }
-    });
-
-    if (filterActive && archive) archive.open = true;
+    if (sortColumn !== null) {
+      const key = ["label", "stationName", "first", "flags"][sortColumn];
+      matching.sort((left, right) => {
+        const order = compareValues(left.dataset[key], right.dataset[key], "text");
+        return sortDirection === "asc" ? order : -order;
+      });
+    }
+    tbody.innerHTML = matching.slice(0, visibleLimit).map(rowHtml).join("");
 
     if (cardGrid) {
       if (filterActive) {
@@ -3389,42 +3545,68 @@ function initRecordFilters() {
     }
     if (gridExpand) {
       gridExpand.hidden = matching.length <= cardPageSize;
+      gridExpand.setAttribute("aria-expanded", String(cardsExpanded));
       gridExpand.textContent = cardsExpanded ? "Show fewer photos" : `Show all ${matching.length} matching photos`;
     }
 
     if (emptyMessage) emptyMessage.hidden = matching.length > 0;
     if (showMore) {
-      showMore.hidden = filterActive || visibleLimit >= rows.length;
-      const remaining = Math.max(0, rows.length - visibleLimit);
+      showMore.hidden = visibleLimit >= matching.length;
+      const remaining = Math.max(0, matching.length - visibleLimit);
       showMore.textContent = `Show ${Math.min(pageSize, remaining)} more`;
     }
     if (count) {
-      count.textContent = filterActive
-        ? `${matching.length} matching record${matching.length === 1 ? "" : "s"}`
-        : `Showing ${Math.min(visibleLimit, rows.length)} of ${rows.length} records`;
+      count.textContent = `Showing ${Math.min(visibleLimit, matching.length)} of ${matching.length} ${filterActive ? "matching " : ""}record${matching.length === 1 ? "" : "s"}`;
     }
   };
 
+  const withRecords = async (action) => {
+    retryAction = action;
+    section.setAttribute("aria-busy", "true");
+    controls.forEach((control) => { control.disabled = true; });
+    if (loadError) loadError.hidden = true;
+    try {
+      await ensureRecords();
+      action();
+      apply();
+    } catch {
+      if (loadError) loadError.hidden = false;
+    } finally {
+      section.removeAttribute("aria-busy");
+      controls.forEach((control) => { control.disabled = false; });
+    }
+  };
   const filterChanged = () => {
-    visibleLimit = pageSize;
-    cardsExpanded = false;
-    apply();
+    withRecords(() => {
+      visibleLimit = pageSize;
+      cardsExpanded = false;
+    });
   };
   typeSelect.addEventListener("change", filterChanged);
   locationSelect.addEventListener("change", filterChanged);
   showMore?.addEventListener("click", () => {
-    visibleLimit += pageSize;
-    apply();
+    withRecords(() => { visibleLimit += pageSize; });
   });
   gridExpand?.addEventListener("click", () => {
     cardsExpanded = !cardsExpanded;
     apply();
   });
-  table?.addEventListener("table-sorted", () => {
-    visibleLimit = pageSize;
-    apply();
+  sortButtons.forEach((button, index) => {
+    button.addEventListener("click", () => {
+      withRecords(() => {
+        sortDirection = button.dataset.direction === "asc" ? "desc" : "asc";
+        sortColumn = index;
+        visibleLimit = pageSize;
+        sortButtons.forEach((item) => {
+          item.dataset.direction = "";
+          item.closest("th")?.removeAttribute("aria-sort");
+        });
+        button.dataset.direction = sortDirection;
+        button.closest("th")?.setAttribute("aria-sort", sortDirection === "asc" ? "ascending" : "descending");
+      });
+    });
   });
-  apply();
+  retry?.addEventListener("click", () => { withRecords(retryAction); });
 }
 
 const INSIGHT_FEEDBACK_KEY = "mothdash-insight-feedback-v1";
@@ -7791,6 +7973,18 @@ def _render(settings: Settings, stations: list[Station], output: Path | None = N
     recent = recent_observations(settings)
     recent_spotlight = diversify_by_station(recent, limit=12, dedupe_key="url")
     hero_photo_rows = hero_photos(settings)
+    prepared = prepare_photos(
+        hero_photo_rows + recent_spotlight,
+        settings.public_dir,
+        settings.root / ".cache" / "photos",
+        allow_downloads=os.environ.get("MOTHDASH_PREPARE_PHOTOS") == "1",
+    )
+    hero_count = len(hero_photo_rows)
+    hero_photo_rows, recent_spotlight = prepared[:hero_count], prepared[hero_count:]
+    photo_credits_link = (
+        ' <a class="footer-utility-link" href="photo-credits.html">Photo credits</a>'
+        if any(row.get("photo_variants") for row in prepared) else ""
+    )
     year = active_year(settings)
     pulses = first_of_season(settings, year)
     all_time_pulses = first_of_season(settings, all_time=True)
@@ -7921,7 +8115,7 @@ def _render(settings: Settings, stations: list[Station], output: Path | None = N
       <p><a class="footer-utility-link" href="archive.html">Open the complete data archive</a></p>
     </section>
   </main>
-  <footer><div>Generated {h(generated_at())}. First-of-season dates use moth session dates, with records before noon assigned to the previous evening. <a class="footer-utility-link" href="archive.html">Data archive</a> <a class="footer-utility-link" href="forecast-validation.html">Forecast validation</a></div></footer>
+  <footer><div>Generated {h(generated_at())}. First-of-season dates use moth session dates, with records before noon assigned to the previous evening. <a class="footer-utility-link" href="archive.html">Data archive</a> <a class="footer-utility-link" href="forecast-validation.html">Forecast validation</a>{photo_credits_link}</div></footer>
   <script src="assets/dashboard.js" defer></script>
 </body>
 </html>
@@ -7953,22 +8147,20 @@ def _render(settings: Settings, stations: list[Station], output: Path | None = N
     (assets_dir / "dashboard.css").write_text(CSS, encoding="utf-8")
     (assets_dir / "dashboard.js").write_text(DASHBOARD_JS, encoding="utf-8")
     (assets_dir / "live.js").write_text(LIVE_JS, encoding="utf-8")
-    (settings.public_dir / "archive.html").write_text(
-        _archive_page(
-            year=year,
-            pulses=pulses,
-            all_time_pulses=all_time_pulses,
-            year_calendar=year_calendar,
-            all_time_calendar=all_time_calendar,
-            records=records,
-            uniques=uniques,
-            taxa=taxa,
-            year_taxa=year_taxa,
-            recent_week_taxa=recent_week_taxa,
-            latest_night_taxa=latest_night_taxa,
-            stations=stations,
-        ),
-        encoding="utf-8",
+    _write_archive_assets(
+        settings.public_dir,
+        year=year,
+        pulses=pulses,
+        all_time_pulses=all_time_pulses,
+        year_calendar=year_calendar,
+        all_time_calendar=all_time_calendar,
+        records=records,
+        uniques=uniques,
+        taxa=taxa,
+        year_taxa=year_taxa,
+        recent_week_taxa=recent_week_taxa,
+        latest_night_taxa=latest_night_taxa,
+        stations=stations,
     )
     stations_dir = settings.public_dir / "stations"
     stations_dir.mkdir(parents=True, exist_ok=True)

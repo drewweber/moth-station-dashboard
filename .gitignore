@@ -6,12 +6,14 @@ data/*.db
 data/*.db-*
 public/index.html
 public/archive.html
+public/archive-*.html
 public/live.html
 public/forecast-validation.html
 public/live-snapshot.json
 public/insights.json
 public/trends.json
 public/assets/
+public/photo-credits.html
 public/stations/
 logs/
 .cache/

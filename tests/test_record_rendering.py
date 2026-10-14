@@ -536,12 +536,13 @@ class RecordRenderingTests(unittest.TestCase):
         self.assertIn('data-single-station-id="alpha"', html)
         self.assertIn('data-night-station-total="1"', html)
 
-    def test_archive_contains_every_record_without_server_hidden_rows(self) -> None:
+    def test_archive_initial_table_only_renders_one_page_of_records(self) -> None:
         html = _record_table(records(150))
 
-        self.assertEqual(html.count("data-record-row"), 150)
+        self.assertEqual(html.count("data-record-row"), 100)
         self.assertIn("Species 0000", html)
-        self.assertIn("Species 0149", html)
+        self.assertNotIn("Species 0149", html)
+        self.assertIn("Showing 100 of 150 records", html)
         self.assertNotIn("data-default-hidden", html)
         self.assertNotIn("<tr hidden", html)
 
@@ -554,11 +555,10 @@ class RecordRenderingTests(unittest.TestCase):
         self.assertIn("data-record-count", html)
         self.assertIn('data-record-filter="type"', DASHBOARD_JS)
         self.assertIn('data-record-filter="location"', DASHBOARD_JS)
-        self.assertIn('archive.open = true', DASHBOARD_JS)
 
     def test_archive_rows_carry_card_rebuild_data(self) -> None:
         # The filtered photo grid is rebuilt client-side from data embedded
-        # on the (always-complete) table rows, since the server-rendered
+        # on the initial table rows, since the server-rendered
         # card grid intentionally only ever contains a bounded preview.
         html = _record_table(records(5))
 

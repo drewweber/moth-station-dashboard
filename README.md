@@ -15,8 +15,13 @@ The MVP builds a static dashboard from configured station queries:
 
 ## Setup
 
-This first version uses only the Python standard library. Python 3.11 or newer
-is required because station config is read from TOML.
+Python 3.11 or newer is required because station config is read from TOML.
+The core renderer uses the standard library. Install the optional image-build
+dependency to generate smaller, licensed WebP photo variants:
+
+```sh
+python3 -m pip install -r requirements.txt
+```
 
 ```sh
 python3 -m mothdash build
@@ -34,6 +39,57 @@ python3 -m mothdash build      # sync, then render
 python3 -m mothdash sync --full # atomically replace active-station observations
 python3 -m mothdash check      # report stations with data newer than the cache
 ```
+
+## Page speed and photo assets
+
+The first homepage photo loads eagerly with high priority; other photos stay
+lazy. Recent-sighting thumbnails use iNaturalist's smaller source variant when
+no optimized local image is available. The homepage's hero and recent-sighting
+photos can receive responsive WebP variants, with actual pixel widths and a
+linked photo-credit page retaining source links, attribution, license, and
+conversion details.
+
+Ordinary `render` remains network-free and reuses available cached variants.
+To prepare missing photos while rendering an existing database:
+
+```sh
+MOTHDASH_PREPARE_PHOTOS=1 python3 -m mothdash render
+```
+
+Deployment builds enable this flag and cache `.cache/photos` separately from
+the database. Only known iNaturalist photo URLs with suitable cached licensing
+and attribution metadata are eligible; missing-license and no-derivatives
+images stay upstream. Download or decoding failures also keep the original
+image usable. Pillow is not required for cache-only rendering.
+
+Build-cost ceiling: at most 20 eligible source photos per build, with at most
+20 new download attempts, a 5 MiB limit per source, and a shared 60-second
+preparation budget (plus an in-flight operation's five-second timeout).
+Successful encodes produce at most two variants per source, each capped at
+5 MiB. Only current-source derived files are retained in the persistent cache;
+ordinary photos are much smaller than these safety limits. This adds no
+iNaturalist API calls, scheduled runs, or Pages deployments. It adds at most
+100 MiB of source-image transfer and 200 MiB of encoded assets/cache per cold
+build; warm-cache builds do no photo downloading. All output is static and
+requires no paid image-transformation service.
+
+The archive initially renders at most 100 flagged records. Filtering, sorting,
+and “Show more” load the complete static JSON dataset once, then build only the
+requested rows. A full static table remains available without JavaScript.
+Calendar and species-comparison views have dedicated static pages, preserving
+their full data without parsing all views when the archive opens. Station
+selection, scientific counts, sync cadence, and iNaturalist API calls are
+unchanged.
+
+Browser regression check (requires Node, Playwright, and Chrome):
+
+```sh
+node tests/archive_browser.mjs
+```
+
+Set `PLAYWRIGHT_MODULE` to an absolute Playwright module path if it is not
+installed in the default Node resolution path. Unit checks remain
+`python3 -m unittest discover -s tests -v`.
 
 ## Hosting
 
