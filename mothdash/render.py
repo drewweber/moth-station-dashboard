@@ -62,6 +62,12 @@ def h(value: Any) -> str:
     return escape(str(value))
 
 
+def _stylesheet_href(prefix: str = "") -> str:
+    """Refresh cached styles when the generated stylesheet changes."""
+    version = hashlib.sha256(CSS.encode("utf-8")).hexdigest()[:12]
+    return f"{prefix}assets/dashboard.css?v={version}"
+
+
 def _mode_toggle(history_href: str, live_href: str, active: str) -> str:
     """Render the primary History/Live navigation used across generated pages."""
     history_current = ' aria-current="page"' if active == "history" else ""
@@ -1917,7 +1923,7 @@ def _forecast_validation_page(validation: dict[str, Any]) -> str:
   <title>Forecast validation · Moth Station Dashboard</title>
   <meta name="description" content="Internal validation of the predicted next 10 moths at tracked sources.">
   <meta name="theme-color" content="#151611">
-  <link rel="stylesheet" href="assets/dashboard.css">
+  <link rel="stylesheet" href="{_stylesheet_href()}">
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to forecast validation</a>
@@ -2681,7 +2687,7 @@ def _archive_page(
   <title>Moth Station Data Archive</title>
   <meta name="description" content="Full reference tables for the Moth Station Dashboard.">
   <meta name="theme-color" content="#151611">
-  <link rel="stylesheet" href="assets/dashboard.css">
+  <link rel="stylesheet" href="{_stylesheet_href()}">
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to archive</a>
@@ -2774,7 +2780,7 @@ def _write_archive_assets(output: Path, **data: Any) -> None:
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{h(title)} · Moth Station Data Archive</title>
-  <link rel="stylesheet" href="assets/dashboard.css">
+  <link rel="stylesheet" href="{_stylesheet_href()}">
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to data</a>
@@ -2946,7 +2952,7 @@ def _station_profile_page(station: Station, profile: dict[str, Any], recap: dict
   <title>{h(station.name)} · Moth Station Dashboard</title>
   <meta name="description" content="Station profile for {h(station.name)} in the moth stations dashboard.">
   <meta name="theme-color" content="#151611">
-  <link rel="stylesheet" href="../assets/dashboard.css">
+  <link rel="stylesheet" href="{_stylesheet_href('../')}">
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to station profile</a>
@@ -3082,7 +3088,7 @@ def _station_habitat_page(station: Station, habitat: dict[str, Any], color: str)
   <title>Habitat archive · {h(station.name)} · Moth Station Dashboard</title>
   <meta name="description" content="Documented moth host-plant associations for {h(station.name)}.">
   <meta name="theme-color" content="#151611">
-  <link rel="stylesheet" href="../assets/dashboard.css">
+  <link rel="stylesheet" href="{_stylesheet_href('../')}">
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to habitat archive</a>
@@ -8003,6 +8009,7 @@ def _render(settings: Settings, stations: list[Station], output: Path | None = N
         settings.public_dir,
         settings.root / ".cache" / "photos",
         allow_downloads=os.environ.get("MOTHDASH_PREPARE_PHOTOS") == "1",
+        stylesheet_href=_stylesheet_href("/"),
     )
     hero_count = len(hero_photo_rows)
     hero_photo_rows, recent_spotlight = prepared[:hero_count], prepared[hero_count:]
@@ -8038,7 +8045,7 @@ def _render(settings: Settings, stations: list[Station], output: Path | None = N
   <title>Moth Station Dashboard</title>
   <meta name="description" content="Compare recent moth observations and first-of-season records across iNaturalist stations.">
   <meta name="theme-color" content="#151611">
-  <link rel="stylesheet" href="assets/dashboard.css">
+  <link rel="stylesheet" href="{_stylesheet_href()}">
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to dashboard</a>

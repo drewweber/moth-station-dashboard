@@ -260,7 +260,7 @@ def _publish_variants(variants: list[dict[str, Any]], cache_dir: Path, public_di
     return published
 
 
-def _write_credits(rows: list[dict[str, Any]], public_dir: Path) -> None:
+def _write_credits(rows: list[dict[str, Any]], public_dir: Path, stylesheet_href: str) -> None:
     entries = []
     seen = set()
     for row in rows:
@@ -284,7 +284,7 @@ def _write_credits(rows: list[dict[str, Any]], public_dir: Path) -> None:
         '<!doctype html><html lang="en"><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width, initial-scale=1">'
         '<title>Photo credits · Moth stations</title>'
-        '<link rel="stylesheet" href="/assets/dashboard.css"></head>'
+        f'<link rel="stylesheet" href="{escape(stylesheet_href)}"></head>'
         '<body><main class="site-shell"><p><a href="/index.html">Moth stations</a></p>'
         '<h1>Photo credits</h1><p>These homepage photographs have been resized '
         'without cropping and converted to WebP for faster loading. Photographers '
@@ -301,6 +301,7 @@ def prepare_photos(
     *,
     max_downloads: int = 20,
     allow_downloads: bool = False,
+    stylesheet_href: str = "/assets/dashboard.css",
 ) -> list[dict[str, Any]]:
     """Copy rows, adding responsive assets and credits for eligible successes.
 
@@ -344,7 +345,7 @@ def prepare_photos(
     _trim_cache(cache_dir, set(prepared))
     if any(row.get("photo_credit") for row in result):
         try:
-            _write_credits(result, public_dir)
+            _write_credits(result, public_dir, stylesheet_href)
         except OSError:
             # Do not publish locally rewritten photos without their credits.
             return [dict(row) for row in rows]
