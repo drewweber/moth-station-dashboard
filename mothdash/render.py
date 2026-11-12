@@ -98,7 +98,7 @@ HISTORY_NAV_DESTINATIONS = (
     (
         "Season",
         (
-            ("First arrivals", "dashboard", "pulses"),
+            ("First records", "dashboard", "pulses"),
             ("Trends", "dashboard", "trends"),
         ),
     ),
@@ -613,7 +613,7 @@ def _taxa_period_dashboard(
         for station_id in active_station_ids
     }
 
-    # Keep shared flights first by default, while reserving a small real
+    # Keep shared species first by default, while reserving a small real
     # preview for every station-only filter.
     preview_taxa = list(taxa[:PERIOD_CARD_PREVIEW_LIMIT])
     preview_taxon_ids = {row.get("taxon_id") for row in preview_taxa}
@@ -730,7 +730,7 @@ def _last_night_dashboard(payload: dict[str, Any], stations: list[Station]) -> s
         payload,
         stations,
         "completed 12pm-to-12pm moth session",
-        "No species-level moth observations were recorded in the last completed moth session.",
+        "No species-level moth reports are available for the last completed session.",
     )
 
 
@@ -739,7 +739,7 @@ def _recent_week_dashboard(payload: dict[str, Any], stations: list[Station]) -> 
         payload,
         stations,
         "past 7 nights",
-        "No species-level moth observations were recorded in this seven-night range.",
+        "No species-level moth reports are available for this seven-night range.",
     )
 
 
@@ -1466,12 +1466,12 @@ def _accumulation_bars(profile: dict[str, Any]) -> str:
     for x, y, row in points:
         tooltip_html = (
             f'<div class="monthly-tooltip-head"><strong>{h(row["date"])}</strong>'
-            f'<span>{h(row["species"])} species · {h(row["nights"])} nights</span></div>'
+            f'<span>{h(row["species"])} species · {h(row["nights"])} reporting dates</span></div>'
         )
         markers.append(
             f"""
             <g class="monthly-point-group" style="--series-color: var(--amber)" tabindex="0" role="img"
-               aria-label="{h(row['date'])}: {h(row['species'])} species after {h(row['nights'])} active moth nights"
+               aria-label="{h(row['date'])}, {h(row['species'])} species after {h(row['nights'])} reporting dates"
                data-tooltip-html="{h(tooltip_html)}">
               <circle class="monthly-hit-target" cx="{x:.1f}" cy="{y:.1f}" r="9"></circle>
               <circle class="monthly-point" cx="{x:.1f}" cy="{y:.1f}" r="2.6"></circle>
@@ -1483,7 +1483,7 @@ def _accumulation_bars(profile: dict[str, Any]) -> str:
     <figure class="accumulation-line-chart">
       <svg viewBox="0 0 {width} {height}" role="img" aria-labelledby="accumulation-title accumulation-desc">
         <title id="accumulation-title">Station species accumulation curve</title>
-        <desc id="accumulation-desc">Running moth species count from {h(min_date)} to {h(max_date)}, ending at {h(latest["species"])} species after {h(latest["nights"])} active moth nights. Focus or point at a node to see its date, count, and moth-night coverage.</desc>
+        <desc id="accumulation-desc">Running moth species count from {h(min_date)} to {h(max_date)}, ending at {h(latest["species"])} species after {h(latest["nights"])} dates with species reports. Focus or point at a node to see its date, species count, and reporting coverage.</desc>
         <line class="chart-axis" x1="{left}" y1="{top + plot_height}" x2="{left + plot_width}" y2="{top + plot_height}"></line>
         <line class="chart-axis" x1="{left}" y1="{top}" x2="{left}" y2="{top + plot_height}"></line>
         <line class="chart-grid" x1="{left}" y1="{top}" x2="{left + plot_width}" y2="{top}"></line>
@@ -1524,7 +1524,7 @@ def _profile_phenology_calendar(profile: dict[str, Any]) -> str:
 
 def _expected_next_list(rows: list[dict[str, Any]]) -> str:
     if not rows:
-        return '<p class="empty">No next-flight suggestions are available from the current station history.</p>'
+        return '<p class="empty">No seasonal return suggestions are available from the current station history.</p>'
     items = []
     for row in rows:
         label = h(row["label"])
@@ -1742,9 +1742,9 @@ def _seasonal_target_intro(station: Station, targets: dict[str, Any]) -> tuple[s
             "Predicted next 10 moths",
             "The ten moth species not yet recorded at "
             f"{h(station.name)} with the strongest near-term seasonal evidence within "
-            f"{radius:g} km. Nearby iNaturalist records from the next 14 calendar days "
-            "set the order, with this week's records weighted slightly more than next "
-            "week's. Species with at least four timed tracked records move behind the "
+            f"{radius:g} km. Nearby iNaturalist records on corresponding calendar dates "
+            "across years set the order, with the first week of the 14-day window weighted "
+            "slightly more than the second. Species with at least four timed tracked records move behind the "
             "other candidates when half or fewer fall during sheet-compatible hours "
             "(6 p.m. to 10 a.m.). Host associations are shown as context but do not change the "
             "ranking. This is a watchlist for likely next new station records, not a "
@@ -2016,7 +2016,7 @@ def _weekly_recap(data: dict[str, Any]) -> str:
     week_range = f"{h(data['week_start'])} to {h(data['week_end'])}"
     if not data.get("has_data"):
         return f"""
-          <p class="empty">Last week ({week_range}) was quiet at this station -- no species-level observations recorded.</p>
+          <p class="empty">No species-level reports are available for this station from {week_range}.</p>
         """
 
     if data["previous_total_species"] == 0:
@@ -2044,8 +2044,8 @@ def _weekly_recap(data: dict[str, Any]) -> str:
     showcase_cards.append(
         _recap_showcase_card(
             data["frequent_flyer"],
-            "Frequent Flyer",
-            f"Seen {data['frequent_flyer']['count']} times here last week, more than anything else.",
+            "Most reported",
+            f"{data['frequent_flyer']['count']} records here last week, the most for any species.",
         )
     )
     showcase_html = "".join(showcase_cards)
@@ -2053,7 +2053,7 @@ def _weekly_recap(data: dict[str, Any]) -> str:
     new_in_town = data["new_in_town"]
     new_in_town_count = data.get("new_in_town_count", len(new_in_town))
     if not new_in_town:
-        new_in_town_body = '<p class="recap-empty-line">No brand-new arrivals at this station last week.</p>'
+        new_in_town_body = '<p class="recap-empty-line">No first records for this station last week.</p>'
     else:
         preview = new_in_town[:2]
         names = ", ".join(
@@ -2062,9 +2062,8 @@ def _weekly_recap(data: dict[str, Any]) -> str:
         )
         remainder = new_in_town_count - len(preview)
         tail = f", and {remainder} more" if remainder > 0 else ""
-        plural = "species" if new_in_town_count == 1 else "species"
         new_in_town_body = (
-            f'<p class="recap-stacked-copy">{h(new_in_town_count)} new {plural} first appeared here '
+            f'<p class="recap-stacked-copy">First records here for {h(new_in_town_count)} species '
             f"this week, including {names}{tail}.</p>"
         )
 
@@ -2292,15 +2291,15 @@ def _phenology_ribbons(rows: list[dict[str, Any]]) -> str:
         return '<p class="empty">Phenology ribbons will appear after synced observations.</p>'
     items = []
     for row in rows:
-        start = max(0, min(100, (row["first_day"] - 1) / 365 * 100))
-        end = max(start + 1, min(100, row["latest_day"] / 365 * 100))
+        start = (row["first_day"] - 1) / 366 * 100
+        end = row["latest_day"] / 366 * 100
         width = end - start
         items.append(
             f"""
             <div class="phenology-row">
               <div>
                 <strong>{h(row["label"])}</strong>
-                <span>{h(row["station_count"])} stations · {h(row["count"])} obs · peak {h(row["peak_month"])}</span>
+                <span>{h(row["station_count"])} stations · {h(row["count"])} records · most reports in {h(row["peak_month"])}</span>
               </div>
               <div class="phenology-track" aria-label="{h(row["label"])} observed from {h(row["first_label"])} to {h(row["latest_label"])}">
                 <i style="left: {start:.2f}%; width: {width:.2f}%"></i>
@@ -2566,7 +2565,7 @@ def _monthly_overlays(rows: list[dict[str, Any]], stations: list[Station]) -> st
 
 def _rank_abundance(rows: list[dict[str, Any]]) -> str:
     if not rows:
-        return '<p class="empty">Rank abundance will appear after synced observations.</p>'
+        return '<p class="empty">Species rankings will appear after synced observations.</p>'
     max_count = max(row["count"] for row in rows)
     items = []
     for row in rows:
@@ -2577,7 +2576,7 @@ def _rank_abundance(rows: list[dict[str, Any]]) -> str:
               <span>{h(row["rank"])}</span>
               <div>
                 <strong>{h(row["label"])}</strong>
-                <small>{h(row["station_count"])} stations · {h(row["count"])} obs</small>
+                <small>{h(row["station_count"])} stations · {h(row["count"])} records</small>
                 <i style="width: {width:.1f}%"></i>
               </div>
             </div>
@@ -2634,8 +2633,8 @@ def _trend_section(trends: dict[str, Any], stations: list[Station]) -> str:
     return f"""
     <div class="trend-grid">
       <article class="trend-panel trend-panel-wide">
-        <h3>Phenology ribbons</h3>
-        <p>Common network species, shown by observed flight span across all synced years.</p>
+        <h3>Occurrence windows</h3>
+        <p>Earliest to latest calendar dates recorded for selected network species, pooling all years and life stages. Reports may be sparse between the endpoints.</p>
         {_phenology_ribbons(trends["phenology"])}
       </article>
       <article class="trend-panel">
@@ -2644,13 +2643,13 @@ def _trend_section(trends: dict[str, Any], stations: list[Station]) -> str:
         {_monthly_overlays(trends["monthly_overlays"], stations)}
       </article>
       <article class="trend-panel">
-        <h3>Rank abundance</h3>
-        <p>Most frequently observed moth taxa in the current network cache.</p>
+        <h3>Species by record count</h3>
+        <p>Species ranked by number of dated reports across the tracked network. Coverage and reporting vary by station and season.</p>
         {_rank_abundance(trends["rank_abundance"])}
       </article>
       <article class="trend-panel trend-panel-wide">
         <h3>Station similarity</h3>
-        <p>Overlap coefficient based on shared moth taxa: shared species divided by the smaller station's total, so a small station whose species are a subset of a larger one's shows as fully similar. Darker cells mean more overlap.</p>
+        <p>Shared species divided by the smaller station's recorded list. Darker cells show more overlap between lists assembled under different coverage.</p>
         <div class="similarity-wrap">{_station_similarity_matrix(trends["station_similarity"], stations)}</div>
       </article>
     </div>
@@ -2910,6 +2909,23 @@ def _station_profile_page(station: Station, profile: dict[str, Any], recap: dict
         f'<a href="{h(station.website)}">iNaturalist source</a>'
         if station.website else ""
     )
+    if station.id == "kingfisher":
+        website += (
+            '<a href="https://survey.kingfisher-hollow.com/moths/">Kingfisher moth survey</a>'
+            '<a href="https://survey.kingfisher-hollow.com/field/">Field guide</a>'
+        )
+    month_num = profile["seasonal_month"]
+    month = profile["seasonal_richness"][month_num - 1]
+    month_name = date(2000, month_num, 1).strftime("%B")
+    if month["nights"]:
+        date_label = "reporting date" if month["nights"] == 1 else "reporting dates"
+        seasonal_note = (
+            f"In the station archive, {month_name} records cover {month['species']} "
+            f"moth species across {month['nights']} {date_label}. "
+            "Use the seasonal watchlists below for search ideas."
+        )
+    else:
+        seasonal_note = f"This station has no dated species reports for {month_name} in its archive."
     metrics = "".join(
         [
             _profile_metric("moth species", f"{profile['species']:,}"),
@@ -2954,7 +2970,10 @@ def _station_profile_page(station: Station, profile: dict[str, Any], recap: dict
     <section id="station-story">
       <div class="section-head">
         <h2>Station story</h2>
-        <p>{h(profile["narrative"])}</p>
+        <div class="station-story-copy">
+          <p>{h(seasonal_note)}</p>
+          <p>{h(profile["narrative"])}</p>
+        </div>
       </div>
     </section>
 
@@ -2993,7 +3012,7 @@ def _station_profile_page(station: Station, profile: dict[str, Any], recap: dict
     <section id="station-signature" class="section-chapter-start" data-chapter="Identity">
       <div class="section-head">
         <h2>Signature species</h2>
-        <p>Shared species that lean most strongly toward this station, based on its share of their network observations.</p>
+        <p>Shared species for which this station contributed a large share of tracked network reports.</p>
       </div>
       {_signature_species_gallery(profile["signature_species"])}
     </section>
@@ -3017,7 +3036,7 @@ def _station_profile_page(station: Station, profile: dict[str, Any], recap: dict
     <section id="station-sampling" class="section-chapter-start" data-chapter="Evidence">
       <div class="section-head">
         <h2>Sampling context</h2>
-        <p>Automatically derived from species-level iNaturalist timestamps. These records show active moth nights and upload timing, not trap duration or light setup.</p>
+        <p>Dates with species-level iNaturalist reports and, where timestamps are available, the time between observation and upload.</p>
       </div>
       {_sampling_context(profile)}
     </section>
@@ -3025,7 +3044,7 @@ def _station_profile_page(station: Station, profile: dict[str, Any], recap: dict
     <section id="station-richness">
       <div class="section-head">
         <h2>Seasonal richness</h2>
-        <p>Unique moth species by month across all synced years. Each row also shows how many active moth nights contributed to that month.</p>
+        <p>Distinct moth species reported by month across all years and life stages. Each row shows the number of session dates with species reports.</p>
       </div>
       <div class="profile-chart">{_seasonal_bars(profile)}</div>
     </section>
@@ -3033,7 +3052,7 @@ def _station_profile_page(station: Station, profile: dict[str, Any], recap: dict
     <section id="station-phenology">
       <div class="section-head">
         <h2>Phenology calendar</h2>
-        <p>Weekly unique moth species across all synced years. Each cell includes active moth-night coverage for that week.</p>
+        <p>Distinct moth species reported by week across all years and life stages. Each cell includes the number of session dates with species reports.</p>
       </div>
       <div class="profile-chart">{_profile_phenology_calendar(profile)}</div>
     </section>
@@ -3041,7 +3060,7 @@ def _station_profile_page(station: Station, profile: dict[str, Any], recap: dict
     <section id="station-accumulation">
       <div class="section-head">
         <h2>Species accumulation</h2>
-        <p>Running species list, with active moth-night coverage in each chart point.</p>
+        <p>Running species count through the latest session with a species-level record.</p>
       </div>
       <div class="profile-chart">{_accumulation_bars(profile)}</div>
     </section>
@@ -5155,7 +5174,13 @@ header {
   max-width: 980px;
 }
 .profile-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
   margin-top: 14px;
+}
+.station-story-copy p + p {
+  margin-top: 8px;
 }
 .profile-metrics {
   display: flex;
@@ -8027,9 +8052,9 @@ def _render(settings: Settings, stations: list[Station], output: Path | None = N
     </div>
     <div class="hero">
       <div class="hero-copy">
-        <p class="eyebrow">regional light-sheet telemetry</p>
-        <h1>Night flights, compared.</h1>
-        <p class="subhead">A working dashboard for seeing which moth stations are active, what just arrived, and whether first-of-season records are breaking across the region on the same nights.</p>
+        <p class="eyebrow">Regional moth records</p>
+        <h1>Moths through the year</h1>
+        <p class="subhead">Compare what stations have reported, when species first appear in their records, and which moths the stations share.</p>
       </div>
       <div class="photo-rail" aria-label="Recent moth photos">{_photo_strip(hero_photo_rows)}</div>
       <div class="hero-metrics">{_hero_metrics(summaries, taxa, pulses, stations, records)}</div>
@@ -8056,7 +8081,7 @@ def _render(settings: Settings, stations: list[Station], output: Path | None = N
       <div class="section-head feed-section-head">
         <h2>Naturalist feed</h2>
         <div class="feed-section-copy">
-          <p>Build-generated headlines from the station network, meant to surface discoveries, timing shifts, and shared flight pulses before the tables.</p>
+          <p>Discoveries and clusters of reports in the station network.</p>
           <button type="button" class="insight-feedback-copy" data-insight-feedback-copy>Copy ratings</button>
         </div>
       </div>
@@ -8087,13 +8112,13 @@ def _render(settings: Settings, stations: list[Station], output: Path | None = N
         <p>The running union of moth species recorded across all tracked stations. Each dashed line and the key below mark a station's first cached observation session, making changes in network coverage visible alongside species growth.</p>
       </div>
       {_network_accumulation(trends["network_accumulation"], trends["station_launches"], stations, trends["network_accumulation_current"])}
-      <p class="chart-caveat">This is a cumulative record of the tracked iNaturalist sources, not a standardized measure of survey effort, abundance, or site quality.</p>
+      <p class="chart-caveat">The count runs through the latest species-level report. Station coverage and reporting effort vary over time.</p>
     </section>
 
     <section id="pulses" class="section-chapter-start" data-chapter="Season">
       <div class="section-head">
-        <h2>{h(year) if year else "Current"} first-of-season pulses</h2>
-        <p>Species appearing at two or more stations are grouped by how tightly their first session dates line up. Switch to all-time to compare first arrivals across the full station history.</p>
+        <h2>{h(year) if year else "Current"} first-of-season records</h2>
+        <p>Compare first record dates for species reported at two or more stations. The archive also shows first records across the full station history.</p>
       </div>
       <div class="pulse-grid">{_pulse_cards(pulses)}</div>
       <p><a class="footer-utility-link" href="archive.html#archive-pulses">Browse all first-of-season comparisons</a></p>
@@ -8102,7 +8127,7 @@ def _render(settings: Settings, stations: list[Station], output: Path | None = N
     <section id="trends">
       <div class="section-head">
         <h2>Trend views</h2>
-        <p>Build-time visual summaries for flight timing, monthly variation, abundance structure, and shared fauna.</p>
+        <p>Compare seasonal reports, species counts by month, and overlap between station lists.</p>
       </div>
       {_trend_section(trends, stations)}
     </section>

@@ -344,7 +344,7 @@ def first_of_season(
         elif spread <= 2:
             pulse = "highly synchronized"
         elif spread <= 7:
-            pulse = "same flight pulse"
+            pulse = "within a week"
         else:
             pulse = "staggered"
         item.update(
@@ -794,8 +794,8 @@ def _select_varied_insights(
     return selected
 
 
-# How many days a date-anchored insight (tied to one specific session, first-of-season
-# arrival, or seasonal peak) stays eligible for the feed before it's considered no
+# How many days a date-anchored insight (tied to a session, first record, or
+# reporting peak) stays eligible for the feed before it's considered no
 # longer novel. Insights based on current standing state (e.g. "most widely shared
 # moth in the network") are not date-anchored and are not subject to this window.
 INSIGHT_RECENCY_WINDOW_DAYS = 5
@@ -952,9 +952,9 @@ def dashboard_insights(
                 if gap >= 30:
                     insights.append(
                         _insight(
-                            "Back in flight",
-                            f"{item['label']} returned after {gap} quiet days",
-                            f"The previous tracked session was {previous_dates[-1].isoformat()}; it reappeared at {', '.join(station_names)}.",
+                            "Recorded again",
+                            f"{item['label']} recorded again after a {gap}-day gap",
+                            f"The previous network record was dated {previous_dates[-1].isoformat()}. The latest was reported at {', '.join(station_names)}.",
                             latest.isoformat(),
                             80 + min(gap // 20, 9),
                             subject=f"taxon:{taxon_id}",
@@ -1072,8 +1072,8 @@ def dashboard_insights(
             ]
             insights.append(
                 _insight(
-                    "Synchronized flight",
-                    f"{pulse['label']} moved through {pulse['station_count']} stations together",
+                    "First records close together",
+                    f"{pulse['label']} was first recorded at {pulse['station_count']} stations within two days",
                     f"First-of-season dates were within {pulse['spread_days']} days across {', '.join(sorted(names))}.",
                     pulse["pulse"],
                     88 - pulse["spread_days"],
@@ -1110,8 +1110,8 @@ def dashboard_insights(
                 continue
             insights.append(
                 _insight(
-                    "Early emergence",
-                    f"{label} is running {delta} days earlier than its prior earliest date",
+                    "Earlier first record",
+                    f"{label} was reported {delta} calendar days earlier than its prior earliest date",
                     f"This year's first tracked session was {current.isoformat()}; the previous earliest was {historical.isoformat()}.",
                     str(year),
                     84 + min(delta, 30),
@@ -1126,8 +1126,8 @@ def dashboard_insights(
             if is_recent(peak_date):
                 insights.append(
                     _insight(
-                        "Peak night",
-                        f"{peak['label']} is the richest night of {year} so far",
+                        "Most species reported",
+                        f"{peak['label']} has the most species reported on a date in {year} so far",
                         f"The network recorded {peak['total']} unique moth taxa across {peak['active_stations']} active station{'s' if peak['active_stations'] != 1 else ''}.",
                         "unique species across stations",
                         76,
@@ -1156,18 +1156,17 @@ def dashboard_insights(
         if not taxon_id or not sd or not is_species(row):
             continue
         taxon_id = int(taxon_id)
-        season_year, normalized_date = flight_season_date(sd)
+        season_year, _ = flight_season_date(sd)
         item = seasonal_dates.setdefault(
             (row["station_id"], taxon_id, season_year),
             {
                 "taxon_id": taxon_id,
                 "label": row["label"],
                 "station_name": row["station_name"],
-                "season_year": season_year,
                 "days": set(),
             },
         )
-        item["days"].add(normalized_date)
+        item["days"].add(sd)
 
     longest = None
     for item in seasonal_dates.values():
@@ -1186,16 +1185,15 @@ def dashboard_insights(
                 latest_seen,
                 item["taxon_id"],
                 len(days),
-                item["season_year"],
             )
     if longest and longest[0] > 0:
-        span, label, station_name, first, latest_seen, taxon_id, session_count, season_year = longest
+        span, label, station_name, first, latest_seen, taxon_id, session_count = longest
         insights.append(
             _insight(
-                "Long flight period",
-                f"{label} has the longest tracked seasonal flight window",
-                f"{station_name} has records from {first:%b} {first.day} through {latest_seen:%b} {latest_seen.day} within the {season_year} flight season across {session_count} distinct moth dates, a {span}-day window.",
-                "longest single tracked season",
+                "Long observation window",
+                f"{label} has the widest span between seasonal records",
+                f"{station_name} reported it on {session_count} dates from {first.isoformat()} through {latest_seen.isoformat()}, a span of {span} days.",
+                "single station and season",
                 70,
                 subject=f"taxon:{taxon_id}",
             )
@@ -1239,13 +1237,14 @@ def dashboard_insights(
     return _select_varied_insights(insights, limit)
 
 
+def _calendar_day_of_year(day: date) -> int:
+    """Align month and day on a shared calendar that includes February 29."""
+    return day.replace(year=2000).timetuple().tm_yday
+
+
 def _seasonal_offset(day: date, reference_day: date) -> int:
     """Return the closest calendar-day offset, allowing the year boundary."""
-    day_of_year = date(2000, day.month, day.day).timetuple().tm_yday
-    reference_day_of_year = date(
-        2000, reference_day.month, reference_day.day
-    ).timetuple().tm_yday
-    raw_offset = day_of_year - reference_day_of_year
+    raw_offset = _calendar_day_of_year(day) - _calendar_day_of_year(reference_day)
     return min(
         (raw_offset, raw_offset - 366, raw_offset + 366),
         key=abs,
@@ -1486,7 +1485,7 @@ def _station_seasonal_targets(
         _sheet_time_evidence(all_rows, station_context, default_timezone),
     )
     # Keep the same seasonal candidate pool and target-list length for all
-    # variants. This ranking deliberately ignores seasonal abundance after a
+    # variants. This ranking deliberately ignores seasonal record counts after a
     # species enters the pool, letting the validation isolate host evidence.
     host_only_items = sorted(
         items,
@@ -2257,6 +2256,36 @@ def forecast_validation_summary(
     }
 
 
+def _accumulation_points(
+    taxa_by_date: dict[date, set[int]],
+) -> list[tuple[date, int, int, int]]:
+    """Keep species gains and the final species-recorded date."""
+    seen: set[int] = set()
+    points = []
+    dates = sorted(taxa_by_date)
+    for nights, session in enumerate(dates, start=1):
+        previous_total = len(seen)
+        seen.update(taxa_by_date[session])
+        gained = len(seen) - previous_total
+        if gained or nights == len(dates):
+            points.append((session, len(seen), nights, gained))
+    return points
+
+
+def _sample_accumulation_points(
+    points: list[tuple[date, int, int, int]], limit: int
+) -> list[tuple[date, int, int, int]]:
+    if len(points) <= limit:
+        return points
+
+    # A plateau needs both its start at the last discovery and its endpoint.
+    keep_tail = 2 if points[-1][3] == 0 else 1
+    earlier = points[:-keep_tail]
+    slots = limit - keep_tail
+    step = (len(earlier) + slots - 1) // slots
+    return earlier[::step] + points[-keep_tail:]
+
+
 def station_profile(
     settings: Settings,
     station_id: str,
@@ -2291,7 +2320,7 @@ def station_profile(
         if taxon_id and sd:
             by_month[sd.month]["taxa"].add(int(taxon_id))
             by_month[sd.month]["sessions"].add(sd)
-            week = min(52, max(1, ((sd.timetuple().tm_yday - 1) // 7) + 1))
+            week = min(52, ((_calendar_day_of_year(sd) - 1) // 7) + 1)
             by_week[week]["taxa"].add(int(taxon_id))
             by_week[week]["sessions"].add(sd)
             yearly_coverage[sd.year]["taxa"].add(int(taxon_id))
@@ -2323,22 +2352,10 @@ def station_profile(
         sd = row.get("session_date")
         if taxon_id and sd:
             taxa_by_date[sd].add(int(taxon_id))
-    seen = set()
-    sessions_seen = 0
-    accumulation = []
-    for sd in sorted(taxa_by_date):
-        sessions_seen += 1
-        before = len(seen)
-        seen.update(taxa_by_date[sd])
-        if len(seen) != before:
-            accumulation.append({"date": sd, "species": len(seen), "nights": sessions_seen})
-    if len(accumulation) > 40:
-        step = max(1, (len(accumulation) + 39) // 40)
-        accumulation = accumulation[::step]
-        if accumulation[-1]["species"] != len(seen):
-            accumulation.append(
-                {"date": max(dates), "species": len(seen), "nights": sessions_seen}
-            )
+    accumulation = [
+        {"date": session, "species": total, "nights": nights}
+        for session, total, nights, _gained in _sample_accumulation_points(_accumulation_points(taxa_by_date), 40)
+    ]
 
     upload_lags_minutes = []
     for row in species_rows:
@@ -2563,7 +2580,7 @@ def station_profile(
         )
     if signature:
         narrative_bits.append(
-            f"{signature[0]['label']} is the strongest station-associated species by current share of network observations."
+            f"{signature[0]['label']} is featured for this station's share of its tracked network reports."
         )
 
     return {
@@ -2588,6 +2605,7 @@ def station_profile(
             "total_records": len(species_rows),
         },
         "seasonal_richness": seasonal_richness,
+        "seasonal_month": reference_day.month,
         "phenology_weeks": phenology_weeks,
         "accumulation": accumulation,
         "signature_species": signature,
@@ -3146,7 +3164,7 @@ def trend_summary(settings: Settings) -> dict[str, Any]:
         key=lambda value: (-len(value["stations"]), -value["count"], value["label"]),
     )[:16]:
         dates = item["dates"]
-        days = [seen_date.timetuple().tm_yday for seen_date in dates]
+        days = [_calendar_day_of_year(seen_date) for seen_date in dates]
         first_day = min(days)
         latest_day = max(days)
         first_label = date(2000, 1, 1) + timedelta(days=first_day - 1)
@@ -3181,39 +3199,18 @@ def trend_summary(settings: Settings) -> dict[str, Any]:
                 }
         if taxon_id and sd and is_species(row):
             taxa_by_date[sd].add(int(taxon_id))
-    seen = set()
-    network_accumulation = []
-    for sd in sorted(taxa_by_date):
-        before = len(seen)
-        seen.update(taxa_by_date[sd])
-        if len(seen) != before:
-            network_accumulation.append(
-                {
-                    "date": sd.isoformat(),
-                    "species": len(seen),
-                    "new_species": len(seen) - before,
-                }
-            )
-    # Keep the overview light enough to scan, but preserve every gain day in
-    # the active-year detail chart. Sampling the only copy of this series
-    # would otherwise hide real dates when a user zooms in.
-    current_year = max(taxa_by_date).year if taxa_by_date else None
-    network_accumulation_current = [
-        row for row in network_accumulation
-        if current_year is not None and date.fromisoformat(row["date"]).year == current_year
+    points = _accumulation_points(taxa_by_date)
+    network_accumulation = [
+        {"date": session.isoformat(), "species": total, "new_species": gained}
+        for session, total, _nights, gained in _sample_accumulation_points(points, 44)
     ]
-    if len(network_accumulation) > 44:
-        step = max(1, (len(network_accumulation) + 43) // 44)
-        network_accumulation = network_accumulation[::step]
-        if network_accumulation[-1]["species"] != len(seen):
-            latest_date = max(taxa_by_date)
-            network_accumulation.append(
-                {
-                    "date": latest_date.isoformat(),
-                    "species": len(seen),
-                    "new_species": 0,
-                }
-            )
+    # Preserve all gain dates and the endpoint in the active-year detail chart.
+    current_year = points[-1][0].year if points else None
+    network_accumulation_current = [
+        {"date": session.isoformat(), "species": total, "new_species": gained}
+        for session, total, _nights, gained in points
+        if session.year == current_year
+    ]
     station_launches = [
         {
             **launch,

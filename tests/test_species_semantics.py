@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 import sqlite3
 from tempfile import TemporaryDirectory
@@ -202,6 +202,100 @@ class SpeciesSemanticsTests(unittest.TestCase):
             [row["date"] for row in trends["network_accumulation_current"]],
             ["2026-07-10", "2026-08-01", "2026-08-05"],
         )
+
+    def test_station_and_network_accumulation_keep_zero_new_final_session(self) -> None:
+        with connect(self.settings.database) as conn:
+            conn.execute(
+                """
+                INSERT INTO observations (
+                    station_id, inat_obs_id, observed_on, taxon_id, taxon_name, rank
+                ) VALUES ('station-a', 8, '2026-07-12', 101, 'Species alpha', 'species')
+                """
+            )
+
+        profile = station_profile(self.settings, "station-a")
+        trends = trend_summary(self.settings)
+
+        self.assertEqual(
+            profile["accumulation"],
+            [
+                {"date": date(2026, 7, 10), "species": 2, "nights": 1},
+                {"date": date(2026, 7, 12), "species": 2, "nights": 2},
+            ],
+        )
+        self.assertEqual(
+            trends["network_accumulation"],
+            [
+                {"date": "2026-07-10", "species": 2, "new_species": 2},
+                {"date": "2026-07-12", "species": 2, "new_species": 0},
+            ],
+        )
+
+    def test_downsampled_accumulation_keeps_last_discovery_and_plateau(self) -> None:
+        start = date(2026, 7, 11)
+        dates = [start + timedelta(days=offset) for offset in range(45)]
+        latest = dates[-1] + timedelta(days=3)
+        with connect(self.settings.database) as conn:
+            conn.executemany(
+                """
+                INSERT INTO observations (
+                    station_id, inat_obs_id, observed_on, taxon_id, taxon_name, rank
+                ) VALUES ('station-a', ?, ?, ?, 'Species', 'species')
+                """,
+                [(i, day.isoformat(), i + 1000) for i, day in enumerate(dates, 100)]
+                + [(999, latest.isoformat(), 101)],
+            )
+
+        station_points = station_profile(self.settings, "station-a")["accumulation"]
+        trends = trend_summary(self.settings)
+        network_points = trends["network_accumulation"]
+
+        self.assertLessEqual(len(station_points), 40)
+        self.assertLessEqual(len(network_points), 44)
+        self.assertEqual(len(trends["network_accumulation_current"]), 47)
+        self.assertEqual(trends["network_accumulation_current"][-2:], network_points[-2:])
+        self.assertEqual(station_points[-2:], [
+            {"date": dates[-1], "species": 47, "nights": 46},
+            {"date": latest, "species": 47, "nights": 47},
+        ])
+        self.assertEqual(network_points[-2:], [
+            {"date": dates[-1].isoformat(), "species": 47, "new_species": 1},
+            {"date": latest.isoformat(), "species": 47, "new_species": 0},
+        ])
+
+    def test_occurrence_windows_keep_calendar_dates_across_leap_years(self) -> None:
+        with connect(self.settings.database) as conn:
+            conn.execute(
+                """
+                INSERT INTO observations (
+                    station_id, inat_obs_id, observed_on, taxon_id, taxon_name, rank
+                ) VALUES ('station-a', 8, '2024-07-10', 101, 'Species alpha', 'species')
+                """
+            )
+
+        alpha = next(row for row in trend_summary(self.settings)["phenology"] if row["taxon_id"] == 101)
+
+        self.assertEqual((alpha["first_label"], alpha["latest_label"]), ("Jul 10", "Jul 10"))
+
+    def test_station_phenology_groups_the_same_week_across_leap_years(self) -> None:
+        with connect(self.settings.database) as conn:
+            conn.executemany(
+                """
+                INSERT INTO observations (
+                    station_id, inat_obs_id, observed_on, taxon_id, taxon_name, rank
+                ) VALUES ('station-a', ?, ?, 101, 'Species alpha', 'species')
+                """,
+                [(8, "2024-03-04"), (9, "2026-03-04")],
+            )
+
+        weeks = {
+            row["label"]: row
+            for row in station_profile(self.settings, "station-a")["phenology_weeks"]
+        }
+
+        self.assertEqual(weeks["Feb 26"]["nights"], 0)
+        self.assertEqual(weeks["Mar 4"]["nights"], 2)
+        self.assertEqual(weeks["Mar 4"]["species"], 1)
 
     def test_network_accumulation_labels_station_coverage_dates_clearly(self) -> None:
         chart = _network_accumulation(
